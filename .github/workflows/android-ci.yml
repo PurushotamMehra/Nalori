@@ -1,0 +1,56 @@
+name: Android CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    env:
+      HAS_ANDROID_KEY_PROPERTIES: ${{ secrets.ANDROID_KEY_PROPERTIES != '' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Check formatting
+        run: dart format --set-exit-if-changed lib test packages/epubx/lib
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Validate unsigned release app bundle
+        run: flutter build appbundle --release
+        env:
+          ORG_GRADLE_PROJECT_allowUnsignedRelease: "true"
+
+      - name: Build signed release app bundle
+        if: env.HAS_ANDROID_KEY_PROPERTIES == 'true'
+        run: |
+          printf '%s' "${{ secrets.ANDROID_KEY_PROPERTIES }}" > android/key.properties
+          flutter build appbundle --release
+
+      - name: Upload app bundle artifact
+        if: env.HAS_ANDROID_KEY_PROPERTIES == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nalori-app-release
+          path: build/app/outputs/bundle/release/app-release.aab

@@ -1,0 +1,35 @@
+{
+  "@@locale": "en",
+  "appTitle": "Nalori",
+  "libraryTitle": "Library",
+  "loadingBooks": "Loading your books",
+  "bookCount": "{count, plural, =1{1 book} other{{count} books}}",
+  "@bookCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "addBook": "Add Book",
+  "addABook": "Add a book",
+  "addBookSheetSubtitle": "Import your own EPUB or browse free classics.",
+  "importEpub": "Import EPUB",
+  "importEpubSubtitle": "Choose a book file from this device",
+  "recommended": "Recommended",
+  "browseProjectGutenberg": "Browse Project Gutenberg",
+  "browseProjectGutenbergSubtitle": "Explore free public-domain EPUBs",
+  "addBookSupportNote": "Supported format: EPUB. Imported books stay on this device.",
+  "readingStats": "Reading Stats",
+  "howToUseNalori": "How to use Nalori",
+  "themes": "Themes",
+  "enhanceBookDetailsOnline": "Enhance book details online",
+  "enhanceBookDetailsOnlineSubtitle": "Find cleaner titles, authors, and covers",
+  "aboutAndLicenses": "About and licenses",
+  "personalLibraryTagline": "Your personal library",
+  "privacyPolicyPlaceholder": "Privacy policy: add the production URL before Play release.",
+  "ok": "OK",
+  "cancel": "Cancel",
+  "loading": "Loading",
+  "error": "Error"
+}

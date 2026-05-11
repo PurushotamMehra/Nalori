@@ -1,0 +1,69 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    # ── Performance ──────────────────────────────────────────────────
+    # Encourage const constructors wherever possible to enable widget caching
+    prefer_const_constructors: true
+    prefer_const_constructors_in_immutables: true
+    prefer_const_declarations: true
+    prefer_const_literals_to_create_immutables: true
+
+    # Avoid unnecessary rebuilds and allocations
+    use_build_context_synchronously: true
+    avoid_unnecessary_containers: true
+    sized_box_for_whitespace: true
+
+    # ── Immutability & Data Integrity ────────────────────────────────
+    prefer_final_fields: true
+    prefer_final_locals: true
+    prefer_final_in_for_each: true
+    annotate_overrides: true
+    prefer_typing_uninitialized_variables: true
+    unnecessary_late: true
+
+    # ── Code Quality & SOLID ─────────────────────────────────────────
+    avoid_print: true
+    prefer_single_quotes: true
+    unnecessary_this: true
+    unnecessary_new: true
+    unnecessary_nullable_for_final_variable_declarations: true
+    avoid_redundant_argument_values: true
+    avoid_void_async: true
+    prefer_is_empty: true
+    prefer_is_not_empty: true
+    prefer_iterable_whereType: true
+    unnecessary_string_escapes: true
+    unnecessary_string_interpolations: true
+    prefer_interpolation_to_compose_strings: true
+    no_leading_underscores_for_local_identifiers: true
+
+    # ── Memory Safety ────────────────────────────────────────────────
+    cancel_subscriptions: true
+    close_sinks: true
+
+    # ── Type Safety ──────────────────────────────────────────────────
+    always_declare_return_types: true
+    avoid_dynamic_calls: true
+    prefer_void_to_null: true
+
+    # ── Style ────────────────────────────────────────────────────────
+    sort_child_properties_last: true
+    use_full_hex_values_for_flutter_colors: true
+    require_trailing_commas: true
+
+analyzer:
+  errors:
+    # Treat missing const constructors as warnings, not errors
+    prefer_const_constructors: warning
+    prefer_const_literals_to_create_immutables: warning
+    require_trailing_commas: warning
+    avoid_print: warning
+
+  exclude:
+    - "**/*.g.dart"
+    - "**/*.freezed.dart"
+    - "build/**"
+    - ".dart_tool/**"
+    - "packages/epubx/**"
+    - "test/**"

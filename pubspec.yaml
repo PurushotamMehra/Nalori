@@ -1,0 +1,42 @@
+name: nalori
+description: "Nalori EPUB reader."
+publish_to: 'none'
+version: 1.0.1+2
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  epubx:
+    path: packages/epubx
+  html: ^0.15.6
+  file_picker: ^10.3.10
+  path_provider: ^2.1.5
+  path: ^1.9.1
+  shared_preferences: ^2.5.4
+  google_fonts: ^8.0.2
+  url_launcher: ^6.3.2
+  http: ^1.6.0
+  uuid: ^4.5.3
+  share_plus: ^12.0.1
+  flutter_svg: ^2.0.10+1
+  intl: any
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  mockito: ^5.4.0
+  build_runner: ^2.4.0
+  mocktail: ^1.0.0
+
+flutter:
+  generate: true
+  uses-material-design: true
+  assets:
+    - assets/images/nalori_mark.svg
+    - assets/images/nalori_app_icon.png
