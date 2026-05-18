@@ -72,8 +72,8 @@ class _BookMemorySourceDetailScreenState
         builder: (_) => BookLoadingScreen(
           bookFile: widget.bookFile,
           settings: _s,
-          initialOriginalChunkIndex: chunkIndex,
-          initialOriginalStartOffset: originalStartOffset,
+          // initialOriginalChunkIndex: chunkIndex,
+          // initialOriginalStartOffset: originalStartOffset,
         ),
       ),
     );

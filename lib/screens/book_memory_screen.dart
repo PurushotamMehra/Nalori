@@ -90,8 +90,8 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
         builder: (_) => BookLoadingScreen(
           bookFile: widget.bookFile,
           settings: _s,
-          initialOriginalChunkIndex: originalChunkIndex,
-          initialOriginalStartOffset: originalStartOffset,
+          // initialOriginalChunkIndex: originalChunkIndex,
+          // initialOriginalStartOffset: originalStartOffset,
         ),
       ),
     );
