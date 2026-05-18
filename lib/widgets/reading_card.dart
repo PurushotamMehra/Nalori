@@ -9,6 +9,7 @@ import '../models/highlight.dart';
 import '../models/reading_settings.dart';
 import '../controllers/speed_read_controller.dart';
 import '../ui/app_visuals.dart';
+import '../utils/final_layout_paragraphs.dart';
 import '../utils/reader_content_parser.dart';
 import '../widgets/highlight_palette_sheet.dart';
 import '../widgets/note_sheets.dart';
@@ -1372,7 +1373,11 @@ class _ReadingCardState extends State<ReadingCard>
     TextAlign textAlign, {
     int startOffset = 0,
   }) {
-    final resolvedHighlights = startOffset == 0
+    final fullChunkText = widget.chunk.text;
+    final isFullDisplayText =
+        startOffset == 0 &&
+        (fullChunkText == null || fullChunkText.length == text.length);
+    final resolvedHighlights = isFullDisplayText
         ? _resolvedHighlightsForDisplay(text)
         : _resolvedHighlightsForDisplayRange(text, startOffset);
     final hasAnnotations = resolvedHighlights.isNotEmpty;
@@ -2769,7 +2774,41 @@ class _ReadingCardState extends State<ReadingCard>
       );
     }
 
+    Widget buildParagraphSeparatedBodyContent() {
+      if (!hasText || isSpeedReadActive) {
+        return buildSelectableText();
+      }
+
+      final segments = splitFinalLayoutParagraphSegments(chunkText!);
+      if (segments.length <= 1) {
+        return buildSelectableText();
+      }
+
+      final paragraphGap = finalLayoutParagraphGapForStyle(
+        style: bodyTextStyle,
+        fallbackFontSize: widget.settings.fontSizeValue,
+        fallbackLineHeight: widget.settings.lineHeight,
+        paragraphSpacing: widget.settings.paragraphSpacing,
+      );
+
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < segments.length; i++)
+            Padding(
+              padding: EdgeInsets.only(top: i == 0 ? 0 : paragraphGap),
+              child: buildSelectableText(
+                text: segments[i].text,
+                startOffset: segments[i].startOffset,
+              ),
+            ),
+        ],
+      );
+    }
+
     Widget buildTableAwareContent() {
+      final paragraphPadding = 4.0 * widget.settings.paragraphSpacing;
       return Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2777,7 +2816,7 @@ class _ReadingCardState extends State<ReadingCard>
           for (final block in contentBlocks)
             switch (block.type) {
               ReaderContentBlockType.paragraph => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
+                padding: EdgeInsets.symmetric(vertical: paragraphPadding),
                 child: buildSelectableText(
                   text: block.rawText,
                   startOffset: block.startOffset,
@@ -2856,13 +2895,14 @@ class _ReadingCardState extends State<ReadingCard>
                     hasStructuredBlocks
                         ? buildTableAwareContent()
                         : speedReadController == null
-                        ? buildSelectableText()
+                        ? buildParagraphSeparatedBodyContent()
                         : AnimatedBuilder(
                             animation: Listenable.merge([
                               speedReadController,
                               _speedReadStyleController,
                             ]),
-                            builder: (context, _) => buildSelectableText(),
+                            builder: (context, _) =>
+                                buildParagraphSeparatedBodyContent(),
                           ),
                   ],
                 ),

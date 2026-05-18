@@ -250,6 +250,7 @@ class BookCacheService {
     required String fontWeight,
     required double density,
     required double lineHeight,
+    required double paragraphSpacing,
     required double screenW,
     required double screenH,
     required bool enableCardDepth,
@@ -267,7 +268,7 @@ class BookCacheService {
         '${safeAreaLeft.round()}_${safeAreaRight.round()}';
 
     return '${bookId}_dc_${layoutVersion}_${fontSize}_${fontFamily}_${fontWeight}_'
-        '${density}_lineHeight_${lineHeight}_'
+        '${density}_lineHeight_${lineHeight}_paragraphSpacing_${paragraphSpacing}_'
         '${screenW.toInt()}x${screenH.toInt()}_${cardModeStr}_${textScalerStr}_$safeAreaStr';
   }
 

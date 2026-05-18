@@ -515,6 +515,7 @@ class ReadingSettings {
   final SpeedReadPageAdvanceMode speedReadPageAdvanceMode;
   final bool speedReadAdaptivePacing;
   final double lineHeight;
+  final double paragraphSpacing;
   final BookReaderThemePalette? bookThemePalette;
   final bool useCustomReaderTheme;
   final CustomReaderTheme? customReaderTheme;
@@ -541,6 +542,7 @@ class ReadingSettings {
     this.speedReadPageAdvanceMode = SpeedReadPageAdvanceMode.manual,
     this.speedReadAdaptivePacing = true,
     this.lineHeight = 1.3,
+    this.paragraphSpacing = 1.0,
     this.bookThemePalette,
     this.useCustomReaderTheme = false,
     this.customReaderTheme,
@@ -586,6 +588,7 @@ class ReadingSettings {
       'speedReadPageAdvanceMode': speedReadPageAdvanceMode.name,
       'speedReadAdaptivePacing': speedReadAdaptivePacing,
       'lineHeight': lineHeight,
+      'paragraphSpacing': paragraphSpacing,
       'useCustomReaderTheme': useCustomReaderTheme,
       'customReaderTheme': customReaderTheme?.toJson(),
     };
@@ -688,6 +691,10 @@ class ReadingSettings {
           json['speedReadAdaptivePacing'] as bool? ??
           fallback.speedReadAdaptivePacing,
       lineHeight: doubleValue(json['lineHeight'], fallback.lineHeight),
+      paragraphSpacing: doubleValue(
+        json['paragraphSpacing'],
+        fallback.paragraphSpacing,
+      ),
       useCustomReaderTheme:
           json['useCustomReaderTheme'] as bool? ??
           fallback.useCustomReaderTheme,
@@ -875,6 +882,7 @@ class ReadingSettings {
     SpeedReadPageAdvanceMode? speedReadPageAdvanceMode,
     bool? speedReadAdaptivePacing,
     double? lineHeight,
+    double? paragraphSpacing,
     BookReaderThemePalette? bookThemePalette,
     bool clearBookThemePalette = false,
     bool? useCustomReaderTheme,
@@ -907,6 +915,7 @@ class ReadingSettings {
       speedReadAdaptivePacing:
           speedReadAdaptivePacing ?? this.speedReadAdaptivePacing,
       lineHeight: lineHeight ?? this.lineHeight,
+      paragraphSpacing: paragraphSpacing ?? this.paragraphSpacing,
       bookThemePalette: clearBookThemePalette
           ? null
           : (bookThemePalette ?? this.bookThemePalette),

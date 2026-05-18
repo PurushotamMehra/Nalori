@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/reading_settings.dart';
 import 'package:nalori/screens/reader_screen.dart';
+import 'package:nalori/utils/final_layout_paragraphs.dart';
 
 void main() {
   const screenSize = Size(412, 915);
@@ -67,7 +68,10 @@ void main() {
     test(
       'Card Mode metadata and footer reserves reduce usable text height',
       () {
-        const flat = ReadingSettings(contentDensity: ContentDensity.fullPage);
+        const flat = ReadingSettings(
+          contentDensity: ContentDensity.fullPage,
+          enableCardDepth: false,
+        );
         const depth = ReadingSettings(
           contentDensity: ContentDensity.fullPage,
           enableCardDepth: true,
@@ -113,7 +117,7 @@ void main() {
       final metrics = resolveReaderLayoutMetrics(
         landscape,
         landscapeInsets,
-        const ReadingSettings(),
+        const ReadingSettings(enableCardDepth: false),
       );
 
       expect(metrics.contentPadding.left, kContentPaddingH + 44);
@@ -210,6 +214,65 @@ void main() {
         'Next.',
       ]);
       expect(readerTextEndsAtSentenceBoundary(ranges.first), isTrue);
+    });
+  });
+
+  group('final paragraph layout measurement', () {
+    const style = TextStyle(fontSize: 18, height: 1.2);
+    const maxWidth = 360.0;
+
+    double measure(String text, double paragraphSpacing) {
+      return measureFinalLayoutParagraphTextHeight(
+        text: text,
+        style: style,
+        maxWidth: maxWidth,
+        textDirection: TextDirection.ltr,
+        textAlign: TextAlign.start,
+        textScaler: TextScaler.noScaling,
+        strutStyle: null,
+        fallbackFontSize: 18,
+        fallbackLineHeight: 1.2,
+        paragraphSpacing: paragraphSpacing,
+      );
+    }
+
+    test('increasing paragraphSpacing increases multi-paragraph height', () {
+      const text = 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.';
+
+      expect(measure(text, 2), greaterThan(measure(text, 1)));
+      expect(measure(text, 0), lessThan(measure(text, 1)));
+    });
+
+    test('paragraphSpacing changes page fit for multi-paragraph text', () {
+      const text = 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.';
+      final oneXHeight = measure(text, 1);
+      final pageBudget = oneXHeight + 1;
+
+      expect(measure(text, 1), lessThanOrEqualTo(pageBudget));
+      expect(measure(text, 2), greaterThan(pageBudget));
+      expect(measure(text, 0), lessThan(oneXHeight));
+    });
+
+    test(
+      'single paragraphs measure the same across paragraphSpacing values',
+      () {
+        final text = List.filled(
+          40,
+          'Long wrapped prose remains one measured paragraph.',
+        ).join(' ');
+
+        expect(measure(text, 0), measure(text, 1));
+        expect(measure(text, 2), measure(text, 1));
+      },
+    );
+  });
+
+  group('readerSettingsRequireDisplayChunkRebuild', () {
+    test('returns true when only paragraphSpacing changes', () {
+      const old = ReadingSettings(paragraphSpacing: 1);
+      const updated = ReadingSettings(paragraphSpacing: 1.5);
+
+      expect(readerSettingsRequireDisplayChunkRebuild(old, updated), isTrue);
     });
   });
 

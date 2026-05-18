@@ -41,6 +41,7 @@ void main() {
         );
         expect(settings.speedReadAdaptivePacing, true);
         expect(settings.lineHeight, 1.3);
+        expect(settings.paragraphSpacing, 1.0);
       });
 
       test('should accept custom values', () {
@@ -63,6 +64,7 @@ void main() {
           speedReadDisplayMode: SpeedReadDisplayMode.window,
           speedReadPageAdvanceMode: SpeedReadPageAdvanceMode.auto,
           speedReadAdaptivePacing: false,
+          paragraphSpacing: 1.5,
         );
 
         expect(settings.appTheme, AppTheme.sepia);
@@ -86,6 +88,32 @@ void main() {
           SpeedReadPageAdvanceMode.auto,
         );
         expect(settings.speedReadAdaptivePacing, false);
+        expect(settings.paragraphSpacing, 1.5);
+      });
+    });
+
+    group('paragraphSpacing', () {
+      test('copyWith should update paragraph spacing', () {
+        final settings = const ReadingSettings().copyWith(
+          paragraphSpacing: 0.5,
+        );
+
+        expect(settings.paragraphSpacing, 0.5);
+        expect(settings.lineHeight, 1.3);
+      });
+
+      test('preset json should preserve paragraph spacing', () {
+        const settings = ReadingSettings(paragraphSpacing: 1.7);
+
+        final decoded = ReadingSettings.fromPresetJson(settings.toPresetJson());
+
+        expect(decoded.paragraphSpacing, 1.7);
+      });
+
+      test('preset json should default missing paragraph spacing', () {
+        final decoded = ReadingSettings.fromPresetJson(const {});
+
+        expect(decoded.paragraphSpacing, 1.0);
       });
     });
 

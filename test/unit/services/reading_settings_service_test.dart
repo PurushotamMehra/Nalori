@@ -33,6 +33,7 @@ void main() {
           SpeedReadPageAdvanceMode.manual,
         );
         expect(result.speedReadAdaptivePacing, true);
+        expect(result.paragraphSpacing, 1.0);
       });
 
       test('should load saved theme', () async {
@@ -214,6 +215,7 @@ void main() {
           speedReadDisplayMode: SpeedReadDisplayMode.window,
           speedReadPageAdvanceMode: SpeedReadPageAdvanceMode.auto,
           speedReadAdaptivePacing: false,
+          paragraphSpacing: 1.4,
         );
 
         await settingsService.saveSettings(settings);
@@ -238,6 +240,17 @@ void main() {
         expect(result.speedReadDisplayMode, SpeedReadDisplayMode.window);
         expect(result.speedReadPageAdvanceMode, SpeedReadPageAdvanceMode.auto);
         expect(result.speedReadAdaptivePacing, false);
+        expect(result.paragraphSpacing, 1.4);
+      });
+
+      test('should load saved paragraph spacing', () async {
+        SharedPreferences.setMockInitialValues({
+          'setting_paragraphSpacing_val': 0.5,
+        });
+
+        final result = await settingsService.loadSettings();
+
+        expect(result.paragraphSpacing, 0.5);
       });
 
       test('should save and restore custom reader theme', () async {
@@ -308,6 +321,7 @@ void main() {
               blueLightFilter: true,
               dimText: true,
               lineHeight: 1.6,
+              paragraphSpacing: 1.8,
             ),
           ),
         ];
@@ -325,6 +339,7 @@ void main() {
         expect(result.first.settings.blueLightFilter, true);
         expect(result.first.settings.dimText, true);
         expect(result.first.settings.lineHeight, 1.6);
+        expect(result.first.settings.paragraphSpacing, 1.8);
       });
 
       test('should ignore invalid saved preset payloads', () async {

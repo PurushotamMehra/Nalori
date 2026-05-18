@@ -27,6 +27,7 @@ import '../widgets/reading_card.dart';
 import '../widgets/reading_card_deck.dart';
 import '../widgets/book_completion_overlay.dart';
 import '../ui/app_visuals.dart';
+import '../utils/final_layout_paragraphs.dart';
 import '../utils/reader_content_parser.dart';
 import 'quote_card_preview_screen.dart';
 import 'search_screen.dart';
@@ -288,6 +289,19 @@ EdgeInsets resolveReaderPublisherPadding(BookChunk chunk) {
     left: chunk.publisherLeftIndent.clamp(0, 72).toDouble(),
     right: chunk.publisherRightIndent.clamp(0, 72).toDouble(),
   );
+}
+
+bool readerSettingsRequireDisplayChunkRebuild(
+  ReadingSettings old,
+  ReadingSettings updated,
+) {
+  return old.fontSize != updated.fontSize ||
+      old.fontFamily != updated.fontFamily ||
+      old.fontWeight != updated.fontWeight ||
+      old.contentDensity != updated.contentDensity ||
+      old.lineHeight != updated.lineHeight ||
+      old.paragraphSpacing != updated.paragraphSpacing ||
+      old.enableCardDepth != updated.enableCardDepth;
 }
 
 bool _isReaderWhitespace(String char) => char.trim().isEmpty;
@@ -1208,6 +1222,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       fontWeight: _settings.fontWeight.name,
       density: _settings.densityMultiplier,
       lineHeight: _settings.lineHeight,
+      paragraphSpacing: _settings.paragraphSpacing,
       screenW: screenSize.width,
       screenH: screenSize.height,
       enableCardDepth: _settings.enableCardDepth,
@@ -1536,6 +1551,25 @@ class _ReaderScreenState extends State<ReaderScreen>
         return cachedHeight;
       }
 
+      final textAlign = resolveReaderChunkTextAlign(chunk, _settings);
+
+      if (!chunk.isHeading && !chunk.usesPublisherLayout) {
+        final height = measureFinalLayoutParagraphTextHeight(
+          text: text,
+          style: bodyStyle,
+          maxWidth: maxWidth,
+          textDirection: TextDirection.ltr,
+          textAlign: textAlign,
+          textScaler: textScaler,
+          strutStyle: bodyStrut,
+          fallbackFontSize: _settings.fontSizeValue,
+          fallbackLineHeight: _settings.lineHeight,
+          paragraphSpacing: _settings.paragraphSpacing,
+        );
+        textHeightCache[cacheKey] = height;
+        return height;
+      }
+
       final span = chunk.isHeading
           ? TextSpan(text: text, style: headingStyle)
           : TextSpanUtils.buildSpacedTextSpan(
@@ -1543,7 +1577,6 @@ class _ReaderScreenState extends State<ReaderScreen>
               baseStyle: bodyStyle,
               paragraphSpacingMultiplier: 1.0,
             );
-      final textAlign = resolveReaderChunkTextAlign(chunk, _settings);
 
       final tp = TextPainter(
         text: span,
@@ -4311,13 +4344,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
 
     // ── Smooth transition: check if we need a full chunk rebuild ──
-    final needsRebuild =
-        old.fontSize != updated.fontSize ||
-        old.fontFamily != updated.fontFamily ||
-        old.fontWeight != updated.fontWeight ||
-        old.contentDensity != updated.contentDensity ||
-        old.lineHeight != updated.lineHeight ||
-        old.enableCardDepth != updated.enableCardDepth;
+    final needsRebuild = readerSettingsRequireDisplayChunkRebuild(old, updated);
 
     if (!needsRebuild) {
       // Alignment, theme, paging controls, and blue light do not need
@@ -7200,6 +7227,9 @@ class _SettingsModalContentState extends State<_SettingsModalContent> {
               const SizedBox(height: 8),
               _buildSubLabel('Line height'),
               _buildLineHeightSlider(),
+              const SizedBox(height: 8),
+              _buildSubLabel('Paragraph spacing'),
+              _buildParagraphSpacingSlider(),
             ],
           ),
         ),
@@ -7924,6 +7954,66 @@ class _SettingsModalContentState extends State<_SettingsModalContent> {
                   widget.onLiveScaleUpdate?.call(1.0);
                   _update(_localSettings);
                 },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildParagraphSpacingSlider() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: _controlColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _hairlineColor),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _selectedControlColor,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: _accent.withValues(alpha: 0.45)),
+            ),
+            child: Text(
+              '${_localSettings.paragraphSpacing.toStringAsFixed(1)}x',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: _accent,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SliderTheme(
+              data: SliderThemeData(
+                trackHeight: 2.5,
+                activeTrackColor: _accent,
+                inactiveTrackColor: _localSettings.mutedColor.withValues(
+                  alpha: 0.18,
+                ),
+                thumbColor: _accent,
+                overlayColor: _accent.withValues(alpha: 0.12),
+              ),
+              child: Slider(
+                max: 2.0,
+                divisions: 20,
+                value: _localSettings.paragraphSpacing.clamp(0.0, 2.0),
+                onChanged: (val) {
+                  setState(() {
+                    _localSettings = _localSettings.copyWith(
+                      paragraphSpacing: val,
+                    );
+                  });
+                },
+                onChangeEnd: (_) => _update(_localSettings),
               ),
             ),
           ),

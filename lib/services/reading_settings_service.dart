@@ -46,6 +46,7 @@ class ReadingSettingsService {
       'setting_speedReadAdaptivePacing',
     );
     final lineHeightVal = prefs.getDouble('setting_lineHeight_val');
+    final paragraphSpacingVal = prefs.getDouble('setting_paragraphSpacing_val');
     final useCustomReaderTheme = prefs.getBool('setting_useCustomReaderTheme');
     final customReaderThemeJson = prefs.getString('setting_customReaderTheme');
     final hasLegacySpeedReadSettings =
@@ -135,6 +136,7 @@ class ReadingSettingsService {
           : SpeedReadPageAdvanceMode.manual,
       speedReadAdaptivePacing: speedReadAdaptivePacing ?? true,
       lineHeight: lineHeightVal ?? 1.3,
+      paragraphSpacing: paragraphSpacingVal ?? 1.0,
       useCustomReaderTheme: useCustomReaderTheme ?? false,
       customReaderTheme: _decodeCustomReaderTheme(customReaderThemeJson),
     );
@@ -188,6 +190,10 @@ class ReadingSettingsService {
       settings.speedReadAdaptivePacing,
     );
     await prefs.setDouble('setting_lineHeight_val', settings.lineHeight);
+    await prefs.setDouble(
+      'setting_paragraphSpacing_val',
+      settings.paragraphSpacing,
+    );
     await prefs.setBool(
       'setting_useCustomReaderTheme',
       settings.useCustomReaderTheme,
