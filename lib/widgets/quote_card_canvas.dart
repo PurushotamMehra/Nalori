@@ -63,6 +63,9 @@ class QuoteCardCanvas extends StatelessWidget {
     final crossAxisAlignment = textAlign == TextAlign.left
         ? CrossAxisAlignment.start
         : CrossAxisAlignment.center;
+    final footerAlignment = textAlign == TextAlign.left
+        ? Alignment.bottomLeft
+        : Alignment.bottomCenter;
 
     return AspectRatio(
       aspectRatio: 9 / 16,
@@ -80,7 +83,7 @@ class QuoteCardCanvas extends StatelessWidget {
                   children: [
                     const Spacer(),
                     Expanded(
-                      flex: 12,
+                      flex: 10,
                       child: Align(
                         alignment: textAlign == TextAlign.left
                             ? Alignment.centerLeft
@@ -94,12 +97,29 @@ class QuoteCardCanvas extends StatelessWidget {
                         ),
                       ),
                     ),
-                    const Spacer(),
-                    _BookFooter(
-                      payload: payload,
-                      theme: theme,
-                      crossAxisAlignment: crossAxisAlignment,
-                      cardStyle: cardStyle,
+                    const SizedBox(height: 18),
+                    Flexible(
+                      flex: 3,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          return Align(
+                            alignment: footerAlignment,
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: footerAlignment,
+                              child: SizedBox(
+                                width: constraints.maxWidth,
+                                child: _BookFooter(
+                                  payload: payload,
+                                  theme: theme,
+                                  crossAxisAlignment: crossAxisAlignment,
+                                  cardStyle: cardStyle,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
                     ),
                   ],
                 ),
@@ -1322,16 +1342,15 @@ class _QuoteText extends StatelessWidget {
         cardStyle == QuoteCardStyle.brokenFrame ||
         cardStyle == QuoteCardStyle.editorialGlass ||
         cardStyle == QuoteCardStyle.socialStory;
+    final displayQuote = _prepareQuoteForCard(quote);
+    final category = _QuoteLengthCategory.fromText(displayQuote);
+    final effectiveTextAlign = _effectiveTextAlign(category);
     final quotePadding = _quotePaddingFor(cardStyle);
     final maxLines = _maxLinesFor(cardStyle);
     final minFontSize = _minFontSizeFor(cardStyle);
-    final lineHeight = switch (cardStyle) {
-      QuoteCardStyle.brokenFrame => 1.06,
-      QuoteCardStyle.editorialGlass => 1.08,
-      QuoteCardStyle.socialStory => 1.06,
-      QuoteCardStyle.polaroid => 1.12,
-      QuoteCardStyle.classic => 1.12,
-    };
+    final maxFontSize = _maxFontSizeFor(cardStyle, category);
+    final lineHeight = _lineHeightFor(cardStyle, category);
+    final fontWeight = _fontWeightFor(cardStyle, category);
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -1341,30 +1360,36 @@ class _QuoteText extends StatelessWidget {
         final maxHeight = constraints.maxHeight.isFinite
             ? constraints.maxHeight
             : 640.0;
+        final minAvailableWidth = maxWidth < 120 ? maxWidth : 120.0;
+        final minAvailableHeight = maxHeight < 120 ? maxHeight : 120.0;
         final availableWidth = (maxWidth - quotePadding.horizontal).clamp(
-          120.0,
+          minAvailableWidth,
           maxWidth,
         );
         final availableHeight = (maxHeight - quotePadding.vertical).clamp(
-          120.0,
+          minAvailableHeight,
           maxHeight,
         );
+        final readableWidth = (availableWidth * _widthFactorFor(category))
+            .clamp(minAvailableWidth, availableWidth)
+            .toDouble();
         final quoteStyle = _fitTextStyleToBox(
-          text: quote,
+          text: displayQuote,
           style: _readerFont(
             fontFamily,
             TextStyle(
               color: color,
-              fontSize: 84,
+              fontSize: maxFontSize,
               height: lineHeight,
-              fontWeight: FontWeight.w700,
+              fontWeight: fontWeight,
               letterSpacing: 0,
             ),
           ),
-          maxWidth: availableWidth,
+          maxWidth: readableWidth,
           maxHeight: availableHeight,
           maxLines: maxLines,
           minFontSize: minFontSize,
+          step: category == _QuoteLengthCategory.long ? 0.75 : 0.5,
         );
         final quoteMarkSize =
             (quoteStyle.fontSize ?? 36) * (isPremium ? 2.5 : 2.9);
@@ -1376,7 +1401,9 @@ class _QuoteText extends StatelessWidget {
             children: [
               Positioned(
                 top: -(quoteMarkSize * 0.42),
-                left: textAlign == TextAlign.left ? -(quoteMarkSize * 0.14) : 0,
+                left: effectiveTextAlign == TextAlign.left
+                    ? -(quoteMarkSize * 0.14)
+                    : 0,
                 child: IgnorePointer(
                   child: Text(
                     '“',
@@ -1399,16 +1426,20 @@ class _QuoteText extends StatelessWidget {
                 width: availableWidth,
                 height: availableHeight,
                 child: Align(
-                  alignment: textAlign == TextAlign.left
+                  alignment: effectiveTextAlign == TextAlign.left
                       ? Alignment.centerLeft
                       : Alignment.center,
-                  child: Text(
-                    quote,
-                    textAlign: textAlign,
-                    textScaler: TextScaler.noScaling,
-                    maxLines: maxLines,
-                    overflow: TextOverflow.ellipsis,
-                    style: quoteStyle,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxWidth: readableWidth),
+                    child: Text(
+                      displayQuote,
+                      textAlign: effectiveTextAlign,
+                      textWidthBasis: TextWidthBasis.parent,
+                      textScaler: TextScaler.noScaling,
+                      maxLines: maxLines,
+                      overflow: TextOverflow.ellipsis,
+                      style: quoteStyle,
+                    ),
                   ),
                 ),
               ),
@@ -1434,6 +1465,63 @@ class _QuoteText extends StatelessWidget {
     };
   }
 
+  TextAlign _effectiveTextAlign(_QuoteLengthCategory category) {
+    final shouldBalanceShortQuote =
+        category == _QuoteLengthCategory.veryShort ||
+        category == _QuoteLengthCategory.short;
+    if (!shouldBalanceShortQuote) return textAlign;
+
+    return switch (cardStyle) {
+      QuoteCardStyle.classic ||
+      QuoteCardStyle.brokenFrame ||
+      QuoteCardStyle.socialStory => TextAlign.center,
+      QuoteCardStyle.polaroid || QuoteCardStyle.editorialGlass => textAlign,
+    };
+  }
+
+  double _widthFactorFor(_QuoteLengthCategory category) {
+    return switch (category) {
+      _QuoteLengthCategory.veryShort => 0.88,
+      _QuoteLengthCategory.short => 0.94,
+      _QuoteLengthCategory.medium => 1.0,
+      _QuoteLengthCategory.long => 1.0,
+    };
+  }
+
+  double _lineHeightFor(
+    QuoteCardStyle cardStyle,
+    _QuoteLengthCategory category,
+  ) {
+    final base = switch (cardStyle) {
+      QuoteCardStyle.brokenFrame => 1.06,
+      QuoteCardStyle.editorialGlass => 1.08,
+      QuoteCardStyle.socialStory => 1.06,
+      QuoteCardStyle.polaroid => 1.12,
+      QuoteCardStyle.classic => 1.12,
+    };
+
+    return switch (category) {
+      _QuoteLengthCategory.veryShort => base + 0.08,
+      _QuoteLengthCategory.short => base + 0.05,
+      _QuoteLengthCategory.medium => base + 0.02,
+      _QuoteLengthCategory.long => base,
+    };
+  }
+
+  FontWeight _fontWeightFor(
+    QuoteCardStyle cardStyle,
+    _QuoteLengthCategory category,
+  ) {
+    if (cardStyle == QuoteCardStyle.classic &&
+        category != _QuoteLengthCategory.long) {
+      return FontWeight.w600;
+    }
+    if (category == _QuoteLengthCategory.veryShort) {
+      return FontWeight.w600;
+    }
+    return FontWeight.w700;
+  }
+
   int _maxLinesFor(QuoteCardStyle cardStyle) {
     return switch (cardStyle) {
       QuoteCardStyle.classic => 20,
@@ -1453,6 +1541,68 @@ class _QuoteText extends StatelessWidget {
       QuoteCardStyle.socialStory => 12,
     };
   }
+
+  double _maxFontSizeFor(
+    QuoteCardStyle cardStyle,
+    _QuoteLengthCategory category,
+  ) {
+    return switch (cardStyle) {
+      QuoteCardStyle.classic => switch (category) {
+        _QuoteLengthCategory.veryShort => 36,
+        _QuoteLengthCategory.short => 32,
+        _QuoteLengthCategory.medium => 28,
+        _QuoteLengthCategory.long => 23,
+      },
+      QuoteCardStyle.polaroid => switch (category) {
+        _QuoteLengthCategory.veryShort => 34,
+        _QuoteLengthCategory.short => 30,
+        _QuoteLengthCategory.medium => 26,
+        _QuoteLengthCategory.long => 22,
+      },
+      QuoteCardStyle.brokenFrame => switch (category) {
+        _QuoteLengthCategory.veryShort => 40,
+        _QuoteLengthCategory.short => 34,
+        _QuoteLengthCategory.medium => 28,
+        _QuoteLengthCategory.long => 22,
+      },
+      QuoteCardStyle.editorialGlass => switch (category) {
+        _QuoteLengthCategory.veryShort => 34,
+        _QuoteLengthCategory.short => 30,
+        _QuoteLengthCategory.medium => 25,
+        _QuoteLengthCategory.long => 20,
+      },
+      QuoteCardStyle.socialStory => switch (category) {
+        _QuoteLengthCategory.veryShort => 36,
+        _QuoteLengthCategory.short => 32,
+        _QuoteLengthCategory.medium => 26,
+        _QuoteLengthCategory.long => 21,
+      },
+    };
+  }
+}
+
+enum _QuoteLengthCategory {
+  veryShort,
+  short,
+  medium,
+  long;
+
+  static _QuoteLengthCategory fromText(String text) {
+    final length = text.trim().length;
+    if (length <= 40) return veryShort;
+    if (length <= 100) return short;
+    if (length <= 220) return medium;
+    return long;
+  }
+}
+
+String _prepareQuoteForCard(String input) {
+  final normalized = QuoteSharePayload.normalizeQuote(input);
+
+  return normalized.replaceAllMapped(
+    RegExp(r"""^([“‘"'])(\S)"""),
+    (match) => '${match[1]}\u2060${match[2]}',
+  );
 }
 
 class _BookFooter extends StatelessWidget {
@@ -1485,10 +1635,13 @@ class _BookFooter extends StatelessWidget {
         final titleMaxLines = isBrokenFrame ? 3 : 2;
         final coverHeight = isPremium ? (isBrokenFrame ? 64.0 : 48.0) : 0.0;
         final coverGap = showCover ? (isBrokenFrame ? 16.0 : 12.0) : 0.0;
+        final minAvailableWidth = constraints.maxWidth < 120
+            ? constraints.maxWidth
+            : 120.0;
         final availableWidth =
             (constraints.maxWidth -
                     (showCover ? (coverHeight * (2 / 3)) + coverGap : 0.0))
-                .clamp(120.0, constraints.maxWidth);
+                .clamp(minAvailableWidth, constraints.maxWidth);
 
         final baseTitleStyle = isPremium
             ? _metadataTitleStyle(payload.fontFamily, theme).copyWith(

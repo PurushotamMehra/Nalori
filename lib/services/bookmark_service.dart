@@ -31,7 +31,7 @@ class BookmarkService {
 
   // ── Default Color ────────────────────────────────────────────────────
 
-  /// Load the user's preferred default bookmark color index (0–4).
+  /// Load the user's preferred default bookmark palette index.
   Future<int> loadDefaultColorIndex() async {
     final prefs = await _cachedPrefs;
     return prefs.getInt(_defaultColorKey) ?? 0;
@@ -50,6 +50,7 @@ class BookmarkService {
     int originalStartOffset = 0,
     String? previewText,
     int colorIndex = 0,
+    int? colorValue,
   }) async {
     final list = await load();
 
@@ -77,6 +78,7 @@ class BookmarkService {
         name: 'Bookmark ${maxNum + 1}',
         previewText: previewText,
         colorIndex: colorIndex,
+        colorValue: colorValue,
       ),
     );
 
@@ -124,6 +126,8 @@ class BookmarkService {
     int? originalStartOffset,
     String? newName,
     int? colorIndex,
+    int? colorValue,
+    bool clearColorValue = false,
   }) async {
     final list = await load();
     final updated = <Bookmark>[];
@@ -135,6 +139,8 @@ class BookmarkService {
           b.copyWith(
             name: newName ?? b.name,
             colorIndex: colorIndex ?? b.colorIndex,
+            colorValue: colorValue,
+            clearColorValue: clearColorValue,
           ),
         );
       } else {

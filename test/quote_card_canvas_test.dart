@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:nalori/models/book_share_payload.dart';
+import 'package:nalori/models/quote_card_style.dart';
 import 'package:nalori/models/quote_share_payload.dart';
 import 'package:nalori/models/reading_settings.dart';
 import 'package:nalori/services/quote_card_palette_service.dart';
@@ -111,6 +112,124 @@ void main() {
       find.text('A sentence worth carrying forward.'),
     );
     expect(quoteText.textAlign, TextAlign.center);
+  });
+
+  testWidgets('keeps short quote typography balanced across templates', (
+    tester,
+  ) async {
+    const examples = [
+      'Talking to him was largely a matter of getting him away',
+      "'I know you,' the eyes seemed to say, 'I see through you.'",
+      'Alone.',
+      'First line.\nSecond line.',
+      'This was one of those long paragraphs that should remain readable when it is shared as a quote card, even when the sentence keeps going for a while and needs more room than a short poster quote.',
+    ];
+    final theme = QuoteCardPaletteService.fallbackThemes().first;
+
+    for (final style in QuoteCardStyle.values) {
+      for (final quote in examples) {
+        final payload = QuoteSharePayload.fromSelection(
+          quote: quote,
+          bookTitle: 'Nineteen Eighty-Four',
+          author: 'George Orwell',
+          bookId: 'book-id',
+          displayIndex: 2,
+          fontFamily: ReaderFontFamily.lora,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Center(
+                child: SizedBox(
+                  width: 270,
+                  height: 480,
+                  child: QuoteCardCanvas(
+                    payload: payload,
+                    theme: theme,
+                    cardStyle: style,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+
+        expect(tester.takeException(), isNull);
+        expect(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is Text &&
+                widget.data?.replaceAll('\u2060', '') == payload.quote,
+          ),
+          findsOneWidget,
+        );
+      }
+    }
+  });
+
+  testWidgets('caps classic short quote size and centers it like a poster', (
+    tester,
+  ) async {
+    final payload = QuoteSharePayload.fromSelection(
+      quote: 'Talking to him was largely a matter of getting him away',
+      bookTitle: 'Nineteen Eighty-Four',
+      author: 'George Orwell',
+      bookId: 'book-id',
+      displayIndex: 2,
+      fontFamily: ReaderFontFamily.lora,
+    );
+    final theme = QuoteCardPaletteService.fallbackThemes().first;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 270,
+              height: 480,
+              child: QuoteCardCanvas(payload: payload, theme: theme),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final quoteText = tester.widget<Text>(find.text(payload.quote));
+    expect(quoteText.textAlign, TextAlign.center);
+    expect(quoteText.style?.fontSize, lessThanOrEqualTo(32));
+    expect(quoteText.style?.height, greaterThanOrEqualTo(1.15));
+  });
+
+  testWidgets('classic quote card does not overflow with a tall footer', (
+    tester,
+  ) async {
+    final payload = QuoteSharePayload.fromSelection(
+      quote: "'I know you,' the eyes seemed to say, 'I see through you.'",
+      bookTitle: 'Nineteen Eighty-Four (1984): A Very Long Edition Title',
+      author: 'George Orwell With A Long Display Name',
+      bookId: 'book-id',
+      displayIndex: 2,
+      coverImagePath: '/path/to/missing-cover.png',
+      fontFamily: ReaderFontFamily.lora,
+    );
+    final theme = QuoteCardPaletteService.fallbackThemes().first;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 220,
+              height: 391,
+              child: QuoteCardCanvas(payload: payload, theme: theme),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('uses a dark watermark on light quote card themes', (

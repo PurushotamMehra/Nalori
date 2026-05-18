@@ -14,6 +14,7 @@ import '../models/reading_settings.dart';
 import '../l10n/app_localizations.dart';
 import '../services/reading_settings_service.dart';
 import '../services/book_cache_service.dart';
+import '../services/book_memory_entry_service.dart';
 import '../services/book_import_service.dart';
 import '../services/book_preparse_service.dart';
 import '../services/book_metadata_service.dart';
@@ -26,6 +27,7 @@ import '../ui/app_visuals.dart';
 import '../widgets/add_book_sheet.dart';
 import '../widgets/floating_progress_hud.dart';
 import 'book_loading_screen.dart';
+import 'book_memory_screen.dart';
 import 'contact_screen.dart';
 import 'how_to_use_screen.dart';
 import 'public_domain_books_screen.dart';
@@ -312,6 +314,21 @@ class _BookListScreenState extends State<BookListScreen> {
     );
 
     // Re-sort and refresh UI when returning from reading
+    _refreshLibrary();
+  }
+
+  Future<void> _openBookMemory(File file) async {
+    final bookId = p.basename(file.path);
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => BookMemoryScreen(
+          bookFile: file,
+          bookId: bookId,
+          settings: _settings,
+        ),
+      ),
+    );
     _refreshLibrary();
   }
 
@@ -1102,6 +1119,17 @@ class _BookListScreenState extends State<BookListScreen> {
                     title: 'Reading',
                     actions: [
                       _BookOptionAction(
+                        icon: Icons.auto_stories_outlined,
+                        title: 'Book Memory',
+                        subtitle: 'Bookmarks, notes, words, and characters',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted) _openBookMemory(file);
+                          });
+                        },
+                      ),
+                      _BookOptionAction(
                         icon: Icons.restart_alt_rounded,
                         title: 'Start from Beginning',
                         subtitle: 'Reset progress to the first chapter',
@@ -1459,10 +1487,11 @@ class _BookListScreenState extends State<BookListScreen> {
       // 2. Delete metadata + cover image
       await _metadataService.deleteMetadata(bookId);
 
-      // 3. Clear reading position & bookmarks from SharedPreferences
+      // 3. Clear reading position, bookmarks, and book memory entries.
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('last_read_$bookId');
       await prefs.remove('bookmarks_$bookId');
+      await BookMemoryEntryService(bookId: bookId).clearForBook();
 
       // 4. Clear disk cache
       final cacheService = BookCacheService();

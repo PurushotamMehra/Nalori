@@ -6,11 +6,14 @@ import '../services/public_domain_book_service.dart';
 import '../ui/app_visuals.dart';
 import '../widgets/floating_progress_hud.dart';
 
+typedef PublicDomainPrimaryBookAction =
+    Future<String?> Function({ValueChanged<double?>? onProgress});
+
 class PublicDomainBookDetailScreen extends StatefulWidget {
   final PublicDomainBook book;
   final ReadingSettings settings;
   final bool isDownloaded;
-  final Future<String?> Function() onPrimaryAction;
+  final PublicDomainPrimaryBookAction onPrimaryAction;
   final Future<void> Function(PublicDomainPerson author) onAuthorSelected;
   final Future<void> Function(String topic) onTopicSelected;
 
@@ -35,6 +38,8 @@ class _PublicDomainBookDetailScreenState
 
   late PublicDomainBook _book;
   late bool _isDownloaded;
+  String? _downloadedPath;
+  double? _downloadProgress;
   bool _loadingDetails = false;
   bool _performingPrimaryAction = false;
 
@@ -76,15 +81,37 @@ class _PublicDomainBookDetailScreenState
 
   Future<void> _runPrimaryAction() async {
     if (_performingPrimaryAction) return;
-    setState(() => _performingPrimaryAction = true);
+
+    if (_isDownloaded && _downloadedPath != null) {
+      Navigator.pop(context, _downloadedPath);
+      return;
+    }
+
+    setState(() {
+      _performingPrimaryAction = true;
+      _downloadProgress = null;
+    });
     try {
-      final pathToOpen = await widget.onPrimaryAction();
+      final pathToOpen = await widget.onPrimaryAction(
+        onProgress: _isDownloaded
+            ? null
+            : (progress) {
+                if (!mounted) return;
+                setState(() => _downloadProgress = progress);
+              },
+      );
       if (!mounted) return;
       if (pathToOpen != null) {
-        Navigator.pop(context, pathToOpen);
-        return;
+        if (_isDownloaded) {
+          Navigator.pop(context, pathToOpen);
+          return;
+        }
+        setState(() {
+          _isDownloaded = true;
+          _downloadedPath = pathToOpen;
+          _downloadProgress = 1;
+        });
       }
-      setState(() => _isDownloaded = true);
     } finally {
       if (mounted) {
         setState(() => _performingPrimaryAction = false);
@@ -168,49 +195,7 @@ class _PublicDomainBookDetailScreenState
                         ),
                       ),
                     ),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton.icon(
-                        onPressed: _performingPrimaryAction
-                            ? null
-                            : _runPrimaryAction,
-                        icon: _performingPrimaryAction
-                            ? SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: _s.textColor,
-                                ),
-                              )
-                            : Icon(
-                                _isDownloaded
-                                    ? Icons.menu_book_rounded
-                                    : Icons.download_rounded,
-                                size: 18,
-                              ),
-                        label: Text(
-                          _isDownloaded ? 'Open Book' : 'Download Book',
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _s.accentColor,
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor: _s.mutedColor.withValues(
-                            alpha: 0.14,
-                          ),
-                          disabledForegroundColor: _s.mutedColor,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          textStyle: _s.uiText(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ),
+                    child: _buildPrimaryActionButton(),
                   ),
                 ],
               ),
@@ -227,23 +212,86 @@ class _PublicDomainBookDetailScreenState
                   mutedColor: _s.mutedColor,
                   accentColor: _s.accentColor,
                 ),
-              if (_performingPrimaryAction)
-                FloatingProgressHud(
-                  data: FloatingProgressHudData(
-                    title: _isDownloaded ? 'Opening book' : 'Downloading book',
-                    message: _isDownloaded
-                        ? 'Routing this book through your library…'
-                        : 'Downloading the EPUB and preparing it for reading…',
-                  ),
-                  settings: _s,
-                  backgroundColor: _s.backgroundColor,
-                  surfaceColor: _s.menuColor,
-                  textColor: _s.textColor,
-                  mutedColor: _s.mutedColor,
-                  accentColor: _s.accentColor,
-                ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPrimaryActionButton() {
+    if (_performingPrimaryAction && !_isDownloaded) {
+      final progress = _downloadProgress;
+      final label = progress == null
+          ? 'Preparing download'
+          : progress >= 1
+          ? 'Adding to library'
+          : 'Downloading ${(progress * 100).floor()}%';
+
+      return SizedBox(
+        width: double.infinity,
+        height: 48,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: _s.accentColor.withValues(alpha: 0.24),
+                ),
+              ),
+              if (progress != null)
+                FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: progress.clamp(0.0, 1.0),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(color: _s.accentColor),
+                  ),
+                )
+              else
+                Align(
+                  alignment: Alignment.bottomCenter,
+                  child: LinearProgressIndicator(
+                    minHeight: 3,
+                    color: _s.accentColor,
+                    backgroundColor: Colors.transparent,
+                  ),
+                ),
+              Center(
+                child: Text(
+                  label,
+                  style: _s.uiText(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return SizedBox(
+      width: double.infinity,
+      height: 48,
+      child: ElevatedButton.icon(
+        onPressed: _performingPrimaryAction ? null : _runPrimaryAction,
+        icon: Icon(
+          _isDownloaded ? Icons.menu_book_rounded : Icons.download_rounded,
+          size: 18,
+        ),
+        label: Text(_isDownloaded ? 'Read Book' : 'Download Book'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _s.accentColor,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: _s.mutedColor.withValues(alpha: 0.14),
+          disabledForegroundColor: _s.mutedColor,
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          textStyle: _s.uiText(fontWeight: FontWeight.w700, fontSize: 14),
         ),
       ),
     );

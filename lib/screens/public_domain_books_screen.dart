@@ -12,7 +12,6 @@ import '../services/library_service.dart';
 import '../services/public_domain_book_service.dart';
 import '../services/public_domain_download_service.dart';
 import '../ui/app_visuals.dart';
-import '../widgets/floating_progress_hud.dart';
 import 'public_domain_book_detail_screen.dart';
 
 class PublicDomainBooksScreen extends StatefulWidget {
@@ -69,6 +68,19 @@ class PublicDomainBooksScreen extends StatefulWidget {
       _PublicDomainBooksScreenState();
 }
 
+enum _DownloadTaskPhase { queued, downloading, preparing }
+
+class _PublicDomainDownloadTask {
+  final PublicDomainBook book;
+  final PublicDomainDownloadCancelToken cancelToken;
+  _DownloadTaskPhase phase;
+  double? progress;
+
+  _PublicDomainDownloadTask({required this.book})
+    : cancelToken = PublicDomainDownloadCancelToken(),
+      phase = _DownloadTaskPhase.queued;
+}
+
 class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   final _catalogService = PublicDomainBookService();
   final _downloadService = PublicDomainDownloadService();
@@ -86,7 +98,9 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   Map<int, File> _localGutenbergBooksById = {};
   Map<String, File> _localBooksByTitleAuthor = {};
   Set<int> _downloadingIds = {};
-  FloatingProgressHudData? _progressHud;
+  final Map<int, _PublicDomainDownloadTask> _downloadTasks = {};
+  final List<int> _downloadQueue = [];
+  int? _activeDownloadId;
   String? _error;
   String? _statusMessage;
   bool _loading = true;
@@ -100,7 +114,6 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   bool _prefetchingMore = false;
   PublicDomainBookPage? _prefetchedPage;
   String? _prefetchedPageKey;
-  PublicDomainDownloadCancelToken? _downloadCancelToken;
 
   ReadingSettings get _s => widget.settings;
 
@@ -554,7 +567,10 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
     );
   }
 
-  Future<String?> _performPrimaryBookAction(PublicDomainBook book) async {
+  Future<String?> _performPrimaryBookAction(
+    PublicDomainBook book, {
+    ValueChanged<double?>? onProgress,
+  }) async {
     if (_downloadingIds.contains(book.id)) return null;
 
     final existingFile = _existingFileFor(book);
@@ -562,22 +578,97 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       return existingFile.path;
     }
 
+    if (onProgress != null) {
+      return _downloadBookForDetail(book, onProgress);
+    }
+
     setState(() {
       _downloadingIds = {..._downloadingIds, book.id};
-      _downloadCancelToken = PublicDomainDownloadCancelToken();
-      _progressHud = FloatingProgressHudData(
-        title: 'Downloading book',
-        message: 'Starting the EPUB download…',
-        onCancel: _downloadCancelToken?.cancel,
-      );
+      _downloadTasks[book.id] = _PublicDomainDownloadTask(book: book);
+      _downloadQueue.add(book.id);
     });
+
+    unawaited(_startNextQueuedDownload());
+    return null;
+  }
+
+  Future<String?> _downloadBookForDetail(
+    PublicDomainBook book,
+    ValueChanged<double?> onProgress,
+  ) async {
+    setState(() => _downloadingIds = {..._downloadingIds, book.id});
+    onProgress(null);
 
     File? downloadedFile;
     var lastReportedProgress = 0.0;
     try {
       downloadedFile = await _downloadService.downloadBook(
         book,
-        cancelToken: _downloadCancelToken,
+        onProgress: (receivedBytes, totalBytes) {
+          if (!mounted || totalBytes == null || totalBytes <= 0) return;
+          final progress = (receivedBytes / totalBytes)
+              .clamp(0.0, 1.0)
+              .toDouble();
+          if (progress - lastReportedProgress < 0.01 && progress < 1.0) {
+            return;
+          }
+          lastReportedProgress = progress;
+          onProgress(progress);
+        },
+      );
+      onProgress(1);
+      final preparedFile = await _prepareDownloadedBook(book, downloadedFile);
+      await _loadLocalBooks();
+      return mounted ? preparedFile.path : null;
+    } catch (e) {
+      if (downloadedFile != null) {
+        try {
+          await downloadedFile.delete();
+        } catch (_) {}
+      }
+      if (!mounted) return null;
+      if (e is! PublicDomainDownloadCancelledException) {
+        _showDownloadError(e);
+      }
+      return null;
+    } finally {
+      if (mounted) {
+        setState(() => _downloadingIds = {..._downloadingIds}..remove(book.id));
+      }
+    }
+  }
+
+  Future<void> _startNextQueuedDownload() async {
+    if (_activeDownloadId != null || _downloadQueue.isEmpty) return;
+
+    final bookId = _downloadQueue.removeAt(0);
+    final task = _downloadTasks[bookId];
+    if (task == null) {
+      unawaited(_startNextQueuedDownload());
+      return;
+    }
+
+    setState(() {
+      _activeDownloadId = bookId;
+      task.phase = _DownloadTaskPhase.downloading;
+      task.progress = null;
+    });
+
+    await _runDownloadTask(task);
+
+    if (!mounted) return;
+    setState(() => _activeDownloadId = null);
+    unawaited(_startNextQueuedDownload());
+  }
+
+  Future<void> _runDownloadTask(_PublicDomainDownloadTask task) async {
+    final book = task.book;
+    File? downloadedFile;
+    var lastReportedProgress = 0.0;
+    try {
+      downloadedFile = await _downloadService.downloadBook(
+        book,
+        cancelToken: task.cancelToken,
         onProgress: (receivedBytes, totalBytes) {
           if (!mounted || totalBytes == null || totalBytes <= 0) return;
           final progress = (receivedBytes / totalBytes)
@@ -588,53 +679,84 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
           }
           lastReportedProgress = progress;
           setState(() {
-            _progressHud = FloatingProgressHudData(
-              title: 'Downloading book',
-              message: 'Downloading ${((progress) * 100).floor()}%',
-              progress: progress,
-              onCancel: _downloadCancelToken?.cancel,
-            );
+            task.progress = progress;
           });
         },
       );
       if (mounted) {
         setState(() {
-          _progressHud = const FloatingProgressHudData(
-            title: 'Preparing book',
-            message: 'Verifying the EPUB and adding it to your library…',
-          );
+          task.phase = _DownloadTaskPhase.preparing;
+          task.progress = null;
         });
       }
       final preparedFile = await _prepareDownloadedBook(book, downloadedFile);
       await _loadLocalBooks();
-      if (!mounted) return null;
-      final readNow = await _confirmReadNow(book);
-      return readNow ? preparedFile.path : null;
+      if (!mounted) return;
+      _showDownloadComplete(book, preparedFile);
     } catch (e) {
       if (downloadedFile != null) {
         try {
           await downloadedFile.delete();
         } catch (_) {}
       }
-      if (!mounted) return null;
+      if (!mounted) return;
       if (e is! PublicDomainDownloadCancelledException) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not download this book: $e'),
-            backgroundColor: _s.menuColor,
-          ),
-        );
+        _showDownloadError(e);
       }
-      return null;
     } finally {
       if (mounted) {
         setState(() {
           _downloadingIds = {..._downloadingIds}..remove(book.id);
-          _progressHud = null;
-          _downloadCancelToken = null;
+          _downloadTasks.remove(book.id);
         });
       }
     }
+  }
+
+  void _cancelDownload(_PublicDomainDownloadTask task) {
+    if (_activeDownloadId == task.book.id) {
+      task.cancelToken.cancel();
+      return;
+    }
+
+    setState(() {
+      _downloadQueue.remove(task.book.id);
+      _downloadTasks.remove(task.book.id);
+      _downloadingIds = {..._downloadingIds}..remove(task.book.id);
+    });
+  }
+
+  void _showDownloadComplete(PublicDomainBook book, File file) {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          'Downloaded "${book.title}"',
+          style: _s.uiText(color: _s.textColor, fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: _s.menuColor,
+        action: SnackBarAction(
+          label: 'Read',
+          textColor: _s.accentColor,
+          onPressed: () {
+            if (mounted) Navigator.pop(context, file.path);
+          },
+        ),
+      ),
+    );
+  }
+
+  void _showDownloadError(Object error) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Could not download this book: $error',
+          style: _s.uiText(color: _s.textColor, fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: _s.menuColor,
+      ),
+    );
   }
 
   Future<File> _prepareDownloadedBook(
@@ -688,52 +810,6 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
     return downloadedFile;
   }
 
-  Future<bool> _confirmReadNow(PublicDomainBook book) async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: _s.menuColor,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-            side: BorderSide(color: _s.mutedColor.withValues(alpha: 0.14)),
-          ),
-          title: Text(
-            'Download complete',
-            style: _s.uiText(color: _s.textColor, fontWeight: FontWeight.w700),
-          ),
-          content: Text(
-            'Read "${book.title}" now?',
-            style: _s.uiText(color: _s.mutedColor, height: 1.45),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              style: TextButton.styleFrom(foregroundColor: _s.textColor),
-              child: Text(
-                'Not now',
-                style: _s.uiText(fontWeight: FontWeight.w600),
-              ),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _s.accentColor,
-                foregroundColor: Colors.white,
-                elevation: 0,
-              ),
-              child: Text(
-                'Read now',
-                style: _s.uiText(fontWeight: FontWeight.w700),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-    return result ?? false;
-  }
-
   Future<void> _openBookDetails(PublicDomainBook book) async {
     final isDownloaded = _isInLibrary(book);
 
@@ -744,7 +820,8 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
           book: book,
           settings: _s,
           isDownloaded: isDownloaded,
-          onPrimaryAction: () => _performPrimaryBookAction(book),
+          onPrimaryAction: ({onProgress}) =>
+              _performPrimaryBookAction(book, onProgress: onProgress),
           onAuthorSelected: _openAuthorBooks,
           onTopicSelected: _openTopicBooks,
         ),
@@ -843,16 +920,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
                 ],
               ),
             ),
-            if (_progressHud != null)
-              FloatingProgressHud(
-                data: _progressHud!,
-                settings: _s,
-                backgroundColor: _s.backgroundColor,
-                surfaceColor: _s.menuColor,
-                textColor: _s.textColor,
-                mutedColor: _s.mutedColor,
-                accentColor: _s.accentColor,
-              ),
+            if (_downloadTasks.isNotEmpty) _buildDownloadStatusBar(),
           ],
         ),
       ),
@@ -974,6 +1042,122 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
     );
   }
 
+  Widget _buildDownloadStatusBar() {
+    final activeTask = _activeDownloadId == null
+        ? null
+        : _downloadTasks[_activeDownloadId];
+    final task = activeTask ?? _downloadTasks.values.first;
+    final queuedCount = activeTask == null
+        ? (_downloadTasks.length > 1 ? _downloadTasks.length - 1 : 0)
+        : _downloadTasks.length - 1;
+    final progress = task.progress;
+    final isQueued = task.phase == _DownloadTaskPhase.queued;
+    final isPreparing = task.phase == _DownloadTaskPhase.preparing;
+    final statusText = isQueued
+        ? 'Queued'
+        : isPreparing
+        ? 'Adding to library'
+        : progress == null
+        ? 'Downloading EPUB'
+        : 'Downloading ${(progress * 100).floor()}%';
+    final queueText = queuedCount > 0 ? ' • $queuedCount waiting' : '';
+    final safeBottom = MediaQuery.paddingOf(context).bottom;
+
+    return Positioned(
+      left: 20,
+      right: 20,
+      bottom: safeBottom + 12,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+          decoration: BoxDecoration(
+            color: _s.menuColor,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: _s.mutedColor.withValues(alpha: 0.14)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: _s.isDark ? 0.34 : 0.14),
+                blurRadius: 22,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 30,
+                height: 30,
+                child: isQueued
+                    ? Icon(
+                        Icons.schedule_rounded,
+                        color: _s.accentColor,
+                        size: 22,
+                      )
+                    : CircularProgressIndicator(
+                        value: isPreparing ? null : progress,
+                        strokeWidth: 2.6,
+                        color: _s.accentColor,
+                        backgroundColor: _s.accentColor.withValues(alpha: 0.16),
+                      ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$statusText$queueText',
+                      style: _s.uiText(
+                        color: _s.textColor,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      task.book.title,
+                      style: _s.uiText(
+                        color: _s.mutedColor,
+                        fontSize: 12,
+                        height: 1.2,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (!isQueued && progress != null) ...[
+                      const SizedBox(height: 8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          minHeight: 3,
+                          color: _s.accentColor,
+                          backgroundColor: _s.accentColor.withValues(
+                            alpha: 0.16,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Cancel download',
+                onPressed: () => _cancelDownload(task),
+                icon: Icon(Icons.close_rounded, color: _s.mutedColor),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildBody() {
     if (_loading) {
       return _buildSkeletonList();
@@ -1011,7 +1195,12 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       onRefresh: _refreshCurrentQuery,
       child: ListView.separated(
         controller: _scrollController,
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+        padding: EdgeInsets.fromLTRB(
+          20,
+          4,
+          20,
+          _downloadTasks.isEmpty ? 28 : 112,
+        ),
         itemCount:
             _books.length +
             (_hasNextPage ? 1 : 0) +
@@ -1033,7 +1222,12 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
 
   Widget _buildSkeletonList() {
     return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
+      padding: EdgeInsets.fromLTRB(
+        20,
+        4,
+        20,
+        _downloadTasks.isEmpty ? 28 : 112,
+      ),
       itemCount: 6,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (_, __) => _buildSkeletonListItem(),
@@ -1169,6 +1363,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   Widget _buildBookCard(PublicDomainBook book) {
     final isDownloaded = _isInLibrary(book);
     final isDownloading = _downloadingIds.contains(book.id);
+    final downloadTask = _downloadTasks[book.id];
     final summary = book.summary;
     final topicChips = book.topicLabels.take(2).toList(growable: false);
 
@@ -1283,14 +1478,20 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
                                     }
                                   },
                             icon: isDownloading
-                                ? SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: _s.textColor,
-                                    ),
-                                  )
+                                ? downloadTask?.phase ==
+                                          _DownloadTaskPhase.queued
+                                      ? const Icon(
+                                          Icons.schedule_rounded,
+                                          size: 16,
+                                        )
+                                      : SizedBox(
+                                          width: 14,
+                                          height: 14,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            color: _s.textColor,
+                                          ),
+                                        )
                                 : Icon(
                                     isDownloaded
                                         ? Icons.menu_book_rounded
@@ -1299,7 +1500,10 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
                                   ),
                             label: Text(
                               isDownloading
-                                  ? 'Saving'
+                                  ? downloadTask?.phase ==
+                                            _DownloadTaskPhase.queued
+                                        ? 'Queued'
+                                        : 'Saving'
                                   : isDownloaded
                                   ? 'Open'
                                   : 'Download',

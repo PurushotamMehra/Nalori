@@ -11,6 +11,15 @@ void main() {
       );
     });
 
+    test('normalizes quote punctuation spacing without changing meaning', () {
+      expect(
+        QuoteSharePayload.normalizeQuote(
+          "  ' I know you , '  the eyes seemed to say ,  ' I see through you . ' ",
+        ),
+        "'I know you,' the eyes seemed to say, 'I see through you.'",
+      );
+    });
+
     test('caps long quotes with a trailing ellipsis', () {
       final quote = List.filled(160, 'word').join(' ');
 

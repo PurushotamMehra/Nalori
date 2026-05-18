@@ -24,6 +24,13 @@ Future<void> showHighlightPaletteSheet(
   required HighlightPaletteReset onResetPalette,
   ReadingSettings? readingSettings,
   String title = 'Highlight colors',
+  int maxPaletteColors = HighlightPaletteService.maxHighlightColors,
+  Color fallbackColor = const Color(0xFFEF5350),
+  String compactHint =
+      'Pick a saved color, or tap + and drag up for the color wheel.',
+  String expandedHint =
+      'Save the draft to your palette, remove it, or use it directly.',
+  String resetMessage = 'Reset to the system colors.',
 }) {
   Color? stagedColor;
 
@@ -40,6 +47,11 @@ Future<void> showHighlightPaletteSheet(
       onResetPalette: onResetPalette,
       readingSettings: readingSettings,
       title: title,
+      maxPaletteColors: maxPaletteColors,
+      fallbackColor: fallbackColor,
+      compactHint: compactHint,
+      expandedHint: expandedHint,
+      resetMessage: resetMessage,
     ),
   ).then((result) {
     final resolvedColor = result ?? stagedColor;
@@ -60,6 +72,11 @@ class _HighlightPaletteSheet extends StatefulWidget {
   final HighlightPaletteReset onResetPalette;
   final ReadingSettings? readingSettings;
   final String title;
+  final int maxPaletteColors;
+  final Color fallbackColor;
+  final String compactHint;
+  final String expandedHint;
+  final String resetMessage;
 
   const _HighlightPaletteSheet({
     required this.initialPalette,
@@ -70,6 +87,11 @@ class _HighlightPaletteSheet extends StatefulWidget {
     required this.onResetPalette,
     this.readingSettings,
     required this.title,
+    required this.maxPaletteColors,
+    required this.fallbackColor,
+    required this.compactHint,
+    required this.expandedHint,
+    required this.resetMessage,
   });
 
   @override
@@ -117,8 +139,7 @@ class _HighlightPaletteSheetState extends State<_HighlightPaletteSheet> {
   bool get _draftExistsInPalette => _containsColor(_draftMaterialColor);
 
   bool get _canAddDraftColor =>
-      !_draftExistsInPalette &&
-      _palette.length < HighlightPaletteService.maxHighlightColors;
+      !_draftExistsInPalette && _palette.length < widget.maxPaletteColors;
 
   bool get _canRemoveDraftColor => _draftExistsInPalette && _palette.length > 1;
 
@@ -186,7 +207,7 @@ class _HighlightPaletteSheetState extends State<_HighlightPaletteSheet> {
 
     if (!_canAddDraftColor) {
       _showMessage(
-        'You can save up to ${HighlightPaletteService.maxHighlightColors} colors. Remove one first.',
+        'You can save up to ${widget.maxPaletteColors} colors. Remove one first.',
       );
       return;
     }
@@ -223,7 +244,7 @@ class _HighlightPaletteSheetState extends State<_HighlightPaletteSheet> {
         .toList();
     final fallback = _paletteContains(normalizedUpdatedPalette, _selectedColor)
         ? _selectedColor
-        : normalizedUpdatedPalette.lastOrNull ?? kHighlightColors.last;
+        : normalizedUpdatedPalette.lastOrNull ?? widget.fallbackColor;
 
     setState(() {
       _palette = normalizedUpdatedPalette;
@@ -247,7 +268,7 @@ class _HighlightPaletteSheetState extends State<_HighlightPaletteSheet> {
     final nextSelected =
         _paletteContains(normalizedUpdatedPalette, _draftMaterialColor)
         ? _draftMaterialColor
-        : normalizedUpdatedPalette.lastOrNull ?? kHighlightColors.last;
+        : normalizedUpdatedPalette.lastOrNull ?? widget.fallbackColor;
 
     setState(() {
       _palette = normalizedUpdatedPalette;
@@ -257,7 +278,7 @@ class _HighlightPaletteSheetState extends State<_HighlightPaletteSheet> {
     });
     widget.onColorStaged(_selectedColor);
 
-    _showMessage('Reset to the system highlight colors.');
+    _showMessage(widget.resetMessage);
   }
 
   void _handleHexChanged(String value) {
@@ -400,8 +421,8 @@ class _HighlightPaletteSheetState extends State<_HighlightPaletteSheet> {
                           const SizedBox(height: 8),
                           Text(
                             _isExpanded
-                                ? 'Save the draft to your palette, remove it, or use it directly.'
-                                : 'Pick a saved color, or tap + and drag up for the color wheel.',
+                                ? widget.expandedHint
+                                : widget.compactHint,
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: readerTheme.muted,
                               height: 1.35,

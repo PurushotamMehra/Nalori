@@ -26,6 +26,11 @@ class DictionaryService {
     _words.sort((a, b) => b.timestamp.compareTo(a.timestamp));
   }
 
+  Future<List<SavedWord>> loadWords() async {
+    await _loadWords();
+    return words;
+  }
+
   Future<void> _saveWords() async {
     final prefs = await SharedPreferences.getInstance();
     final wordsJson = _words.map((w) => w.toJson()).toList();

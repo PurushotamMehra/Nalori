@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/bookmark.dart';
 
@@ -11,6 +12,7 @@ void main() {
         expect(bookmark.originalStartOffset, 0);
         expect(bookmark.name, 'Test Bookmark');
         expect(bookmark.createdAt, isNotNull);
+        expect(bookmark.color, kBookmarkColors.first);
       });
 
       test('should create bookmark with source offset and preview', () {
@@ -56,6 +58,17 @@ void main() {
         expect(copy.chunkIndex, 5);
         expect(copy.name, 'New Name');
       });
+
+      test('should copy with custom color and clear it', () {
+        final original = Bookmark(chunkIndex: 5, name: 'Original');
+        final custom = original.copyWith(
+          colorValue: bookmarkColorValue(const Color(0xFF123456)),
+        );
+        final preset = custom.copyWith(colorIndex: 2, clearColorValue: true);
+
+        expect(custom.color, const Color(0xFF123456));
+        expect(preset.color, kBookmarkColors[2]);
+      });
     });
 
     group('serialization', () {
@@ -72,6 +85,7 @@ void main() {
         expect(json['originalStartOffset'], 0);
         expect(json['name'], 'Test');
         expect(json['createdAt'], contains('2026-03-11'));
+        expect(json['colorIndex'], 0);
       });
 
       test('should convert source offset and preview to JSON', () {
@@ -102,6 +116,7 @@ void main() {
         expect(bookmark.chunkIndex, 5);
         expect(bookmark.originalStartOffset, 0);
         expect(bookmark.name, 'Test');
+        expect(bookmark.color, kBookmarkColors.first);
       });
 
       test('should create from JSON with source offset and preview', () {
@@ -118,6 +133,37 @@ void main() {
         expect(bookmark.chunkIndex, 5);
         expect(bookmark.originalStartOffset, 42);
         expect(bookmark.previewText, 'Visible page text');
+      });
+
+      test('should preserve existing fixed color indices', () {
+        final json = {
+          'chunkIndex': 5,
+          'name': 'Fixed color',
+          'createdAt': '2026-03-11T10:30:00.000',
+          'colorIndex': 4,
+        };
+
+        final bookmark = Bookmark.fromJson(json);
+
+        expect(bookmark.colorIndex, 4);
+        expect(bookmark.color, kBookmarkColors[4]);
+        expect(bookmark.colorValue, isNull);
+      });
+
+      test('should serialize and deserialize arbitrary custom colors', () {
+        final bookmark = Bookmark(
+          chunkIndex: 5,
+          name: 'Custom color',
+          createdAt: DateTime(2026, 3, 11, 10, 30),
+          colorIndex: 1,
+          colorValue: bookmarkColorValue(const Color(0xFF123456)),
+        );
+
+        final decoded = Bookmark.fromJson(bookmark.toJson());
+
+        expect(decoded.colorIndex, 1);
+        expect(decoded.colorValue, bookmarkColorValue(const Color(0xFF123456)));
+        expect(decoded.color, const Color(0xFF123456));
       });
 
       test('should encode and decode list', () {
