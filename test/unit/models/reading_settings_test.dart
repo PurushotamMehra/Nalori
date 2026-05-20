@@ -42,6 +42,7 @@ void main() {
         expect(settings.speedReadAdaptivePacing, true);
         expect(settings.lineHeight, 1.3);
         expect(settings.paragraphSpacing, 1.0);
+        expect(settings.sideMargin, 24.0);
       });
 
       test('should accept custom values', () {
@@ -65,6 +66,7 @@ void main() {
           speedReadPageAdvanceMode: SpeedReadPageAdvanceMode.auto,
           speedReadAdaptivePacing: false,
           paragraphSpacing: 1.5,
+          sideMargin: 56.0,
         );
 
         expect(settings.appTheme, AppTheme.sepia);
@@ -89,6 +91,7 @@ void main() {
         );
         expect(settings.speedReadAdaptivePacing, false);
         expect(settings.paragraphSpacing, 1.5);
+        expect(settings.sideMargin, 56.0);
       });
     });
 
@@ -114,6 +117,29 @@ void main() {
         final decoded = ReadingSettings.fromPresetJson(const {});
 
         expect(decoded.paragraphSpacing, 1.0);
+      });
+    });
+
+    group('sideMargin', () {
+      test('copyWith should update side margin', () {
+        final settings = const ReadingSettings().copyWith(sideMargin: 12.0);
+
+        expect(settings.sideMargin, 12.0);
+        expect(settings.paragraphSpacing, 1.0);
+      });
+
+      test('preset json should preserve side margin', () {
+        const settings = ReadingSettings(sideMargin: 56.0);
+
+        final decoded = ReadingSettings.fromPresetJson(settings.toPresetJson());
+
+        expect(decoded.sideMargin, 56.0);
+      });
+
+      test('preset json should default missing side margin', () {
+        final decoded = ReadingSettings.fromPresetJson(const {});
+
+        expect(decoded.sideMargin, 24.0);
       });
     });
 

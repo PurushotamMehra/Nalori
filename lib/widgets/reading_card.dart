@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show SelectionStatus;
 import 'package:flutter/services.dart';
 
 import '../models/book_chunk.dart';
@@ -9,6 +10,7 @@ import '../models/highlight.dart';
 import '../models/reading_settings.dart';
 import '../controllers/speed_read_controller.dart';
 import '../ui/app_visuals.dart';
+import '../utils/contrast_utils.dart';
 import '../utils/final_layout_paragraphs.dart';
 import '../utils/reader_content_parser.dart';
 import '../widgets/highlight_palette_sheet.dart';
@@ -44,6 +46,7 @@ class ReadingCard extends StatefulWidget {
   final double? chapterProgress;
   final double depthLiftProgress;
   final bool showStackLayers;
+  final bool enableTextSelection;
   final ValueChanged<bool>? onInteractionBlockedChanged;
 
   /// Highlights that apply to this chunk (matched by original chunk index).
@@ -63,7 +66,7 @@ class ReadingCard extends StatefulWidget {
   final ValueChanged<Color>? onDefaultHighlightColorChanged;
 
   /// Called when the user creates a new highlight via text selection.
-  final void Function(
+  final FutureOr<void> Function(
     int startOffset,
     int endOffset,
     String text,
@@ -100,13 +103,20 @@ class ReadingCard extends StatefulWidget {
   final void Function(String id)? onHighlightDeleted;
 
   /// Called when a note is added/updated on an existing highlight
-  final void Function(String highlightId, String note)? onNoteUpdated;
+  final FutureOr<void> Function(String highlightId, String note)? onNoteUpdated;
 
   /// Called when a note is removed from an existing highlight
-  final void Function(String highlightId)? onNoteRemoved;
+  final FutureOr<void> Function(String highlightId)? onNoteRemoved;
+
+  /// Runs note editor routes while the parent reader preserves its visible page.
+  final Future<T> Function<T>(Future<T> Function() action)? onNoteEditorRoute;
 
   /// Called when a tap occurs outside the active highlight or text selection
   final void Function(Offset? globalPosition)? onTapOutside;
+
+  /// Called when an interactive child gesture should not also toggle the
+  /// parent reader menu surface.
+  final VoidCallback? onSuppressParentReaderTap;
 
   /// Called when user taps the Dictionary button on a selected word
   final void Function(
@@ -142,6 +152,7 @@ class ReadingCard extends StatefulWidget {
     this.chapterProgress,
     this.depthLiftProgress = 0,
     this.showStackLayers = true,
+    this.enableTextSelection = true,
     this.onInteractionBlockedChanged,
     this.highlights = const [],
     this.characterNames = const {},
@@ -157,7 +168,9 @@ class ReadingCard extends StatefulWidget {
     this.onHighlightDeleted,
     this.onNoteUpdated,
     this.onNoteRemoved,
+    this.onNoteEditorRoute,
     this.onTapOutside,
+    this.onSuppressParentReaderTap,
     this.onDictionaryLookup,
     this.onQuoteShareRequested,
   });
@@ -196,6 +209,7 @@ class _ReadingCardState extends State<ReadingCard>
   int _consecutiveTaps = 0;
   Timer? _tapTimer;
   Timer? _selectionMenuTimer;
+  Timer? _readerLongPressTimer;
 
   // ── Editing Existing Highlight ──
   Highlight? _tappedHighlight;
@@ -214,6 +228,13 @@ class _ReadingCardState extends State<ReadingCard>
   Color? _lastBookmarkColor;
   bool _speedReadTapHandled = false;
   bool _selectionChangedDuringPointer = false;
+  bool _pointerMovedBeyondTapSlop = false;
+  bool _pointerHeldBeyondTapTimeout = false;
+  bool _readerSimpleTapHandledForPointer = false;
+  bool _annotationTapHandledForPointer = false;
+  final SelectionListenerNotifier _paragraphSelectionNotifier =
+      SelectionListenerNotifier();
+  final Map<_ReadingTextSpanCacheKey, TextSpan> _previewTextSpanCache = {};
 
   @override
   void initState() {
@@ -288,6 +309,7 @@ class _ReadingCardState extends State<ReadingCard>
       duration: const Duration(milliseconds: 120),
       value: 1.0,
     );
+    _paragraphSelectionNotifier.addListener(_onParagraphSelectionChanged);
     _attachSpeedReadController(widget.speedReadController);
   }
 
@@ -306,6 +328,13 @@ class _ReadingCardState extends State<ReadingCard>
     if (widget.highlights != oldWidget.highlights ||
         widget.chunk != oldWidget.chunk) {
       _sortedHighlights = null;
+      _previewTextSpanCache.clear();
+    }
+    if (widget.settings != oldWidget.settings ||
+        widget.characterNames != oldWidget.characterNames ||
+        widget.isActivePage != oldWidget.isActivePage ||
+        widget.enableTextSelection != oldWidget.enableTextSelection) {
+      _previewTextSpanCache.clear();
     }
     // Bounce the corner icon when bookmark is added
     if (widget.bookmark != null && oldWidget.bookmark == null) {
@@ -347,9 +376,11 @@ class _ReadingCardState extends State<ReadingCard>
   void dispose() {
     _tapTimer?.cancel();
     _selectionMenuTimer?.cancel();
+    _readerLongPressTimer?.cancel();
     _removeFloatingMenuOverlay();
     _popController.dispose();
     _cornerController.dispose();
+    _paragraphSelectionNotifier.removeListener(_onParagraphSelectionChanged);
     _detachSpeedReadController(widget.speedReadController);
     _speedReadStyleController.dispose();
     super.dispose();
@@ -529,6 +560,9 @@ class _ReadingCardState extends State<ReadingCard>
       _tappedHighlight != null ||
       _isColorPickerOpen;
 
+  bool get _usesInteractiveText =>
+      widget.enableTextSelection && widget.isActivePage;
+
   bool get _shouldShowFloatingMenu =>
       mounted &&
       widget.isActivePage &&
@@ -651,6 +685,8 @@ class _ReadingCardState extends State<ReadingCard>
 
   void _handleRenderedAnnotationTap(Highlight highlight) {
     if (_isColorPickerOpen) return;
+    _annotationTapHandledForPointer = true;
+    _readerSimpleTapHandledForPointer = true;
 
     final linkedNote = highlight.hasNote || highlight.isNote
         ? highlight
@@ -794,6 +830,138 @@ class _ReadingCardState extends State<ReadingCard>
       _showSelectionMenu = false;
       _tappedHighlight =
           null; // hide existing highlight editor if new selection starts
+    });
+    _notifyInteractionBlockedChanged();
+    _scheduleSelectionMenu();
+
+    if (widget.speedReadController?.isActive == true) {
+      widget.speedReadController!.pause();
+    }
+  }
+
+  bool _isSimpleReaderTap(Offset globalPosition) {
+    final downPosition = _lastPointerDownPosition;
+    if (downPosition == null) return false;
+    if (_pointerMovedBeyondTapSlop) return false;
+    if ((globalPosition - downPosition).distance > kTouchSlop) return false;
+    if (_pointerHeldBeyondTapTimeout) return false;
+    return true;
+  }
+
+  void _finishReaderPointerTracking() {
+    _readerLongPressTimer?.cancel();
+    _readerLongPressTimer = null;
+  }
+
+  void _handleFullSurfacePointerUp(PointerUpEvent event) {
+    _lastPointerPosition = event.position;
+    final isSimpleTap = _isSimpleReaderTap(event.position);
+    _finishReaderPointerTracking();
+    if (isSimpleTap) {
+      _handleReaderSimpleTap(event.position);
+    }
+  }
+
+  void _markAnnotationTapHandled() {
+    _annotationTapHandledForPointer = true;
+    _readerSimpleTapHandledForPointer = true;
+    widget.onSuppressParentReaderTap?.call();
+  }
+
+  void _dispatchReaderOutsideTap(Offset? globalPosition) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _annotationTapHandledForPointer) return;
+      widget.onTapOutside?.call(globalPosition);
+    });
+  }
+
+  void _handleReaderSimpleTap(Offset? globalPosition) {
+    if (_readerSimpleTapHandledForPointer) {
+      return;
+    }
+    _readerSimpleTapHandledForPointer = true;
+
+    if (_annotationTapHandledForPointer) {
+      return;
+    }
+    if (_selectionChangedDuringPointer) {
+      return;
+    }
+    if (_speedReadTapHandled) {
+      return;
+    }
+
+    // Guard: if we just set _tappedHighlight via long-press, don't clear it
+    if (_justTappedHighlight) return;
+
+    if (_hasActiveSelection || _tappedHighlight != null) {
+      _cancelSelectionMenuTimer();
+      setState(() {
+        _hasActiveSelection = false;
+        _showSelectionMenu = false;
+        _tappedHighlight = null;
+        _selectionStart = null;
+        _selectionEnd = null;
+      });
+      FocusScope.of(context).unfocus();
+      if (widget.speedReadController?.isActive == true) {
+        widget.speedReadController!.resume();
+      }
+      return;
+    }
+
+    _dispatchReaderOutsideTap(globalPosition);
+  }
+
+  void _onParagraphSelectionChanged() {
+    if (_isColorPickerOpen || !_paragraphSelectionNotifier.registered) return;
+
+    final details = _paragraphSelectionNotifier.selection;
+    final range = details.range;
+    if (details.status != SelectionStatus.uncollapsed || range == null) {
+      if (_hasActiveSelection) {
+        _cancelSelectionMenuTimer();
+        setState(() {
+          _hasActiveSelection = false;
+          _showSelectionMenu = false;
+          _selectionStart = null;
+          _selectionEnd = null;
+        });
+        _notifyInteractionBlockedChanged();
+        if (_tappedHighlight == null &&
+            widget.speedReadController?.isActive == true) {
+          widget.speedReadController!.resume();
+        }
+      }
+      return;
+    }
+
+    final text = widget.chunk.text;
+    if (text == null || text.isEmpty) return;
+
+    final segments = splitFinalLayoutParagraphSegments(text);
+    final mapped = mapFinalLayoutParagraphSelectionToTextRange(
+      segments: segments,
+      selectionStart: range.startOffset,
+      selectionEnd: range.endOffset,
+    );
+    if (mapped == null) return;
+
+    if (_selectionStart == mapped.startOffset &&
+        _selectionEnd == mapped.endOffset &&
+        _hasActiveSelection) {
+      return;
+    }
+
+    _cancelSelectionMenuTimer();
+    _selectionChangedDuringPointer = true;
+    widget.onSuppressParentReaderTap?.call();
+    setState(() {
+      _selectionStart = mapped.startOffset;
+      _selectionEnd = mapped.endOffset;
+      _hasActiveSelection = true;
+      _showSelectionMenu = false;
+      _tappedHighlight = null;
     });
     _notifyInteractionBlockedChanged();
     _scheduleSelectionMenu();
@@ -1373,6 +1541,44 @@ class _ReadingCardState extends State<ReadingCard>
     TextAlign textAlign, {
     int startOffset = 0,
   }) {
+    if (!_usesInteractiveText &&
+        !_hasActiveSelection &&
+        _pendingNoteDraft == null) {
+      final cacheKey = _ReadingTextSpanCacheKey(
+        text: text,
+        startOffset: startOffset,
+        chunk: widget.chunk,
+        baseStyle: baseStyle,
+        textAlign: textAlign,
+        highlights: widget.highlights,
+        characterNames: widget.characterNames,
+      );
+      final cached = _previewTextSpanCache[cacheKey];
+      if (cached != null) return cached;
+      final span = _buildHighlightedTextSpanUncached(
+        text,
+        baseStyle,
+        textAlign,
+        startOffset: startOffset,
+      );
+      _previewTextSpanCache[cacheKey] = span;
+      return span;
+    }
+
+    return _buildHighlightedTextSpanUncached(
+      text,
+      baseStyle,
+      textAlign,
+      startOffset: startOffset,
+    );
+  }
+
+  TextSpan _buildHighlightedTextSpanUncached(
+    String text,
+    TextStyle baseStyle,
+    TextAlign textAlign, {
+    int startOffset = 0,
+  }) {
     final fullChunkText = widget.chunk.text;
     final isFullDisplayText =
         startOffset == 0 &&
@@ -1562,8 +1768,7 @@ class _ReadingCardState extends State<ReadingCard>
       }
       if (note != null) {
         segStyle = segStyle.copyWith(
-          backgroundColor: note.color,
-          color: widget.settings.backgroundColor,
+          color: _noteHighlightForeground(_noteBlockColor(note.color)),
         );
       }
       if (selectedRange != null &&
@@ -1661,9 +1866,19 @@ class _ReadingCardState extends State<ReadingCard>
   }
 
   GestureRecognizer? _annotationTapRecognizer(Highlight? highlight) {
+    if (!_usesInteractiveText) return null;
     if (highlight == null) return null;
     return TapGestureRecognizer()
-      ..onTap = () => _handleRenderedAnnotationTap(highlight);
+      ..onTapDown = (_) {
+        _markAnnotationTapHandled();
+      }
+      ..onTapUp = (_) {
+        _markAnnotationTapHandled();
+      }
+      ..onTap = () {
+        _markAnnotationTapHandled();
+        _handleRenderedAnnotationTap(highlight);
+      };
   }
 
   TextSpan _buildSpeedReadTextSpan(
@@ -1901,23 +2116,80 @@ class _ReadingCardState extends State<ReadingCard>
 
   Color _speedReadReadableCharacterColor(Color color) {
     final background = widget.settings.backgroundColor;
-    if (_contrastRatio(color, background) >= 3) return color;
+    if (contrastRatio(color, background) >= 3) return color;
 
     final textColor = widget.settings.readerTextColor;
     for (final amount in const [0.25, 0.4, 0.55, 0.7]) {
       final adjusted = Color.lerp(color, textColor, amount)!;
-      if (_contrastRatio(adjusted, background) >= 3) return adjusted;
+      if (contrastRatio(adjusted, background) >= 3) return adjusted;
     }
 
     return textColor;
   }
 
-  double _contrastRatio(Color foreground, Color background) {
-    final fg = foreground.computeLuminance();
-    final bg = background.computeLuminance();
-    final lighter = fg > bg ? fg : bg;
-    final darker = fg > bg ? bg : fg;
-    return (lighter + 0.05) / (darker + 0.05);
+  Color _noteBlockColor(Color color) {
+    return color.withValues(alpha: widget.settings.isDark ? 0.80 : 0.56);
+  }
+
+  Color _noteHighlightForeground(Color paintedNoteColor) {
+    final effectiveBackground = compositeColorOver(
+      paintedNoteColor,
+      widget.settings.backgroundColor,
+    );
+    return readableForegroundForBackground(effectiveBackground);
+  }
+
+  List<_NoteDecorationRange> _noteDecorationRangesForText(
+    String text, {
+    int startOffset = 0,
+  }) {
+    final fullChunkText = widget.chunk.text;
+    final isFullDisplayText =
+        startOffset == 0 &&
+        (fullChunkText == null || fullChunkText.length == text.length);
+    final resolvedHighlights = isFullDisplayText
+        ? _resolvedHighlightsForDisplay(text)
+        : _resolvedHighlightsForDisplayRange(text, startOffset);
+    final ranges = <_NoteDecorationRange>[];
+
+    for (final hl in resolvedHighlights) {
+      final isNoteDecoration =
+          hl.isNote || (hl.isRegularHighlight && hl.hasNote);
+      if (!isNoteDecoration) continue;
+
+      final hlStart = hl.startOffset.clamp(0, text.length);
+      final hlEnd = hl.endOffset.clamp(0, text.length);
+      if (hlStart >= hlEnd) continue;
+
+      ranges.add(
+        _NoteDecorationRange(
+          start: hlStart,
+          end: hlEnd,
+          color: _noteBlockColor(hl.color),
+          highlight: hl,
+        ),
+      );
+    }
+
+    final pendingDraft = _pendingNoteDraft;
+    if (pendingDraft != null) {
+      final endOffset = startOffset + text.length;
+      final draftStart = pendingDraft.startOffset.clamp(startOffset, endOffset);
+      final draftEnd = pendingDraft.endOffset.clamp(startOffset, endOffset);
+      if (draftStart < draftEnd) {
+        ranges.add(
+          _NoteDecorationRange(
+            start: draftStart - startOffset,
+            end: draftEnd - startOffset,
+            color: _noteBlockColor(pendingDraft.color),
+            highlight: null,
+          ),
+        );
+      }
+    }
+
+    ranges.sort((a, b) => a.start.compareTo(b.start));
+    return ranges;
   }
 
   double _speedReadActiveAmountForWord({
@@ -2154,8 +2426,9 @@ class _ReadingCardState extends State<ReadingCard>
               color: const Color(0xFF6B9FFA),
               fontWeight: FontWeight.w600,
             ),
-            recognizer: TapGestureRecognizer()
-              ..onTap = () => _showFootnotePopup(fn),
+            recognizer: _usesInteractiveText
+                ? (TapGestureRecognizer()..onTap = () => _showFootnotePopup(fn))
+                : null,
           ),
         );
         cursor = markerEnd;
@@ -2211,73 +2484,76 @@ class _ReadingCardState extends State<ReadingCard>
     final chunkText = chunk.text;
     final hasText = chunkText != null && chunkText.isNotEmpty;
 
-    return Listener(
-      onPointerDown: (event) {
-        _speedReadTapHandled = false;
-        _selectionChangedDuringPointer = false;
-        _lastPointerPosition = event.position;
-        _lastPointerDownPosition = event.position;
-        _consecutiveTaps++;
-        _tapTimer?.cancel();
-        if (_consecutiveTaps == 3) {
-          _consecutiveTaps = 0;
-          widget.onTripleTap?.call();
-        } else {
-          _tapTimer = Timer(const Duration(milliseconds: 350), () {
-            _consecutiveTaps = 0;
-          });
-        }
-      },
-      child: RepaintBoundary(
-        child: GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onDoubleTap: _handleBookmarkAction,
-          onTapUp: (details) {
-            if (_selectionChangedDuringPointer) {
-              return;
-            }
-            if (_speedReadTapHandled) {
-              return;
-            }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final viewportSize = MediaQuery.sizeOf(context);
+        final width = constraints.hasBoundedWidth
+            ? constraints.maxWidth
+            : viewportSize.width;
+        final height = constraints.hasBoundedHeight
+            ? constraints.maxHeight
+            : viewportSize.height;
 
-            // Guard: if we just set _tappedHighlight via long-press, don't clear it
-            if (_justTappedHighlight) return;
-
-            // Priority 1: Clear selection / tapped highlight
-            if (_hasActiveSelection || _tappedHighlight != null) {
-              _cancelSelectionMenuTimer();
-              setState(() {
-                _hasActiveSelection = false;
-                _showSelectionMenu = false;
-                _tappedHighlight = null;
-                _selectionStart = null;
-                _selectionEnd = null;
+        return SizedBox(
+          width: width,
+          height: height,
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: (event) {
+              _speedReadTapHandled = false;
+              _annotationTapHandledForPointer = false;
+              _selectionChangedDuringPointer = false;
+              _pointerMovedBeyondTapSlop = false;
+              _pointerHeldBeyondTapTimeout = false;
+              _readerSimpleTapHandledForPointer = false;
+              _lastPointerPosition = event.position;
+              _lastPointerDownPosition = event.position;
+              _readerLongPressTimer?.cancel();
+              _readerLongPressTimer = Timer(kLongPressTimeout, () {
+                _pointerHeldBeyondTapTimeout = true;
               });
-              FocusScope.of(context).unfocus();
-              if (widget.speedReadController?.isActive == true) {
-                widget.speedReadController!.resume();
+              _consecutiveTaps++;
+              _tapTimer?.cancel();
+              if (_consecutiveTaps == 3) {
+                _consecutiveTaps = 0;
+                widget.onTripleTap?.call();
+              } else {
+                _tapTimer = Timer(const Duration(milliseconds: 350), () {
+                  _consecutiveTaps = 0;
+                });
               }
-              return;
-            }
-
-            // Priority 2: Default action (toggle reader menu for taps on margins)
-            widget.onTapOutside?.call(details.globalPosition);
-          },
-          child: _buildReadingSurface(
-            bgColor: bgColor,
-            cardMargin: cardMargin,
-            contentPadding: contentPadding,
-            chunk: chunk,
-            chunkText: chunkText,
-            hasText: hasText,
-            textStyle: textStyle,
-            textAlign: textAlign,
-            topPad: topPad,
-            iconTop: iconTop,
-            iconSize: iconSize,
+            },
+            onPointerMove: (event) {
+              final downPosition = _lastPointerDownPosition;
+              if (downPosition != null &&
+                  (event.position - downPosition).distance > kTouchSlop) {
+                _pointerMovedBeyondTapSlop = true;
+              }
+            },
+            onPointerUp: _handleFullSurfacePointerUp,
+            onPointerCancel: (_) => _finishReaderPointerTracking(),
+            child: RepaintBoundary(
+              child: GestureDetector(
+                behavior: HitTestBehavior.translucent,
+                onDoubleTap: _handleBookmarkAction,
+                child: _buildReadingSurface(
+                  bgColor: bgColor,
+                  cardMargin: cardMargin,
+                  contentPadding: contentPadding,
+                  chunk: chunk,
+                  chunkText: chunkText,
+                  hasText: hasText,
+                  textStyle: textStyle,
+                  textAlign: textAlign,
+                  topPad: topPad,
+                  iconTop: iconTop,
+                  iconSize: iconSize,
+                ),
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -2465,8 +2741,8 @@ class _ReadingCardState extends State<ReadingCard>
         settings.readerTextColor.withValues(alpha: 0.32);
 
     return Positioned(
-      left: kContentPaddingH,
-      right: kContentPaddingH - 2,
+      left: contentPadding.left,
+      right: contentPadding.right - 2,
       top: contentPadding.top - 34,
       child: SizedBox(
         height: 24,
@@ -2528,8 +2804,8 @@ class _ReadingCardState extends State<ReadingCard>
     );
 
     return Positioned(
-      left: kContentPaddingH,
-      right: kContentPaddingH,
+      left: contentPadding.left,
+      right: contentPadding.right,
       bottom: contentPadding.bottom - 30,
       child: Row(
         children: [
@@ -2719,69 +2995,122 @@ class _ReadingCardState extends State<ReadingCard>
       );
     }
 
-    Widget buildSelectableText({String? text, int startOffset = 0}) {
-      return Listener(
-        behavior: HitTestBehavior.translucent,
-        onPointerUp: (event) {
-          _lastPointerPosition = event.position;
-          _speedReadTapHandled = _handleSpeedReadTextTap(
-            localPosition: event.localPosition,
-            globalPosition: event.position,
-            textPainter: wordHitTestPainter,
-          );
+    Widget buildNoteBackdrop({
+      required String spanText,
+      required TextSpan span,
+      required int startOffset,
+      required Widget child,
+    }) {
+      final paintsNoteBlocks =
+          !(speedReadController?.isActive == true && widget.isActivePage);
+      final noteRanges = paintsNoteBlocks
+          ? _noteDecorationRangesForText(spanText, startOffset: startOffset)
+          : const <_NoteDecorationRange>[];
+      if (noteRanges.isEmpty) return child;
+
+      return _NoteHighlightBackdrop(
+        textSpan: span,
+        noteRanges: noteRanges,
+        textAlign: textAlign,
+        textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context),
+        strutStyle: widget.settings.getBodyStrutStyle(),
+        onNoteTap: (highlight) {
+          _markAnnotationTapHandled();
+          _handleRenderedAnnotationTap(highlight);
         },
-        child: SelectableText.rich(
-          buildBodySpan(text: text, startOffset: startOffset),
-          textAlign: textAlign,
-          strutStyle: widget.settings.getBodyStrutStyle(),
-          selectionColor: _activeSelectionColor(),
-          onSelectionChanged: (selection, cause) =>
-              _onSelectionChangedFromOffset(selection, cause, startOffset),
-          onTap: () {
-            if (_selectionChangedDuringPointer) {
-              return;
-            }
-            if (_speedReadTapHandled) {
-              return;
-            }
+        child: child,
+      );
+    }
 
-            // Guard: if we just set _tappedHighlight via long-press, don't clear it
-            if (_justTappedHighlight) return;
+    Widget buildTextBlock({String? text, int startOffset = 0}) {
+      final spanText = text ?? chunkText!;
+      final span = buildBodySpan(text: text, startOffset: startOffset);
 
-            if (_hasActiveSelection || _tappedHighlight != null) {
-              _cancelSelectionMenuTimer();
-              setState(() {
-                _hasActiveSelection = false;
-                _showSelectionMenu = false;
-                _tappedHighlight = null;
-                _selectionStart = null;
-                _selectionEnd = null;
-              });
-              FocusScope.of(context).unfocus();
-              if (widget.speedReadController?.isActive == true) {
-                widget.speedReadController!.resume();
+      if (!_usesInteractiveText) {
+        return buildNoteBackdrop(
+          spanText: spanText,
+          span: span,
+          startOffset: startOffset,
+          child: RichText(
+            text: span,
+            textAlign: textAlign,
+            strutStyle: widget.settings.getBodyStrutStyle(),
+            textScaler: MediaQuery.textScalerOf(context),
+          ),
+        );
+      }
+
+      return buildNoteBackdrop(
+        spanText: spanText,
+        span: span,
+        startOffset: startOffset,
+        child: Listener(
+          behavior: HitTestBehavior.translucent,
+          onPointerUp: (event) {
+            _lastPointerPosition = event.position;
+            _speedReadTapHandled = _handleSpeedReadTextTap(
+              localPosition: event.localPosition,
+              globalPosition: event.position,
+              textPainter: wordHitTestPainter,
+            );
+          },
+          child: SelectableText.rich(
+            span,
+            textAlign: textAlign,
+            strutStyle: widget.settings.getBodyStrutStyle(),
+            selectionColor: _activeSelectionColor(),
+            onSelectionChanged: (selection, cause) =>
+                _onSelectionChangedFromOffset(selection, cause, startOffset),
+            onTap: () {
+              if (_readerSimpleTapHandledForPointer) {
+                return;
               }
-              return;
-            }
+              if (_selectionChangedDuringPointer) {
+                return;
+              }
+              if (_speedReadTapHandled) {
+                return;
+              }
 
-            // Let taps on text blocks that miss word tokens act as general toggles.
-            widget.onTapOutside?.call(null);
-          },
-          contextMenuBuilder: (context, editableTextState) {
-            return const SizedBox.shrink();
-          },
+              // Guard: if we just set _tappedHighlight via long-press, don't clear it
+              if (_justTappedHighlight) return;
+
+              if (_hasActiveSelection || _tappedHighlight != null) {
+                _cancelSelectionMenuTimer();
+                setState(() {
+                  _hasActiveSelection = false;
+                  _showSelectionMenu = false;
+                  _tappedHighlight = null;
+                  _selectionStart = null;
+                  _selectionEnd = null;
+                });
+                FocusScope.of(context).unfocus();
+                if (widget.speedReadController?.isActive == true) {
+                  widget.speedReadController!.resume();
+                }
+                return;
+              }
+
+              // Let taps on text blocks that miss word tokens act as general toggles.
+              _dispatchReaderOutsideTap(null);
+            },
+            contextMenuBuilder: (context, editableTextState) {
+              return const SizedBox.shrink();
+            },
+          ),
         ),
       );
     }
 
     Widget buildParagraphSeparatedBodyContent() {
       if (!hasText || isSpeedReadActive) {
-        return buildSelectableText();
+        return buildTextBlock();
       }
 
       final segments = splitFinalLayoutParagraphSegments(chunkText!);
       if (segments.length <= 1) {
-        return buildSelectableText();
+        return buildTextBlock();
       }
 
       final paragraphGap = finalLayoutParagraphGapForStyle(
@@ -2791,18 +3120,80 @@ class _ReadingCardState extends State<ReadingCard>
         paragraphSpacing: widget.settings.paragraphSpacing,
       );
 
+      if (!_usesInteractiveText) {
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var i = 0; i < segments.length; i++)
+              Padding(
+                padding: EdgeInsets.only(top: i == 0 ? 0 : paragraphGap),
+                child: buildTextBlock(
+                  text: segments[i].text,
+                  startOffset: segments[i].startOffset,
+                ),
+              ),
+          ],
+        );
+      }
+
       return Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (var i = 0; i < segments.length; i++)
-            Padding(
-              padding: EdgeInsets.only(top: i == 0 ? 0 : paragraphGap),
-              child: buildSelectableText(
-                text: segments[i].text,
-                startOffset: segments[i].startOffset,
+          SelectionArea(
+            contextMenuBuilder: (context, selectableRegionState) {
+              return const SizedBox.shrink();
+            },
+            child: SelectionListener(
+              selectionNotifier: _paragraphSelectionNotifier,
+              child: DefaultSelectionStyle.merge(
+                selectionColor: _activeSelectionColor(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    for (var i = 0; i < segments.length; i++)
+                      Builder(
+                        builder: (context) {
+                          final segment = segments[i];
+                          final span = buildBodySpan(
+                            text: segment.text,
+                            startOffset: segment.startOffset,
+                          );
+                          return Padding(
+                            padding: EdgeInsets.only(
+                              top: i == 0 ? 0 : paragraphGap,
+                            ),
+                            child: buildNoteBackdrop(
+                              spanText: segment.text,
+                              span: span,
+                              startOffset: segment.startOffset,
+                              child: Listener(
+                                behavior: HitTestBehavior.translucent,
+                                onPointerUp: (event) {
+                                  _lastPointerPosition = event.position;
+                                  if (_isSimpleReaderTap(event.position)) {
+                                    _handleReaderSimpleTap(event.position);
+                                  }
+                                },
+                                child: Text.rich(
+                                  span,
+                                  textAlign: textAlign,
+                                  strutStyle: widget.settings
+                                      .getBodyStrutStyle(),
+                                  textScaler: MediaQuery.textScalerOf(context),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                  ],
+                ),
               ),
             ),
+          ),
         ],
       );
     }
@@ -2817,7 +3208,7 @@ class _ReadingCardState extends State<ReadingCard>
             switch (block.type) {
               ReaderContentBlockType.paragraph => Padding(
                 padding: EdgeInsets.symmetric(vertical: paragraphPadding),
-                child: buildSelectableText(
+                child: buildTextBlock(
                   text: block.rawText,
                   startOffset: block.startOffset,
                 ),
@@ -2938,41 +3329,49 @@ class _ReadingCardState extends State<ReadingCard>
                 })())
             .trim();
 
-    showNoteEditorSheet(
-      context,
-      title: existingNoteAnnotation == null ? 'Add note' : 'Edit note',
-      highlightedText: previewText,
-      accentColor:
-          (existingNoteAnnotation ?? sourceAnnotation)?.color ??
-          pendingDraft?.color ??
-          _selectedColor,
-      readingSettings: widget.settings,
-      initialNote: existingNoteAnnotation?.note ?? '',
-      submitLabel: existingNoteAnnotation == null ? 'Save Note' : 'Update Note',
-    ).then((result) {
+    Future<String?> routeAction() {
+      return showNoteEditorSheet(
+        context,
+        title: existingNoteAnnotation == null ? 'Add note' : 'Edit note',
+        highlightedText: previewText,
+        accentColor:
+            (existingNoteAnnotation ?? sourceAnnotation)?.color ??
+            pendingDraft?.color ??
+            _selectedColor,
+        readingSettings: widget.settings,
+        initialNote: existingNoteAnnotation?.note ?? '',
+        submitLabel: existingNoteAnnotation == null
+            ? 'Save Note'
+            : 'Update Note',
+      );
+    }
+
+    Future<void> handleResult(String? result) async {
       if (result is String) {
         if (existingNoteAnnotation == null) {
           if (result.isNotEmpty) {
             if (sourceAnnotation != null && !sourceAnnotation.isNote) {
-              updateNote?.call(sourceAnnotation.id, result);
+              await Future.sync(
+                () => updateNote?.call(sourceAnnotation.id, result),
+              );
             } else if (pendingDraft != null) {
               if (createMappedNote != null) {
-                unawaited(
-                  createMappedNote(
-                    pendingDraft.mappedRanges,
-                    pendingDraft.text,
-                    pendingDraft.color,
-                    result,
-                  ),
-                );
-              } else {
-                createAnnotation?.call(
-                  pendingDraft.startOffset,
-                  pendingDraft.endOffset,
+                await createMappedNote(
+                  pendingDraft.mappedRanges,
                   pendingDraft.text,
                   pendingDraft.color,
-                  HighlightType.highlight,
                   result,
+                );
+              } else {
+                await Future.sync(
+                  () => createAnnotation?.call(
+                    pendingDraft.startOffset,
+                    pendingDraft.endOffset,
+                    pendingDraft.text,
+                    pendingDraft.color,
+                    HighlightType.highlight,
+                    result,
+                  ),
                 );
               }
             } else if (selectedStart != null && selectedEnd != null) {
@@ -2980,13 +3379,15 @@ class _ReadingCardState extends State<ReadingCard>
               final end = selectedEnd.clamp(0, chunkText.length);
               if (start < end) {
                 final selectedText = chunkText.substring(start, end);
-                createAnnotation?.call(
-                  start,
-                  end,
-                  selectedText,
-                  _selectedColor,
-                  HighlightType.highlight,
-                  result,
+                await Future.sync(
+                  () => createAnnotation?.call(
+                    start,
+                    end,
+                    selectedText,
+                    _selectedColor,
+                    HighlightType.highlight,
+                    result,
+                  ),
                 );
               }
             }
@@ -3005,9 +3406,13 @@ class _ReadingCardState extends State<ReadingCard>
           });
         } else {
           if (result.isEmpty) {
-            removeNote?.call(existingNoteAnnotation.id);
+            await Future.sync(
+              () => removeNote?.call(existingNoteAnnotation.id),
+            );
           } else {
-            updateNote?.call(existingNoteAnnotation.id, result);
+            await Future.sync(
+              () => updateNote?.call(existingNoteAnnotation.id, result),
+            );
           }
           if (!mounted) {
             return;
@@ -3024,7 +3429,17 @@ class _ReadingCardState extends State<ReadingCard>
           _pendingNoteDraft = null;
         });
       }
-    });
+    }
+
+    Future<void> noteFlow() async {
+      final result = await routeAction();
+      await handleResult(result);
+    }
+
+    final route = widget.onNoteEditorRoute == null
+        ? noteFlow()
+        : widget.onNoteEditorRoute!<void>(noteFlow);
+    unawaited(route);
   }
 
   void _showNotePreview(
@@ -3167,6 +3582,367 @@ class _ActiveSelectionRange {
   final int end;
 
   const _ActiveSelectionRange({required this.start, required this.end});
+}
+
+class _NoteHighlightBackdrop extends StatefulWidget {
+  final TextSpan textSpan;
+  final List<_NoteDecorationRange> noteRanges;
+  final TextAlign textAlign;
+  final TextDirection textDirection;
+  final TextScaler textScaler;
+  final StrutStyle? strutStyle;
+  final ValueChanged<Highlight> onNoteTap;
+  final Widget child;
+
+  const _NoteHighlightBackdrop({
+    required this.textSpan,
+    required this.noteRanges,
+    required this.textAlign,
+    required this.textDirection,
+    required this.textScaler,
+    required this.strutStyle,
+    required this.onNoteTap,
+    required this.child,
+  });
+
+  @override
+  State<_NoteHighlightBackdrop> createState() => _NoteHighlightBackdropState();
+}
+
+class _NoteHighlightBackdropState extends State<_NoteHighlightBackdrop> {
+  final GlobalKey _paintKey = GlobalKey();
+
+  @override
+  Widget build(BuildContext context) {
+    _NoteHighlightPainter createPainter() {
+      return _NoteHighlightPainter(
+        textSpan: widget.textSpan,
+        noteRanges: widget.noteRanges,
+        textAlign: widget.textAlign,
+        textDirection: widget.textDirection,
+        textScaler: widget.textScaler,
+        strutStyle: widget.strutStyle,
+      );
+    }
+
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerUp: (event) {
+        final renderBox =
+            _paintKey.currentContext?.findRenderObject() as RenderBox?;
+        if (renderBox == null || !renderBox.hasSize) return;
+
+        final localPosition = renderBox.globalToLocal(event.position);
+        final highlight = createPainter().hitTestPaintedPadding(
+          localPosition,
+          renderBox.size,
+        );
+        if (highlight != null) {
+          widget.onNoteTap(highlight);
+        }
+      },
+      child: CustomPaint(
+        key: _paintKey,
+        painter: createPainter(),
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+class _NoteHighlightPainter extends CustomPainter {
+  static const double _horizontalPadding = 5.0;
+  static const double _cornerRadius = 7.0;
+  static const double _fullLineThreshold = 0.72;
+
+  final TextSpan textSpan;
+  final List<_NoteDecorationRange> noteRanges;
+  final TextAlign textAlign;
+  final TextDirection textDirection;
+  final TextScaler textScaler;
+  final StrutStyle? strutStyle;
+
+  const _NoteHighlightPainter({
+    required this.textSpan,
+    required this.noteRanges,
+    required this.textAlign,
+    required this.textDirection,
+    required this.textScaler,
+    required this.strutStyle,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (noteRanges.isEmpty || size.width <= 0 || size.height <= 0) return;
+
+    final textPainter = TextPainter(
+      text: textSpan,
+      textAlign: textAlign,
+      textDirection: textDirection,
+      textScaler: textScaler,
+      strutStyle: strutStyle,
+    )..layout(maxWidth: size.width);
+
+    for (final range in noteRanges) {
+      final start = range.start.clamp(0, textPainter.plainText.length).toInt();
+      final end = range.end.clamp(0, textPainter.plainText.length).toInt();
+      if (start >= end) continue;
+
+      final boxes = textPainter.getBoxesForSelection(
+        TextSelection(baseOffset: start, extentOffset: end),
+      );
+      if (boxes.isEmpty) continue;
+
+      final lineRects = _lineRectsForBoxes(
+        boxes,
+        textPainter.computeLineMetrics(),
+        size.width,
+      );
+      if (lineRects.isEmpty) continue;
+
+      final paint = Paint()
+        ..color = range.color
+        ..style = PaintingStyle.fill;
+
+      for (var i = 0; i < lineRects.length; i++) {
+        final line = lineRects[i];
+        final isSingleLine = lineRects.length == 1;
+        final isFirstLine = i == 0;
+        final isLastLine = i == lineRects.length - 1;
+        final rect = _paintRectForLine(
+          line: line,
+          lineIndex: i,
+          lineCount: lineRects.length,
+          size: size,
+        );
+        if (rect.isEmpty) continue;
+
+        const radius = Radius.circular(_cornerRadius);
+        final rrect = isSingleLine
+            ? RRect.fromRectAndRadius(rect, radius)
+            : RRect.fromLTRBAndCorners(
+                rect.left,
+                rect.top,
+                rect.right,
+                rect.bottom,
+                topLeft: isFirstLine ? radius : Radius.zero,
+                topRight: isFirstLine ? radius : Radius.zero,
+                bottomLeft: isLastLine ? radius : Radius.zero,
+                bottomRight: isLastLine ? radius : Radius.zero,
+              );
+        canvas.drawRRect(rrect, paint);
+      }
+    }
+  }
+
+  Highlight? hitTestPaintedPadding(Offset position, Size size) {
+    if (noteRanges.isEmpty || size.width <= 0 || size.height <= 0) return null;
+
+    final textPainter = TextPainter(
+      text: textSpan,
+      textAlign: textAlign,
+      textDirection: textDirection,
+      textScaler: textScaler,
+      strutStyle: strutStyle,
+    )..layout(maxWidth: size.width);
+
+    for (final range in noteRanges) {
+      final highlight = range.highlight;
+      if (highlight == null) continue;
+
+      final start = range.start.clamp(0, textPainter.plainText.length).toInt();
+      final end = range.end.clamp(0, textPainter.plainText.length).toInt();
+      if (start >= end) continue;
+
+      final boxes = textPainter.getBoxesForSelection(
+        TextSelection(baseOffset: start, extentOffset: end),
+      );
+      final lineRects = _lineRectsForBoxes(
+        boxes,
+        textPainter.computeLineMetrics(),
+        size.width,
+      );
+      for (var i = 0; i < lineRects.length; i++) {
+        final line = lineRects[i];
+        final paintRect = _paintRectForLine(
+          line: line,
+          lineIndex: i,
+          lineCount: lineRects.length,
+          size: size,
+        );
+        if (!paintRect.contains(position)) continue;
+        if (line.inflate(3).contains(position)) continue;
+        return highlight;
+      }
+    }
+
+    return null;
+  }
+
+  List<Rect> _lineRectsForBoxes(
+    List<TextBox> boxes,
+    List<LineMetrics> lineMetrics,
+    double maxWidth,
+  ) {
+    if (lineMetrics.isEmpty) {
+      return _tightLineRectsForBoxes(boxes, maxWidth);
+    }
+
+    final linesByIndex = <int, Rect>{};
+    for (final box in _sortedTextBoxes(boxes)) {
+      final rect = box.toRect();
+      if (rect.isEmpty) continue;
+      final lineIndex = _lineMetricIndexForBox(rect, lineMetrics);
+      final metrics = lineMetrics[lineIndex];
+      final lineTop = metrics.baseline - metrics.ascent;
+      final lineBottom = lineTop + metrics.height;
+      final lineRect = Rect.fromLTRB(
+        rect.left.clamp(0.0, maxWidth).toDouble(),
+        lineTop,
+        rect.right.clamp(0.0, maxWidth).toDouble(),
+        lineBottom,
+      );
+      linesByIndex[lineIndex] = linesByIndex[lineIndex] == null
+          ? lineRect
+          : linesByIndex[lineIndex]!.expandToInclude(lineRect);
+    }
+
+    final lineIndexes = linesByIndex.keys.toList()..sort();
+    return [
+      for (final index in lineIndexes)
+        _clampLineRect(linesByIndex[index]!, maxWidth),
+    ];
+  }
+
+  List<Rect> _tightLineRectsForBoxes(List<TextBox> boxes, double maxWidth) {
+    final sortedBoxes = _sortedTextBoxes(boxes);
+    final lines = <Rect>[];
+    for (final box in sortedBoxes) {
+      final rect = box.toRect();
+      if (rect.isEmpty) continue;
+      if (lines.isEmpty || (rect.top - lines.last.top).abs() > 1.5) {
+        lines.add(rect);
+      } else {
+        lines[lines.length - 1] = lines.last.expandToInclude(rect);
+      }
+    }
+
+    return [for (final line in lines) _clampLineRect(line, maxWidth)];
+  }
+
+  List<TextBox> _sortedTextBoxes(List<TextBox> boxes) {
+    return boxes.toList()..sort((a, b) {
+      final topCompare = a.top.compareTo(b.top);
+      if (topCompare != 0) return topCompare;
+      return a.left.compareTo(b.left);
+    });
+  }
+
+  int _lineMetricIndexForBox(Rect box, List<LineMetrics> metrics) {
+    final centerY = box.center.dy;
+    var closestIndex = 0;
+    var closestDistance = double.infinity;
+
+    for (var i = 0; i < metrics.length; i++) {
+      final line = metrics[i];
+      final top = line.baseline - line.ascent;
+      final bottom = top + line.height;
+      if (centerY >= top && centerY <= bottom) return i;
+
+      final distance = centerY < top ? top - centerY : centerY - bottom;
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestIndex = i;
+      }
+    }
+
+    return closestIndex;
+  }
+
+  Rect _clampLineRect(Rect line, double maxWidth) {
+    return Rect.fromLTRB(
+      line.left.clamp(0.0, maxWidth).toDouble(),
+      line.top,
+      line.right.clamp(0.0, maxWidth).toDouble(),
+      line.bottom,
+    );
+  }
+
+  Rect _paintRectForLine({
+    required Rect line,
+    required int lineIndex,
+    required int lineCount,
+    required Size size,
+  }) {
+    final isSingleLine = lineCount == 1;
+    final isFirstLine = lineIndex == 0;
+    final isLastLine = lineIndex == lineCount - 1;
+    final mostlyFull = line.width >= size.width * _fullLineThreshold;
+    final shouldExpand =
+        !isSingleLine && (!isFirstLine && !isLastLine || mostlyFull);
+
+    final left = shouldExpand ? 0.0 : line.left - _horizontalPadding;
+    final right = shouldExpand ? size.width : line.right + _horizontalPadding;
+    return Rect.fromLTRB(
+      left.clamp(0.0, size.width).toDouble(),
+      line.top.clamp(0.0, size.height).toDouble(),
+      right.clamp(0.0, size.width).toDouble(),
+      line.bottom.clamp(0.0, size.height).toDouble(),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _NoteHighlightPainter oldDelegate) {
+    return oldDelegate.textSpan != textSpan ||
+        oldDelegate.noteRanges != noteRanges ||
+        oldDelegate.textAlign != textAlign ||
+        oldDelegate.textDirection != textDirection ||
+        oldDelegate.textScaler != textScaler ||
+        oldDelegate.strutStyle != strutStyle;
+  }
+}
+
+class _ReadingTextSpanCacheKey {
+  final String text;
+  final int startOffset;
+  final BookChunk chunk;
+  final TextStyle baseStyle;
+  final TextAlign textAlign;
+  final List<Highlight> highlights;
+  final Map<String, Color> characterNames;
+
+  const _ReadingTextSpanCacheKey({
+    required this.text,
+    required this.startOffset,
+    required this.chunk,
+    required this.baseStyle,
+    required this.textAlign,
+    required this.highlights,
+    required this.characterNames,
+  });
+
+  @override
+  bool operator ==(Object other) {
+    return other is _ReadingTextSpanCacheKey &&
+        other.text == text &&
+        other.startOffset == startOffset &&
+        identical(other.chunk, chunk) &&
+        other.baseStyle == baseStyle &&
+        other.textAlign == textAlign &&
+        identical(other.highlights, highlights) &&
+        identical(other.characterNames, characterNames);
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    text,
+    startOffset,
+    identityHashCode(chunk),
+    baseStyle,
+    textAlign,
+    identityHashCode(highlights),
+    identityHashCode(characterNames),
+  );
 }
 
 class _PendingNoteDraft {

@@ -32,6 +32,7 @@ class ReadingCardDeck extends StatefulWidget {
   final int currentIndex;
   final int itemCount;
   final bool canSwipe;
+  final bool cacheCardWidgetsDuringDrag;
   final Axis axis;
   final ReadingCardDeckController? controller;
   final ValueChanged<int> onIndexChanged;
@@ -44,6 +45,7 @@ class ReadingCardDeck extends StatefulWidget {
     required this.onIndexChanged,
     required this.cardBuilder,
     this.canSwipe = true,
+    this.cacheCardWidgetsDuringDrag = false,
     this.axis = Axis.vertical,
     this.controller,
   });
@@ -71,6 +73,7 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
   bool _isTrackingSwipe = false;
   VelocityTracker? _velocityTracker;
   Timer? _swipeStartTimer;
+  final Map<_DeckCardCacheKey, Widget> _cardWidgetCache = {};
 
   @override
   void initState() {
@@ -90,6 +93,15 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller?._detach(this);
       widget.controller?._attach(this);
+    }
+    if (oldWidget.currentIndex != widget.currentIndex ||
+        oldWidget.itemCount != widget.itemCount ||
+        oldWidget.canSwipe != widget.canSwipe ||
+        oldWidget.cacheCardWidgetsDuringDrag !=
+            widget.cacheCardWidgetsDuringDrag ||
+        oldWidget.axis != widget.axis ||
+        oldWidget.cardBuilder != widget.cardBuilder) {
+      _cardWidgetCache.clear();
     }
     if (oldWidget.currentIndex != widget.currentIndex ||
         oldWidget.itemCount != widget.itemCount) {
@@ -311,7 +323,12 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
     bool isCurrent = false,
     double rotationZ = 0,
   }) {
-    final card = widget.cardBuilder(context, index, progress, isCurrent);
+    final card = widget.cacheCardWidgetsDuringDrag
+        ? _cardWidgetCache.putIfAbsent(
+            _DeckCardCacheKey(index: index, isCurrent: isCurrent),
+            () => widget.cardBuilder(context, index, 0, isCurrent),
+          )
+        : widget.cardBuilder(context, index, progress, isCurrent);
     final offset = widget.axis == Axis.vertical
         ? Offset(0, translate)
         : Offset(translate, 0);
@@ -419,4 +436,21 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
       child: ClipRect(child: Stack(children: children)),
     );
   }
+}
+
+class _DeckCardCacheKey {
+  final int index;
+  final bool isCurrent;
+
+  const _DeckCardCacheKey({required this.index, required this.isCurrent});
+
+  @override
+  bool operator ==(Object other) {
+    return other is _DeckCardCacheKey &&
+        other.index == index &&
+        other.isCurrent == isCurrent;
+  }
+
+  @override
+  int get hashCode => Object.hash(index, isCurrent);
 }

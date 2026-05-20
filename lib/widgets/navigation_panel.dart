@@ -6,6 +6,15 @@ import '../services/dictionary_service.dart';
 import 'highlight_palette_sheet.dart';
 import 'note_sheets.dart';
 
+typedef AnnotationNavigateCallback =
+    void Function(
+      int originalChunkIndex, {
+      int? originalStartOffset,
+      String? sourceText,
+    });
+
+enum AnnotationPanelTab { highlights, notes, dictionary }
+
 /// A bottom-sheet panel for "Highlights", "Notes", and "Dictionary".
 ///
 /// Previously called NavigationPanel and also included Bookmarks.
@@ -27,7 +36,7 @@ class AnnotationsPanel extends StatefulWidget {
   /// Builds the storage location label for highlights and notes.
   final String Function(int originalChunkIndex)? buildLocationLabel;
 
-  final ValueChanged<int> onNavigate;
+  final AnnotationNavigateCallback onNavigate;
 
   // ── Highlights ──
   final List<Highlight> highlights;
@@ -41,6 +50,8 @@ class AnnotationsPanel extends StatefulWidget {
   final Function(String id)? onNoteRemoved;
   final DictionaryService dictionaryService;
   final ReadingSettings? settings;
+  final AnnotationPanelTab initialTab;
+  final ValueChanged<AnnotationPanelTab>? onTabChanged;
 
   const AnnotationsPanel({
     super.key,
@@ -61,6 +72,8 @@ class AnnotationsPanel extends StatefulWidget {
     this.onNoteRemoved,
     required this.dictionaryService,
     this.settings,
+    this.initialTab = AnnotationPanelTab.highlights,
+    this.onTabChanged,
   });
 
   /// Convenience entry point — show as a modal bottom sheet.
@@ -71,7 +84,7 @@ class AnnotationsPanel extends StatefulWidget {
     required int totalDisplayPages,
     Map<int, String> chunkTexts = const {},
     String Function(int originalChunkIndex)? buildLocationLabel,
-    required ValueChanged<int> onNavigate,
+    required AnnotationNavigateCallback onNavigate,
     List<Highlight> highlights = const [],
     Function(String id)? onRemoveHighlight,
     Function(Highlight hl, Color color)? onChangeHighlightColor,
@@ -83,6 +96,8 @@ class AnnotationsPanel extends StatefulWidget {
     Function(String id)? onNoteRemoved,
     required DictionaryService dictionaryService,
     ReadingSettings? settings,
+    AnnotationPanelTab initialTab = AnnotationPanelTab.highlights,
+    ValueChanged<AnnotationPanelTab>? onTabChanged,
   }) {
     return showModalBottomSheet<void>(
       context: context,
@@ -94,9 +109,13 @@ class AnnotationsPanel extends StatefulWidget {
         totalDisplayPages: totalDisplayPages,
         chunkTexts: chunkTexts,
         buildLocationLabel: buildLocationLabel,
-        onNavigate: (index) {
+        onNavigate: (index, {int? originalStartOffset, String? sourceText}) {
           Navigator.pop(context); // close sheet first
-          onNavigate(index);
+          onNavigate(
+            index,
+            originalStartOffset: originalStartOffset,
+            sourceText: sourceText,
+          );
         },
         highlights: highlights,
         onRemoveHighlight: onRemoveHighlight,
@@ -109,6 +128,8 @@ class AnnotationsPanel extends StatefulWidget {
         onNoteRemoved: onNoteRemoved,
         dictionaryService: dictionaryService,
         settings: settings,
+        initialTab: initialTab,
+        onTabChanged: onTabChanged,
       ),
     );
   }
@@ -117,11 +138,14 @@ class AnnotationsPanel extends StatefulWidget {
   State<AnnotationsPanel> createState() => _AnnotationsPanelState();
 }
 
-class _AnnotationsPanelState extends State<AnnotationsPanel> {
+class _AnnotationsPanelState extends State<AnnotationsPanel>
+    with SingleTickerProviderStateMixin {
   // ── Local highlight state for immediate UI updates ──
   late List<Highlight> _localHighlights;
   late List<Color> _highlightPalette;
   late _PanelColors _themeColors;
+  late final TabController _tabController;
+  late AnnotationPanelTab _reportedTab;
 
   // ── Search filters ──
   final _highlightSearchController = TextEditingController();
@@ -138,6 +162,13 @@ class _AnnotationsPanelState extends State<AnnotationsPanel> {
   @override
   void initState() {
     super.initState();
+    _reportedTab = widget.initialTab;
+    _tabController = TabController(
+      length: AnnotationPanelTab.values.length,
+      vsync: this,
+      initialIndex: widget.initialTab.index,
+    );
+    _tabController.addListener(_handleTabChanged);
     _localHighlights = List.from(widget.highlights);
     _highlightPalette = widget.highlightPalette.map((color) {
       return Color(highlightColorValue(color));
@@ -159,6 +190,15 @@ class _AnnotationsPanelState extends State<AnnotationsPanel> {
     });
   }
 
+  void _handleTabChanged() {
+    final index = _tabController.index;
+    if (index < 0 || index >= AnnotationPanelTab.values.length) return;
+    final selectedTab = AnnotationPanelTab.values[index];
+    if (selectedTab == _reportedTab) return;
+    _reportedTab = selectedTab;
+    widget.onTabChanged?.call(selectedTab);
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
@@ -171,6 +211,9 @@ class _AnnotationsPanelState extends State<AnnotationsPanel> {
 
   @override
   void dispose() {
+    _tabController
+      ..removeListener(_handleTabChanged)
+      ..dispose();
     _highlightSearchController.dispose();
     _notesSearchController.dispose();
     _dictionarySearchController.dispose();
@@ -344,6 +387,7 @@ class _AnnotationsPanelState extends State<AnnotationsPanel> {
             ),
             // Tab bar
             TabBar(
+              controller: _tabController,
               labelColor: colors.text,
               unselectedLabelColor: colors.secondaryText,
               indicatorColor: colors.accent,
@@ -362,6 +406,7 @@ class _AnnotationsPanelState extends State<AnnotationsPanel> {
             // Tab views
             Expanded(
               child: TabBarView(
+                controller: _tabController,
                 children: [
                   _buildHighlightsList(),
                   _buildNotesList(),
@@ -601,7 +646,11 @@ class _AnnotationsPanelState extends State<AnnotationsPanel> {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
-          onTap: () => widget.onNavigate(hl.originalChunkIndex),
+          onTap: () => widget.onNavigate(
+            hl.originalChunkIndex,
+            originalStartOffset: hl.startOffset,
+            sourceText: hl.text,
+          ),
           onLongPress: () => _showColorPicker(context, hl),
           child: Ink(
             padding: const EdgeInsets.fromLTRB(0, 10, 8, 10),
@@ -965,7 +1014,11 @@ class _AnnotationsPanelState extends State<AnnotationsPanel> {
       locationLabel: _displayPageLabel(hl.originalChunkIndex),
       readingSettings: widget.settings,
       contextText: _getHighlightContext(hl, contextChars: 80),
-      onNavigate: () => widget.onNavigate(hl.originalChunkIndex),
+      onNavigate: () => widget.onNavigate(
+        hl.originalChunkIndex,
+        originalStartOffset: hl.startOffset,
+        sourceText: hl.text,
+      ),
       onEdit: () => _showNoteEditDialog(context, hl),
       onDelete: () {
         setState(() {
@@ -1025,6 +1078,9 @@ class _AnnotationsPanelState extends State<AnnotationsPanel> {
                         onTap: canNavigate
                             ? () => widget.onNavigate(
                                 savedWord.originalChunkIndex!,
+                                originalStartOffset:
+                                    savedWord.originalStartOffset,
+                                sourceText: savedWord.word,
                               )
                             : null,
                         child: Ink(

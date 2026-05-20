@@ -128,6 +128,62 @@ void main() {
       );
     });
 
+    test(
+      'side margins change available width without changing card margin',
+      () {
+        const narrow = ReadingSettings(sideMargin: 12);
+        const wide = ReadingSettings(sideMargin: 56);
+
+        final narrowMetrics = resolveReaderLayoutMetrics(
+          screenSize,
+          safeArea,
+          narrow,
+        );
+        final defaultMetrics = resolveReaderLayoutMetrics(
+          screenSize,
+          safeArea,
+          const ReadingSettings(),
+        );
+        final wideMetrics = resolveReaderLayoutMetrics(
+          screenSize,
+          safeArea,
+          wide,
+        );
+
+        expect(
+          narrowMetrics.availableWidth,
+          greaterThan(defaultMetrics.availableWidth),
+        );
+        expect(
+          wideMetrics.availableWidth,
+          lessThan(defaultMetrics.availableWidth),
+        );
+        expect(narrowMetrics.cardMargin, defaultMetrics.cardMargin);
+        expect(wideMetrics.cardMargin, defaultMetrics.cardMargin);
+      },
+    );
+
+    test('available width matches render formula in flat and card modes', () {
+      for (final enableCardDepth in [false, true]) {
+        final settings = ReadingSettings(
+          enableCardDepth: enableCardDepth,
+          sideMargin: 56,
+        );
+        final metrics = resolveReaderLayoutMetrics(
+          screenSize,
+          safeArea,
+          settings,
+        );
+
+        expect(
+          metrics.availableWidth,
+          screenSize.width -
+              metrics.contentPadding.horizontal -
+              metrics.cardMargin.horizontal,
+        );
+      }
+    });
+
     test('supported edge combinations keep positive bounded text budgets', () {
       const screens = <Size>[
         Size(320, 568),
@@ -271,6 +327,13 @@ void main() {
     test('returns true when only paragraphSpacing changes', () {
       const old = ReadingSettings(paragraphSpacing: 1);
       const updated = ReadingSettings(paragraphSpacing: 1.5);
+
+      expect(readerSettingsRequireDisplayChunkRebuild(old, updated), isTrue);
+    });
+
+    test('returns true when only sideMargin changes', () {
+      const old = ReadingSettings(sideMargin: 24);
+      const updated = ReadingSettings(sideMargin: 56);
 
       expect(readerSettingsRequireDisplayChunkRebuild(old, updated), isTrue);
     });

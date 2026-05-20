@@ -49,7 +49,7 @@ void main() {
     );
     expect(
       _spanForText(speedReadSpans, 'beta.').style?.color,
-      settings.readerTextColor.withValues(alpha: 0.34),
+      settings.speedReadInactiveWordColor,
     );
 
     controller.jumpToWord(1);
@@ -63,7 +63,7 @@ void main() {
     );
     expect(
       _spanForText(transitioningSpans, 'Alpha').style?.color,
-      isNot(settings.readerTextColor.withValues(alpha: 0.34)),
+      isNot(settings.speedReadInactiveWordColor),
     );
     expect(
       _spanForText(transitioningSpans, 'beta.').style?.color,
@@ -71,7 +71,7 @@ void main() {
     );
     expect(
       _spanForText(transitioningSpans, 'beta.').style?.color,
-      isNot(settings.readerTextColor.withValues(alpha: 0.34)),
+      isNot(settings.speedReadInactiveWordColor),
     );
 
     await tester.pump(const Duration(milliseconds: 140));
@@ -79,7 +79,7 @@ void main() {
     final advancedSpans = _flattenSelectableTextSpans(tester);
     expect(
       _spanForText(advancedSpans, 'Alpha').style?.color,
-      settings.readerTextColor.withValues(alpha: 0.34),
+      settings.speedReadInactiveWordColor,
     );
     expect(
       _spanForText(advancedSpans, 'beta.').style?.color,
@@ -140,6 +140,7 @@ void main() {
     const text = 'Alice met Bob.';
     const characterColor = Color(0xFF81C784);
     const regularHighlightColor = Color(0xFFFFD54F);
+    const settings = ReadingSettings();
     final controller = SpeedReadController()..start(text, 0);
     controller.pause();
 
@@ -167,7 +168,10 @@ void main() {
     );
 
     final spans = _flattenSelectableTextSpans(tester);
-    expect(_spanForText(spans, 'Alice').style?.color, characterColor);
+    expect(
+      _spanForText(spans, 'Alice').style?.color,
+      Color.lerp(characterColor, settings.readerTextColor, 0.4),
+    );
     expect(_spanForText(spans, 'Alice').style?.backgroundColor, isNull);
     expect(_spanForText(spans, 'Bob.').style?.backgroundColor, isNull);
 
@@ -180,6 +184,9 @@ void main() {
       const text = 'Alice met Bob.';
       const characterColor = Color(0xFF81C784);
       const noteColor = Color(0xFFCE93D8);
+      const settings = ReadingSettings(
+        speedReadDisplayMode: SpeedReadDisplayMode.window,
+      );
       final controller = SpeedReadController()..start(text, 0);
       controller.pause();
 
@@ -187,9 +194,7 @@ void main() {
         tester,
         text,
         controller,
-        settings: const ReadingSettings(
-          speedReadDisplayMode: SpeedReadDisplayMode.window,
-        ),
+        settings: settings,
         highlights: [
           _highlight(
             id: 'alice-character',
@@ -213,7 +218,10 @@ void main() {
 
       expect(find.byType(SpeedReadOverlay), findsOneWidget);
       final spans = _flattenSelectableTextSpans(tester);
-      expect(_spanForText(spans, 'Alice').style?.color, characterColor);
+      expect(
+        _spanForText(spans, 'Alice').style?.color,
+        Color.lerp(characterColor, settings.readerTextColor, 0.4),
+      );
       expect(_spanForText(spans, 'Alice').style?.backgroundColor, isNull);
       expect(_spanForText(spans, 'Bob.').style?.backgroundColor, isNull);
 

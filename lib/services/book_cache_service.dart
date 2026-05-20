@@ -251,6 +251,7 @@ class BookCacheService {
     required double density,
     required double lineHeight,
     required double paragraphSpacing,
+    required double sideMargin,
     required double screenW,
     required double screenH,
     required bool enableCardDepth,
@@ -260,7 +261,7 @@ class BookCacheService {
     required double safeAreaLeft,
     required double safeAreaRight,
   }) {
-    const layoutVersion = 'v10';
+    const layoutVersion = 'v11';
     final String cardModeStr = enableCardDepth ? '1' : '0';
     final String textScalerStr = textScaleFactor.toStringAsFixed(2);
     final String safeAreaStr =
@@ -269,6 +270,7 @@ class BookCacheService {
 
     return '${bookId}_dc_${layoutVersion}_${fontSize}_${fontFamily}_${fontWeight}_'
         '${density}_lineHeight_${lineHeight}_paragraphSpacing_${paragraphSpacing}_'
+        'sideMargin_${sideMargin}_'
         '${screenW.toInt()}x${screenH.toInt()}_${cardModeStr}_${textScalerStr}_$safeAreaStr';
   }
 

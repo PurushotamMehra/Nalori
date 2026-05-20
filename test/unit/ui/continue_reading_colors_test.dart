@@ -5,6 +5,8 @@ import 'package:nalori/services/cover_palette_service.dart';
 import 'package:nalori/ui/continue_reading_colors.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('ContinueReadingColors', () {
     test('fallback preserves the existing continue reading accent', () {
       final colors = ContinueReadingColors.fallback(const ReadingSettings());

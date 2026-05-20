@@ -8,6 +8,8 @@ import '../models/reading_settings.dart';
 class ReadingSettingsService {
   static const _presetsKey = 'setting_readerPresets';
   static const _hiddenBuiltInPresetsKey = 'setting_hiddenBuiltInReaderPresets';
+  static const _readerSettingsLastSectionKey =
+      'nalori.readerSettings.lastSection';
   static final settingsNotifier = ValueNotifier<ReadingSettings>(
     const ReadingSettings(),
   );
@@ -47,6 +49,7 @@ class ReadingSettingsService {
     );
     final lineHeightVal = prefs.getDouble('setting_lineHeight_val');
     final paragraphSpacingVal = prefs.getDouble('setting_paragraphSpacing_val');
+    final sideMarginVal = prefs.getDouble('setting_sideMargin_val');
     final useCustomReaderTheme = prefs.getBool('setting_useCustomReaderTheme');
     final customReaderThemeJson = prefs.getString('setting_customReaderTheme');
     final hasLegacySpeedReadSettings =
@@ -137,6 +140,7 @@ class ReadingSettingsService {
       speedReadAdaptivePacing: speedReadAdaptivePacing ?? true,
       lineHeight: lineHeightVal ?? 1.3,
       paragraphSpacing: paragraphSpacingVal ?? 1.0,
+      sideMargin: sideMarginVal ?? 24.0,
       useCustomReaderTheme: useCustomReaderTheme ?? false,
       customReaderTheme: _decodeCustomReaderTheme(customReaderThemeJson),
     );
@@ -194,6 +198,7 @@ class ReadingSettingsService {
       'setting_paragraphSpacing_val',
       settings.paragraphSpacing,
     );
+    await prefs.setDouble('setting_sideMargin_val', settings.sideMargin);
     await prefs.setBool(
       'setting_useCustomReaderTheme',
       settings.useCustomReaderTheme,
@@ -262,5 +267,15 @@ class ReadingSettingsService {
   Future<void> saveHiddenBuiltInPresetIds(Set<String> ids) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_hiddenBuiltInPresetsKey, ids.toList()..sort());
+  }
+
+  Future<String?> loadReaderSettingsLastSection() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_readerSettingsLastSectionKey);
+  }
+
+  Future<void> saveReaderSettingsLastSection(String section) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_readerSettingsLastSectionKey, section);
   }
 }

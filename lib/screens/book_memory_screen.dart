@@ -82,6 +82,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
   Future<void> _openChunk(
     int? originalChunkIndex, {
     int? originalStartOffset,
+    String? sourceText,
   }) async {
     if (originalChunkIndex == null) return;
     await Navigator.push(
@@ -90,8 +91,9 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
         builder: (_) => BookLoadingScreen(
           bookFile: widget.bookFile,
           settings: _s,
-          // initialOriginalChunkIndex: originalChunkIndex,
-          // initialOriginalStartOffset: originalStartOffset,
+          initialOriginalChunkIndex: originalChunkIndex,
+          initialOriginalStartOffset: originalStartOffset,
+          initialSourceText: sourceText,
         ),
       ),
     );
@@ -730,6 +732,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
           onGoToText: () => _openChunk(
             bookmark.chunkIndex,
             originalStartOffset: bookmark.originalStartOffset,
+            sourceText: bookmark.previewText,
           ),
           onWrite: () => _openWriting(
             sourceType: BookMemorySourceType.bookmark,
@@ -931,6 +934,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
           onGoToText: () => _openChunk(
             character.firstMarked.originalChunkIndex,
             originalStartOffset: character.firstMarked.startOffset,
+            sourceText: character.firstMarked.text,
           ),
           onWrite: () => _openWriting(
             sourceType: BookMemorySourceType.character,
@@ -971,6 +975,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
       onGoToText: () => _openChunk(
         highlight.originalChunkIndex,
         originalStartOffset: highlight.startOffset,
+        sourceText: highlight.text,
       ),
       onWrite: () => _openWriting(
         sourceType: type,
@@ -999,6 +1004,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
           ? () => _openChunk(
               word.originalChunkIndex,
               originalStartOffset: word.originalStartOffset,
+              sourceText: word.word,
             )
           : null,
       onWrite: () => _openWriting(
@@ -1276,9 +1282,11 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
       title: bookmark.name,
       subtitle: memory.locationLabel(bookmark.chunkIndex),
       body: bookmark.previewText,
+      sourceText: bookmark.previewText,
       date: _formatDate(bookmark.createdAt),
       color: bookmark.color,
       originalChunkIndex: bookmark.chunkIndex,
+      originalStartOffset: bookmark.originalStartOffset,
     );
   }
 
@@ -1295,9 +1303,11 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
       title: title,
       subtitle: memory.locationLabel(highlight.originalChunkIndex),
       body: body ?? highlight.text,
+      sourceText: highlight.text,
       date: _formatDate(highlight.createdAt),
       color: highlight.color,
       originalChunkIndex: highlight.originalChunkIndex,
+      originalStartOffset: highlight.startOffset,
       details: sourceType == BookMemorySourceType.note
           ? ['Selected text: ${highlight.text}']
           : const [],
@@ -1319,9 +1329,11 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
       body: word.contextSentence?.trim().isNotEmpty == true
           ? '${word.meaning}\n\n${word.contextSentence}'
           : word.meaning,
+      sourceText: word.word,
       date: _formatDateMillis(word.timestamp),
       color: _s.accentColor,
       originalChunkIndex: word.originalChunkIndex,
+      originalStartOffset: word.originalStartOffset,
     );
   }
 
@@ -1339,9 +1351,11 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
           '${character.count} marked moment${character.count == 1 ? '' : 's'}',
       body:
           'First marked: ${memory.locationLabel(character.firstMarked.originalChunkIndex)}',
+      sourceText: character.firstMarked.text,
       date: _formatDate(character.latestMarked.createdAt),
       color: character.first.color,
       originalChunkIndex: character.firstMarked.originalChunkIndex,
+      originalStartOffset: character.firstMarked.startOffset,
       details: [
         'Occurrences',
         'First occurrence: ${_characterOccurrenceLabel(memory, character.firstOccurrence)}',
@@ -1381,6 +1395,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
           character.firstOccurrence,
         ),
         originalStartOffset: character.firstOccurrence?.startOffset,
+        sourceText: character.firstOccurrence?.text,
         spoilerProtected: _isFutureOccurrence(
           memory,
           character.firstOccurrence,
@@ -1402,6 +1417,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
           sourceId: highlight.id,
           originalChunkIndex: highlight.originalChunkIndex,
           originalStartOffset: highlight.startOffset,
+          sourceText: highlight.text,
         ),
       ),
       BookMemoryDetailItem(
@@ -1412,6 +1428,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
             : memory.locationLabel(character.lastOccurrence!.chunkIndex),
         originalChunkIndex: character.lastOccurrence?.chunkIndex,
         originalStartOffset: character.lastOccurrence?.startOffset,
+        sourceText: character.lastOccurrence?.text,
         spoilerProtected: character.lastOccurrence != null,
       ),
       ...character.linkedHighlights.map(
@@ -1423,6 +1440,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
           sourceId: highlight.id,
           originalChunkIndex: highlight.originalChunkIndex,
           originalStartOffset: highlight.startOffset,
+          sourceText: highlight.text,
           sourcePreview: _highlightPreview(
             memory,
             highlight,
@@ -1440,6 +1458,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
           sourceId: note.id,
           originalChunkIndex: note.originalChunkIndex,
           originalStartOffset: note.startOffset,
+          sourceText: note.text,
           sourcePreview: _highlightPreview(
             memory,
             note,

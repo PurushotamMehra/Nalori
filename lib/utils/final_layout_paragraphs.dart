@@ -10,6 +10,16 @@ class FinalLayoutParagraphSegment {
   });
 }
 
+class FinalLayoutParagraphSelection {
+  final int startOffset;
+  final int endOffset;
+
+  const FinalLayoutParagraphSelection({
+    required this.startOffset,
+    required this.endOffset,
+  });
+}
+
 final RegExp finalLayoutParagraphSeparatorPattern = RegExp(
   r'(?:\r\n|\r|\n){2,}',
 );
@@ -48,6 +58,72 @@ List<FinalLayoutParagraphSegment> splitFinalLayoutParagraphSegments(
   return segments.isEmpty
       ? [FinalLayoutParagraphSegment(text: text, startOffset: 0)]
       : segments;
+}
+
+FinalLayoutParagraphSelection? mapFinalLayoutParagraphSelectionToTextRange({
+  required List<FinalLayoutParagraphSegment> segments,
+  required int selectionStart,
+  required int selectionEnd,
+}) {
+  if (segments.isEmpty) return null;
+
+  final start = selectionStart < selectionEnd ? selectionStart : selectionEnd;
+  final end = selectionStart < selectionEnd ? selectionEnd : selectionStart;
+  if (start == end) return null;
+
+  final totalLength = segments.fold<int>(
+    0,
+    (sum, segment) => sum + segment.text.length,
+  );
+  final clampedStart = start.clamp(0, totalLength);
+  final clampedEnd = end.clamp(0, totalLength);
+  if (clampedStart >= clampedEnd) return null;
+
+  final originalStart = _mapFlattenedOffsetToOriginalOffset(
+    segments,
+    clampedStart,
+    preferPreviousSegment: false,
+  );
+  final originalEnd = _mapFlattenedOffsetToOriginalOffset(
+    segments,
+    clampedEnd,
+    preferPreviousSegment: true,
+  );
+  if (originalStart == null || originalEnd == null) return null;
+  if (originalStart >= originalEnd) return null;
+
+  return FinalLayoutParagraphSelection(
+    startOffset: originalStart,
+    endOffset: originalEnd,
+  );
+}
+
+int? _mapFlattenedOffsetToOriginalOffset(
+  List<FinalLayoutParagraphSegment> segments,
+  int flattenedOffset, {
+  required bool preferPreviousSegment,
+}) {
+  var cursor = 0;
+  for (var i = 0; i < segments.length; i++) {
+    final segment = segments[i];
+    final nextCursor = cursor + segment.text.length;
+    if (flattenedOffset < nextCursor) {
+      return segment.startOffset + (flattenedOffset - cursor);
+    }
+    if (flattenedOffset == nextCursor) {
+      if (preferPreviousSegment || i == segments.length - 1) {
+        return segment.startOffset + segment.text.length;
+      }
+      return segments[i + 1].startOffset;
+    }
+    cursor = nextCursor;
+  }
+
+  final last = segments.last;
+  if (flattenedOffset == cursor) {
+    return last.startOffset + last.text.length;
+  }
+  return null;
 }
 
 double finalLayoutParagraphGap({

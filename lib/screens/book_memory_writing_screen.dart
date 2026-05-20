@@ -14,9 +14,11 @@ class BookMemorySourcePreview {
   final String title;
   final String subtitle;
   final String? body;
+  final String? sourceText;
   final String? date;
   final Color color;
   final int? originalChunkIndex;
+  final int? originalStartOffset;
   final List<String> details;
   final List<BookMemoryDetailItem> detailItems;
 
@@ -26,9 +28,11 @@ class BookMemorySourcePreview {
     required this.title,
     required this.subtitle,
     this.body,
+    this.sourceText,
     this.date,
     required this.color,
     this.originalChunkIndex,
+    this.originalStartOffset,
     this.details = const [],
     this.detailItems = const [],
   });
@@ -42,6 +46,7 @@ class BookMemoryDetailItem {
   final String? sourceId;
   final int? originalChunkIndex;
   final int? originalStartOffset;
+  final String? sourceText;
   final BookMemorySourcePreview? sourcePreview;
   final bool spoilerProtected;
 
@@ -53,6 +58,7 @@ class BookMemoryDetailItem {
     this.sourceId,
     this.originalChunkIndex,
     this.originalStartOffset,
+    this.sourceText,
     this.sourcePreview,
     this.spoilerProtected = false,
   });

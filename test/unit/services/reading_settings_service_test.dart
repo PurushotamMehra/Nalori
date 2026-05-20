@@ -34,6 +34,7 @@ void main() {
         );
         expect(result.speedReadAdaptivePacing, true);
         expect(result.paragraphSpacing, 1.0);
+        expect(result.sideMargin, 24.0);
       });
 
       test('should load saved theme', () async {
@@ -216,6 +217,7 @@ void main() {
           speedReadPageAdvanceMode: SpeedReadPageAdvanceMode.auto,
           speedReadAdaptivePacing: false,
           paragraphSpacing: 1.4,
+          sideMargin: 56.0,
         );
 
         await settingsService.saveSettings(settings);
@@ -241,6 +243,7 @@ void main() {
         expect(result.speedReadPageAdvanceMode, SpeedReadPageAdvanceMode.auto);
         expect(result.speedReadAdaptivePacing, false);
         expect(result.paragraphSpacing, 1.4);
+        expect(result.sideMargin, 56.0);
       });
 
       test('should load saved paragraph spacing', () async {
@@ -251,6 +254,16 @@ void main() {
         final result = await settingsService.loadSettings();
 
         expect(result.paragraphSpacing, 0.5);
+      });
+
+      test('should load saved side margin', () async {
+        SharedPreferences.setMockInitialValues({
+          'setting_sideMargin_val': 12.0,
+        });
+
+        final result = await settingsService.loadSettings();
+
+        expect(result.sideMargin, 12.0);
       });
 
       test('should save and restore custom reader theme', () async {

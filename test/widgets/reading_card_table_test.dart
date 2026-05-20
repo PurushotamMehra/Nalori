@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:nalori/models/book_chunk.dart';
 import 'package:nalori/models/highlight.dart';
 import 'package:nalori/models/reading_settings.dart';
+import 'package:nalori/utils/contrast_utils.dart';
 import 'package:nalori/widgets/reader_table_block.dart';
 import 'package:nalori/widgets/reading_card.dart';
 
@@ -129,16 +130,20 @@ PUT /v1/businesses/{:id} | Update details of a business''';
       settings: const ReadingSettings(lineHeight: 1, paragraphSpacing: 0),
     );
 
-    expect(find.byType(SelectableText), findsNWidgets(3));
+    expect(find.byType(SelectionArea), findsOneWidget);
+    expect(find.byType(SelectionListener), findsOneWidget);
+    expect(find.byType(SelectableText), findsNothing);
     expect(_paragraphTopGapPaddings(tester, 0), hasLength(3));
 
     await _pumpReadingCard(
       tester,
       text,
-      settings: const ReadingSettings(lineHeight: 1, paragraphSpacing: 1),
+      settings: const ReadingSettings(lineHeight: 1),
     );
 
-    expect(find.byType(SelectableText), findsNWidgets(3));
+    expect(find.byType(SelectionArea), findsOneWidget);
+    expect(find.byType(SelectionListener), findsOneWidget);
+    expect(find.byType(SelectableText), findsNothing);
     expect(_paragraphTopGapPaddings(tester, 0), hasLength(1));
     expect(_paragraphTopGapPaddings(tester, 18), hasLength(2));
 
@@ -148,7 +153,9 @@ PUT /v1/businesses/{:id} | Update details of a business''';
       settings: const ReadingSettings(lineHeight: 1, paragraphSpacing: 2),
     );
 
-    expect(find.byType(SelectableText), findsNWidgets(3));
+    expect(find.byType(SelectionArea), findsOneWidget);
+    expect(find.byType(SelectionListener), findsOneWidget);
+    expect(find.byType(SelectableText), findsNothing);
     expect(_paragraphTopGapPaddings(tester, 0), hasLength(1));
     expect(_paragraphTopGapPaddings(tester, 36), hasLength(2));
   });
@@ -190,10 +197,229 @@ PUT /v1/businesses/{:id} | Update details of a business''';
       ],
     );
 
-    expect(find.byType(SelectableText), findsNWidgets(3));
+    expect(find.byType(SelectionArea), findsOneWidget);
+    expect(find.byType(SelectionListener), findsOneWidget);
     expect(_hasHighlightedText(tester, 'Second paragraph.'), isTrue);
     expect(_hasHighlightedText(tester, 'First paragraph.'), isFalse);
   });
+
+  testWidgets('ReadingCard paints note blocks inside split paragraphs', (
+    tester,
+  ) async {
+    const text = 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.';
+    const settings = ReadingSettings();
+    final start = text.indexOf('Second paragraph.');
+    final end = start + 'Second paragraph.'.length;
+
+    await _pumpReadingCard(
+      tester,
+      text,
+      highlights: [
+        Highlight(
+          id: 'second-note',
+          originalChunkIndex: 0,
+          startOffset: start,
+          endOffset: end,
+          text: text.substring(start, end),
+          type: HighlightType.note,
+          note: 'Important',
+          createdAt: DateTime(2026, 5, 19),
+        ),
+      ],
+    );
+
+    final span = _spanForText(tester, 'Second paragraph.');
+
+    expect(find.byType(SelectionArea), findsOneWidget);
+    expect(span.style?.backgroundColor, isNull);
+    expect(
+      span.style?.color,
+      _expectedNoteForeground(settings, kHighlightColors.first),
+    );
+    expect(_hasNoteHighlightPainter(tester), isTrue);
+  });
+
+  testWidgets('ReadingCard gives dark notes a readable foreground', (
+    tester,
+  ) async {
+    const text = 'Blue note highlight uses contrast text color.';
+    const noteColor = Color(0xFF0D47A1);
+    const settings = ReadingSettings();
+
+    await _pumpReadingCard(
+      tester,
+      text,
+      highlights: [
+        Highlight(
+          id: 'blue-note',
+          originalChunkIndex: 0,
+          startOffset: 0,
+          endOffset: text.length,
+          text: text,
+          colorValue: noteColor.toARGB32(),
+          type: HighlightType.note,
+          note: 'Important',
+          createdAt: DateTime(2026, 5, 19),
+        ),
+      ],
+    );
+
+    final span = _spanForText(tester, text);
+
+    expect(span.style?.backgroundColor, isNull);
+    expect(span.style?.color, _expectedNoteForeground(settings, noteColor));
+    expect(_hasNoteHighlightPainter(tester), isTrue);
+  });
+
+  testWidgets('ReadingCard gives yellow notes dark foreground in dark mode', (
+    tester,
+  ) async {
+    const text = 'Yellow note highlight uses dark contrast text.';
+    const noteColor = Color(0xFFFFD54F);
+    const settings = ReadingSettings(appTheme: AppTheme.dark);
+
+    await _pumpReadingCard(
+      tester,
+      text,
+      settings: settings,
+      highlights: [
+        Highlight(
+          id: 'yellow-note',
+          originalChunkIndex: 0,
+          startOffset: 0,
+          endOffset: text.length,
+          text: text,
+          colorValue: noteColor.toARGB32(),
+          type: HighlightType.note,
+          note: 'Important',
+          createdAt: DateTime(2026, 5, 19),
+        ),
+      ],
+    );
+
+    final span = _spanForText(tester, text);
+
+    expect(span.style?.backgroundColor, isNull);
+    expect(span.style?.color, _expectedNoteForeground(settings, noteColor));
+    expect(span.style!.color!.computeLuminance(), lessThan(0.5));
+    expect(_hasNoteHighlightPainter(tester), isTrue);
+  });
+
+  testWidgets(
+    'ReadingCard treats regular highlights with notes as note blocks',
+    (tester) async {
+      const text = 'Attached note highlight keeps reader text color.';
+      const noteColor = Color(0xFF4A148C);
+      const settings = ReadingSettings();
+
+      await _pumpReadingCard(
+        tester,
+        text,
+        highlights: [
+          Highlight(
+            id: 'attached-note',
+            originalChunkIndex: 0,
+            startOffset: 0,
+            endOffset: text.length,
+            text: text,
+            colorValue: noteColor.toARGB32(),
+            note: 'Attached note',
+            createdAt: DateTime(2026, 5, 19),
+          ),
+        ],
+      );
+
+      final span = _spanForText(tester, text);
+
+      expect(span.style?.backgroundColor, isNull);
+      expect(span.style?.color, _expectedNoteForeground(settings, noteColor));
+      expect(_hasNoteHighlightPainter(tester), isTrue);
+    },
+  );
+
+  testWidgets('ReadingCard keeps regular highlight foreground unchanged', (
+    tester,
+  ) async {
+    const text = 'Regular highlight stays lightweight.';
+    const highlightColor = Color(0xFF0D47A1);
+    const settings = ReadingSettings();
+
+    await _pumpReadingCard(
+      tester,
+      text,
+      highlights: [
+        Highlight(
+          id: 'regular-blue',
+          originalChunkIndex: 0,
+          startOffset: 0,
+          endOffset: text.length,
+          text: text,
+          colorValue: highlightColor.toARGB32(),
+          createdAt: DateTime(2026, 5, 19),
+        ),
+      ],
+    );
+
+    final span = _spanForText(tester, text);
+
+    expect(span.style?.backgroundColor, highlightColor.withValues(alpha: 0.3));
+    expect(span.style?.color, settings.readerTextColor);
+  });
+
+  testWidgets('ReadingCard toggles reader controls when split text is tapped', (
+    tester,
+  ) async {
+    const text = 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.';
+    var tapCount = 0;
+
+    await _pumpReadingCard(
+      tester,
+      text,
+      onTapOutside: (_) {
+        tapCount++;
+      },
+    );
+
+    await tester.tap(_richTextWithPlainText('Second paragraph.'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(tapCount, 1);
+  });
+
+  testWidgets(
+    'ReadingCard does not toggle reader controls on split text long press',
+    (tester) async {
+      const text = 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.';
+      var tapCount = 0;
+
+      await _pumpReadingCard(
+        tester,
+        text,
+        onTapOutside: (_) {
+          tapCount++;
+        },
+      );
+
+      await tester.longPress(_richTextWithPlainText('Second paragraph.'));
+      await tester.pumpAndSettle();
+
+      expect(tapCount, 0);
+    },
+  );
+
+  testWidgets(
+    'ReadingCard does not wrap inactive split paragraphs in selection area',
+    (tester) async {
+      const text = 'First paragraph.\n\nSecond paragraph.\n\nThird paragraph.';
+
+      await _pumpReadingCard(tester, text, isActivePage: false);
+
+      expect(find.byType(SelectionArea), findsNothing);
+      expect(find.byType(SelectionListener), findsNothing);
+      expect(find.byType(RichText), findsWidgets);
+    },
+  );
 
   testWidgets('ReadingCard keeps default paragraph block spacing unchanged', (
     tester,
@@ -255,6 +481,8 @@ Future<void> _pumpReadingCard(
   String text, {
   ReadingSettings settings = const ReadingSettings(),
   List<Highlight> highlights = const [],
+  bool isActivePage = true,
+  void Function(Offset? globalPosition)? onTapOutside,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -266,6 +494,8 @@ Future<void> _pumpReadingCard(
             chunk: BookChunk(index: 0, type: BookChunkType.text, text: text),
             settings: settings,
             highlights: highlights,
+            isActivePage: isActivePage,
+            onTapOutside: onTapOutside,
           ),
         ),
       ),
@@ -277,7 +507,7 @@ List<Padding> _paragraphPaddings(WidgetTester tester, double verticalPadding) {
   return tester
       .widgetList<Padding>(
         find.ancestor(
-          of: find.byType(SelectableText),
+          of: _readerSelectableTextContent(),
           matching: find.byType(Padding),
         ),
       )
@@ -297,7 +527,7 @@ List<Padding> _paragraphTopGapPaddings(WidgetTester tester, double topPadding) {
   return tester
       .widgetList<Padding>(
         find.ancestor(
-          of: find.byType(SelectableText),
+          of: _readerSelectableTextContent(),
           matching: find.byType(Padding),
         ),
       )
@@ -320,7 +550,59 @@ bool _hasHighlightedText(WidgetTester tester, String text) {
         final span = widget.textSpan;
         if (span != null) yield* _flattenTextSpans(span);
       })
+      .followedBy(
+        tester.widgetList<Text>(find.byType(Text)).expand((widget) sync* {
+          final span = widget.textSpan;
+          if (span != null) yield* _flattenTextSpans(span);
+        }),
+      )
       .any((span) => span.text == text && span.style?.backgroundColor != null);
+}
+
+TextSpan _spanForText(WidgetTester tester, String text) {
+  return tester
+      .widgetList<SelectableText>(find.byType(SelectableText))
+      .expand((widget) sync* {
+        final span = widget.textSpan;
+        if (span != null) yield* _flattenTextSpans(span);
+      })
+      .followedBy(
+        tester.widgetList<Text>(find.byType(Text)).expand((widget) sync* {
+          final span = widget.textSpan;
+          if (span != null) yield* _flattenTextSpans(span);
+        }),
+      )
+      .firstWhere((span) => span.text == text);
+}
+
+bool _hasNoteHighlightPainter(WidgetTester tester) {
+  return tester
+      .widgetList<CustomPaint>(find.byType(CustomPaint))
+      .any(
+        (widget) =>
+            widget.painter?.runtimeType.toString() == '_NoteHighlightPainter',
+      );
+}
+
+Color _expectedNoteForeground(ReadingSettings settings, Color noteColor) {
+  final paintedColor = noteColor.withValues(
+    alpha: settings.isDark ? 0.80 : 0.56,
+  );
+  return readableForegroundForBackground(
+    compositeColorOver(paintedColor, settings.backgroundColor),
+  );
+}
+
+Finder _readerSelectableTextContent() {
+  return find.byWidgetPredicate(
+    (widget) => widget is SelectableText || widget is Text,
+  );
+}
+
+Finder _richTextWithPlainText(String text) {
+  return find.byWidgetPredicate(
+    (widget) => widget is Text && widget.textSpan?.toPlainText() == text,
+  );
 }
 
 Iterable<TextSpan> _flattenTextSpans(InlineSpan span) sync* {

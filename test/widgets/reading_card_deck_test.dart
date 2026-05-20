@@ -251,6 +251,54 @@ void main() {
     expect(disposeCount, 0);
   });
 
+  testWidgets('drag transforms reuse existing card widgets', (tester) async {
+    var buildCount = 0;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 320,
+            height: 560,
+            child: ReadingCardDeck(
+              currentIndex: 0,
+              itemCount: 4,
+              cacheCardWidgetsDuringDrag: true,
+              onIndexChanged: (_) {},
+              cardBuilder: (context, index, progress, isCurrent) {
+                buildCount++;
+                return Center(
+                  child: Container(
+                    key: ValueKey('card-$index'),
+                    width: 260,
+                    height: 420,
+                    alignment: Alignment.center,
+                    color: isCurrent ? Colors.white : Colors.grey.shade300,
+                    child: Text('Card $index'),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+
+    final initialBuildCount = buildCount;
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(ReadingCardDeck)),
+    );
+    await gesture.moveBy(const Offset(0, -90));
+    await tester.pump();
+    await gesture.moveBy(const Offset(0, -60));
+    await tester.pump();
+
+    expect(buildCount, initialBuildCount);
+
+    await gesture.up();
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('horizontal swipe left changes to the next card', (tester) async {
     var latest = 0;
     await tester.pumpWidget(

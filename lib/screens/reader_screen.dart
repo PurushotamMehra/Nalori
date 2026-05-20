@@ -1,5 +1,12 @@
-import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart'
+    show
+        PointerDownEvent,
+        PointerMoveEvent,
+        PointerUpEvent,
+        kLongPressTimeout,
+        kTouchSlop;
+import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -10,6 +17,7 @@ import '../models/bookmark.dart';
 import '../models/highlight.dart';
 import '../models/quote_share_payload.dart';
 import '../models/reading_settings.dart';
+import '../models/reader_position_session.dart';
 import '../services/bookmark_service.dart';
 import '../services/dictionary_service.dart';
 import '../services/highlight_palette_service.dart';
@@ -46,6 +54,9 @@ class ReaderScreen extends StatefulWidget {
   final Map<String, int> anchorMap;
   final List<ChapterInfo> chapters;
   final Map<String, List<int>> searchIndex;
+  final int? initialOriginalChunkIndex;
+  final int? initialOriginalStartOffset;
+  final String? initialSourceText;
 
   const ReaderScreen({
     super.key,
@@ -55,6 +66,9 @@ class ReaderScreen extends StatefulWidget {
     required this.anchorMap,
     required this.chapters,
     required this.searchIndex,
+    this.initialOriginalChunkIndex,
+    this.initialOriginalStartOffset,
+    this.initialSourceText,
   });
 
   @override
@@ -66,6 +80,8 @@ class ReaderScreen extends StatefulWidget {
 const double kBoundaryTop = 14.0;
 const double kBoundaryBottom = 16.0;
 const double kContentPaddingH = 24.0;
+const double kReaderSideMarginMin = 12.0;
+const double kReaderSideMarginMax = 56.0;
 const double kReaderCardDepthInsetH = 18.0;
 const double kReaderCardDepthInsetTop = 28.0;
 const double kReaderCardDepthInsetBottom = 42.0;
@@ -101,6 +117,78 @@ EdgeInsets readerCardMargin(ReadingSettings settings) {
     isFullPage ? 14.0 : kReaderCardDepthInsetH,
     isFullPage ? 34.0 : kReaderCardDepthInsetBottom,
   );
+}
+
+bool isChapterOneLikeTitle(String title) {
+  final normalized = title
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[_\-]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ');
+  if (normalized.isEmpty) return false;
+
+  return RegExp(r'^(chapter\s+)?(1|one|i)(\s*[:.\-].*)?$').hasMatch(normalized);
+}
+
+bool isFrontMatterTitle(String title) {
+  final normalized = title
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[_\-]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ');
+  if (normalized.isEmpty) return false;
+
+  const frontMatterTitles = {
+    'about the author',
+    'acknowledgements',
+    'acknowledgments',
+    'also by',
+    'author note',
+    'authors note',
+    'bibliography',
+    'contents',
+    'copyright',
+    'cover',
+    'dedication',
+    'epigraph',
+    'foreword',
+    'front matter',
+    'introduction',
+    'preface',
+    'prologue',
+    'table of contents',
+    'title page',
+  };
+
+  if (frontMatterTitles.contains(normalized)) return true;
+  return normalized.startsWith('about ') ||
+      normalized.startsWith('copyright ') ||
+      normalized.startsWith('contents ');
+}
+
+ChapterInfo? detectFirstReadingChapter(List<ChapterInfo> chapters) {
+  ChapterInfo? firstNonFrontMatter;
+
+  ChapterInfo? walk(List<ChapterInfo> items) {
+    for (final chapter in items) {
+      if (isChapterOneLikeTitle(chapter.title)) return chapter;
+      if (!isFrontMatterTitle(chapter.title) && firstNonFrontMatter == null) {
+        firstNonFrontMatter = chapter;
+      }
+
+      final childMatch = walk(chapter.children);
+      if (childMatch != null) return childMatch;
+    }
+    return null;
+  }
+
+  return walk(chapters) ?? firstNonFrontMatter;
+}
+
+double readerHorizontalContentPadding(ReadingSettings settings) {
+  return settings.sideMargin
+      .clamp(kReaderSideMarginMin, kReaderSideMarginMax)
+      .toDouble();
 }
 
 @immutable
@@ -184,10 +272,11 @@ ReaderLayoutMetrics resolveReaderLayoutMetrics(
   final depthFooterReserve = settings.enableCardDepth
       ? kReaderCardDepthFooterReserve
       : 0.0;
+  final horizontalContentPadding = readerHorizontalContentPadding(settings);
   final contentPadding = EdgeInsets.fromLTRB(
-    safeArea.left + kContentPaddingH,
+    safeArea.left + horizontalContentPadding,
     safeArea.top + readerBoundaryTopInset(settings) + depthHeaderReserve,
-    safeArea.right + kContentPaddingH,
+    safeArea.right + horizontalContentPadding,
     safeArea.bottom + readerBoundaryBottomInset(settings) + depthFooterReserve,
   );
   final cardMargin = readerCardMargin(settings);
@@ -301,6 +390,7 @@ bool readerSettingsRequireDisplayChunkRebuild(
       old.contentDensity != updated.contentDensity ||
       old.lineHeight != updated.lineHeight ||
       old.paragraphSpacing != updated.paragraphSpacing ||
+      old.sideMargin != updated.sideMargin ||
       old.enableCardDepth != updated.enableCardDepth;
 }
 
@@ -462,6 +552,8 @@ class _ReaderScreenState extends State<ReaderScreen>
   EdgeInsets? _lastSafeArea;
   TextScaler? _lastTextScaler;
   bool _isReaderLifecycleActive = true;
+  bool _hasDeferredRestoreWhileInactive = false;
+  int? _deferredRestoreNavigationGeneration;
   int _readerSurfaceBlockCount = 0;
   bool _cardInteractionBlocked = false;
 
@@ -509,6 +601,7 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   // Cached preferences to avoid repeated async lookups
   SharedPreferences? _prefs;
+  AnnotationPanelTab _lastAnnotationsTab = AnnotationPanelTab.highlights;
 
   // Display chunk caching
   final _bookCacheService = BookCacheService();
@@ -531,8 +624,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   _PageAnchor? _positionAnchor;
   List<int> _targetOriginalCandidates = const [];
   bool _hasPendingSettingsRestore = false;
+  bool _hasResolvedInitialLocation = false;
 
   static const int _positionAnchorLength = 120;
+  static const String _readerDrawerLastTabKeySuffix = '.readerDrawer.lastTab';
 
   // Live scale for Transform.scale visual feedback during slider drag
   double _liveScale = 1.0;
@@ -543,6 +638,16 @@ class _ReaderScreenState extends State<ReaderScreen>
   bool _showReaderGestureHint = false;
   bool _readerGestureHintCheckStarted = false;
   Timer? _readerGestureHintTimer;
+  Timer? _readerViewportLongPressTimer;
+  Timer? _readerViewportDeferredTapTimer;
+  Offset? _readerViewportPointerDownPosition;
+  int? _readerViewportPointer;
+  int _readerViewportTapGeneration = 0;
+  int? _readerViewportTapHandledGeneration;
+  int? _readerViewportTapSuppressedGeneration;
+  DateTime? _readerViewportTapSuppressedUntil;
+  bool _readerViewportPointerMoved = false;
+  bool _readerViewportPointerHeld = false;
   Timer? _hardwarePageRepeatStartTimer;
   Timer? _hardwarePageRepeatTimer;
   int? _hardwarePageRepeatDelta;
@@ -551,12 +656,15 @@ class _ReaderScreenState extends State<ReaderScreen>
   final List<PositionHistory> _positionStack = [];
   Timer? _dwellTimer;
   Timer? _positionSaveTimer;
+  Timer? _previewPromotionTimer;
   int? _pendingPositionSaveIndex;
+  int? _pendingPreviewJumpDisplayIndex;
   bool _isScrubbing = false;
   int? _scrubStartDisplayIndex;
   int? _scrubPreviewDisplayIndex;
   int? _lastDwellPage;
   DateTime? _readingSessionStartedAt;
+  final ReaderPositionSession _positionSession = ReaderPositionSession();
   final ValueNotifier<PositionHistory?> _positionHistoryNotifier =
       ValueNotifier(null);
 
@@ -654,7 +762,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     _readerControlsChannel.setMethodCallHandler(null);
     unawaited(_setNativeReaderControls(readerVisible: false));
     _dwellTimer?.cancel();
+    _previewPromotionTimer?.cancel();
     _readerGestureHintTimer?.cancel();
+    _readerViewportLongPressTimer?.cancel();
+    _readerViewportDeferredTapTimer?.cancel();
     _stopHardwarePagePress();
     _positionSaveTimer?.cancel();
     unawaited(_flushReaderPersistence(includeCurrentPosition: true));
@@ -680,17 +791,19 @@ class _ReaderScreenState extends State<ReaderScreen>
       case AppLifecycleState.paused:
       case AppLifecycleState.detached:
         _isReaderLifecycleActive = false;
+        _dwellTimer?.cancel();
+        _previewPromotionTimer?.cancel();
         _stopHardwarePagePress();
         if (_speedReadController.isActive && !_speedReadController.isPaused) {
           _speedReadController.pause();
           _speedReadLifecycleAutoPaused = true;
         }
         unawaited(_syncNativeReaderControlsState());
-        _syncRestoreTargetFromDisplayIndex(_currentPage);
         unawaited(_flushReaderPersistence(includeCurrentPosition: true));
         break;
       case AppLifecycleState.resumed:
         _isReaderLifecycleActive = true;
+        _applyDeferredRestoreAfterResume();
         unawaited(_syncNativeReaderControlsState());
         _startReadingSession();
         if (_speedReadLifecycleAutoPaused) {
@@ -724,9 +837,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     bool includeCurrentPosition = false,
   }) async {
     if (includeCurrentPosition &&
+        _positionSession.canCommitActiveVisiblePosition &&
         _displayChunks.isNotEmpty &&
         _displayToOriginal.isNotEmpty) {
-      _pendingPositionSaveIndex = _currentPage.clamp(
+      _pendingPositionSaveIndex = _positionSession.activeVisiblePosition.clamp(
         0,
         _displayToOriginal.length - 1,
       );
@@ -769,13 +883,57 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   bool get _usesInteractiveCardDeck => _settings.enableCardDepth;
 
-  void _jumpReaderToPage(int targetIndex) {
+  void _cancelPreviewPromotionTimer() {
+    _previewPromotionTimer?.cancel();
+    _previewPromotionTimer = null;
+  }
+
+  void _schedulePreviewPromotion(int displayIndex) {
+    _cancelPreviewPromotionTimer();
+    _previewPromotionTimer = Timer(const Duration(seconds: 4), () {
+      if (!mounted ||
+          !_isReaderLifecycleActive ||
+          _positionSession.isScrubbing ||
+          _positionSession.previewPosition != displayIndex ||
+          _positionSession.activeVisiblePosition != displayIndex) {
+        return;
+      }
+      _promotePreviewToCommitted();
+    });
+  }
+
+  void _promotePreviewToCommitted() {
+    final promoted = _positionSession.promotePreview();
+    if (promoted == null) return;
+    _isScrubbing = false;
+    _scrubPreviewDisplayIndex = null;
+    _scrubStartDisplayIndex = null;
+    _pendingPreviewJumpDisplayIndex = null;
+    _cancelPreviewPromotionTimer();
+    _runCommittedPageEffects(promoted);
+  }
+
+  void _clearPreviewState({int? visibleDisplayIndex}) {
+    _positionSession.clearPreview(visibleDisplayIndex: visibleDisplayIndex);
+    _isScrubbing = false;
+    _scrubPreviewDisplayIndex = null;
+    _scrubStartDisplayIndex = null;
+    _pendingPreviewJumpDisplayIndex = null;
+    _cancelPreviewPromotionTimer();
+  }
+
+  void _jumpReaderToPage(int targetIndex, {bool asPreview = false}) {
     if (_displayChunks.isEmpty) return;
     final clamped = targetIndex.clamp(0, _displayChunks.length - 1);
+    if (asPreview) {
+      _pendingPreviewJumpDisplayIndex = clamped;
+      _positionSession.updatePreview(clamped);
+    }
     if (_usesInteractiveCardDeck || _pageController?.hasClients != true) {
       if (_currentPage != clamped ||
           _activeDisplayIndex != clamped ||
-          _isScrubbing) {
+          _isScrubbing ||
+          asPreview) {
         _onPageChanged(clamped);
       }
       return;
@@ -894,6 +1052,144 @@ class _ReaderScreenState extends State<ReaderScreen>
     } finally {
       _unblockReaderControls();
     }
+  }
+
+  _ReaderVisiblePositionSnapshot _captureVisibleReaderPosition({
+    int? preferredDisplayIndex,
+  }) {
+    if (_displayChunks.isEmpty) {
+      return const _ReaderVisiblePositionSnapshot(displayIndex: 0);
+    }
+
+    final displayIndex = (preferredDisplayIndex ?? _activeDisplayIndex).clamp(
+      0,
+      _displayChunks.length - 1,
+    );
+    final chunk = _displayChunks[displayIndex];
+    final originals = displayIndex < _displayToOriginal.length
+        ? List<int>.from(_displayToOriginal[displayIndex])
+        : const <int>[];
+
+    double? controllerPage;
+    final controller = _pageController;
+    if (!_usesInteractiveCardDeck && controller?.hasClients == true) {
+      controllerPage = controller!.page;
+    }
+
+    return _ReaderVisiblePositionSnapshot(
+      displayIndex: displayIndex,
+      pageControllerPage: controllerPage,
+      pageControllerIndex: controllerPage?.round(),
+      sourceAnchor: _buildPageAnchor(chunk),
+      sourceOriginalCandidates: originals,
+      displayChunkCount: _displayChunks.length,
+      cardMode: _settings.enableCardDepth,
+      densityMultiplier: _settings.densityMultiplier,
+      hasPreferredDisplayIndex: preferredDisplayIndex != null,
+    );
+  }
+
+  Future<T> _runWithReaderPositionPreserved<T>(
+    Future<T> Function() action, {
+    int? visibleDisplayIndex,
+  }) async {
+    final capturedPosition = _captureVisibleReaderPosition(
+      preferredDisplayIndex: visibleDisplayIndex,
+    );
+    final capturedIndex = capturedPosition.displayIndex;
+    _cancelPreviewPromotionTimer();
+    _positionSaveTimer?.cancel();
+    _pendingPositionSaveIndex = null;
+    _pendingPreviewJumpDisplayIndex = null;
+    _positionSession.beginModalState(capturedIndex);
+    if (_isScrubbing || _scrubPreviewDisplayIndex != null) {
+      setState(() {
+        _isScrubbing = false;
+        _scrubPreviewDisplayIndex = null;
+        _scrubStartDisplayIndex = null;
+      });
+    }
+
+    try {
+      return await _runWithReaderControlsSuspended(action);
+    } finally {
+      _positionSession.endModalState();
+      final restoreIndex = _resolveVisibleReaderPosition(capturedPosition);
+      if (mounted) {
+        _restoreVisibleReaderPosition(restoreIndex, scheduleFollowUp: true);
+      }
+    }
+  }
+
+  int _resolveVisibleReaderPosition(_ReaderVisiblePositionSnapshot snapshot) {
+    if (_displayChunks.isEmpty) return 0;
+
+    final index = snapshot.displayIndex.clamp(0, _displayChunks.length - 1);
+    final layoutUnchanged =
+        snapshot.displayChunkCount == _displayChunks.length &&
+        snapshot.cardMode == _settings.enableCardDepth &&
+        snapshot.densityMultiplier == _settings.densityMultiplier;
+    final controllerIndex = snapshot.pageControllerIndex;
+    final controllerPage = snapshot.pageControllerPage;
+    final controllerIsSettled =
+        controllerIndex != null &&
+        controllerPage != null &&
+        (controllerPage - controllerIndex).abs() < 0.01;
+    if (layoutUnchanged) {
+      if (!snapshot.hasPreferredDisplayIndex &&
+          snapshot.cardMode == false &&
+          controllerIsSettled) {
+        return controllerIndex.clamp(0, _displayChunks.length - 1);
+      }
+      return index;
+    }
+
+    final anchor = snapshot.sourceAnchor;
+    final candidates = snapshot.sourceOriginalCandidates;
+    if (anchor != null && candidates.isNotEmpty) {
+      return _findDisplayIndexForAnchor(
+        anchor: anchor,
+        preferredOriginalIndex: candidates.first,
+        expectedDisplayIndex: index,
+        preferredOriginalCandidates: candidates,
+      ).clamp(0, _displayChunks.length - 1);
+    }
+
+    return _findNearestByOriginalOverlap(
+      expectedDisplayIndex: index,
+      preferredOriginalCandidates: candidates,
+    ).clamp(0, _displayChunks.length - 1);
+  }
+
+  void _restoreVisibleReaderPosition(
+    int index, {
+    bool scheduleFollowUp = false,
+  }) {
+    if (_displayChunks.isEmpty) return;
+    final clamped = index.clamp(0, _displayChunks.length - 1);
+    _currentPage = clamped;
+    _activeDisplayIndex = clamped;
+    _positionSession.markVisible(clamped);
+    _syncRestoreTargetFromDisplayIndex(clamped);
+
+    if (scheduleFollowUp) {
+      final restoreGeneration = _positionSession.navigationGeneration;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            _positionSession.navigationGeneration != restoreGeneration) {
+          return;
+        }
+        _restoreVisibleReaderPosition(clamped);
+      });
+    }
+
+    if (_usesInteractiveCardDeck || _pageController?.hasClients != true) {
+      setState(() {});
+      return;
+    }
+
+    _pageController!.jumpToPage(clamped);
+    setState(() {});
   }
 
   void _startHardwarePagePress(int delta) {
@@ -1121,12 +1417,18 @@ class _ReaderScreenState extends State<ReaderScreen>
     _prefs = await SharedPreferences.getInstance();
     final key = 'last_read_${widget.bookId}';
     int lastIndex = _prefs!.getInt(key) ?? 0;
+    final savedAnnotationsTab = _annotationPanelTabFromName(
+      _prefs!.getString(_readerDrawerLastTabKey),
+    );
 
     if (metadata != null && metadata.lastReadIndex > 0) {
       lastIndex = metadata.lastReadIndex;
     }
 
-    _targetOriginalIndex = lastIndex.clamp(0, widget.chunks.length - 1);
+    final initialOriginalChunkIndex = widget.initialOriginalChunkIndex;
+    _targetOriginalIndex = (initialOriginalChunkIndex ?? lastIndex)
+        .clamp(0, widget.chunks.length - 1)
+        .toInt();
 
     final bookmarks = await _bookmarkService.load();
     final defaultBookmarkColor = await _bookmarkService.loadDefaultColorIndex();
@@ -1155,6 +1457,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       _defaultHighlightColor = Color(
         highlightColorValue(defaultHighlightColor),
       );
+      _lastAnnotationsTab =
+          savedAnnotationsTab ?? AnnotationPanelTab.highlights;
       _settings = settings.copyWith(
         readerTheme: metadataRaw?.theme,
         clearReaderTheme: metadataRaw?.theme == null,
@@ -1223,6 +1527,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       density: _settings.densityMultiplier,
       lineHeight: _settings.lineHeight,
       paragraphSpacing: _settings.paragraphSpacing,
+      sideMargin: _settings.sideMargin,
       screenW: screenSize.width,
       screenH: screenSize.height,
       enableCardDepth: _settings.enableCardDepth,
@@ -1258,6 +1563,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   ) async {
     _rebuildGeneration++;
     final thisGen = _rebuildGeneration;
+    final restoreNavigationGeneration = _positionSession.navigationGeneration;
     if (kDebugMode) {
       debugPrint('[_loadOrRebuildDisplayChunks] start gen=$thisGen');
     }
@@ -1291,7 +1597,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       _originalToDisplay
         ..clear()
         ..addAll(cached.originalToDisplay);
-      _restorePosition();
+      _restorePosition(restoreNavigationGeneration);
       return;
     }
 
@@ -1306,12 +1612,173 @@ class _ReaderScreenState extends State<ReaderScreen>
       textScaler,
       cacheKey,
       thisGen,
+      restoreNavigationGeneration,
     );
+  }
+
+  int? _displayIndexForSourceLocation({
+    required int originalChunkIndex,
+    int? originalStartOffset,
+    String? sourceText,
+  }) {
+    final offsetMatch = originalStartOffset == null
+        ? null
+        : _displayIndexContainingOriginalOffset(
+            originalChunkIndex,
+            originalStartOffset,
+          );
+    if (offsetMatch != null) return offsetMatch;
+
+    final normalizedSource = _normalizeLocatorText(sourceText);
+    if (normalizedSource.isNotEmpty) {
+      final snippetOffset = _offsetForSourceText(
+        originalChunkIndex,
+        normalizedSource,
+      );
+      if (snippetOffset != null) {
+        final snippetMatch = _displayIndexContainingOriginalOffset(
+          originalChunkIndex,
+          snippetOffset,
+        );
+        if (snippetMatch != null) return snippetMatch;
+      }
+
+      final textMatch = _displayIndexContainingSourceText(
+        originalChunkIndex,
+        normalizedSource,
+      );
+      if (textMatch != null) return textMatch;
+    }
+
+    final nearestOffset = originalStartOffset == null
+        ? null
+        : _displayIndexNearestOriginalOffset(
+            originalChunkIndex,
+            originalStartOffset,
+          );
+    return nearestOffset ?? _originalToDisplay[originalChunkIndex];
+  }
+
+  int? _displayIndexContainingOriginalOffset(
+    int originalChunkIndex,
+    int originalStartOffset,
+  ) {
+    for (
+      var displayIndex = 0;
+      displayIndex < _displayChunks.length;
+      displayIndex++
+    ) {
+      for (final range in _displayChunks[displayIndex].effectiveSourceRanges) {
+        if (range.originalChunkIndex != originalChunkIndex) continue;
+        final containsOffset =
+            originalStartOffset >= range.originalStartOffset &&
+            originalStartOffset < range.originalEndOffset;
+        if (containsOffset) return displayIndex;
+      }
+    }
+    return null;
+  }
+
+  int? _displayIndexNearestOriginalOffset(
+    int originalChunkIndex,
+    int originalStartOffset,
+  ) {
+    int? bestDisplayIndex;
+    var bestDistance = 1 << 30;
+
+    for (
+      var displayIndex = 0;
+      displayIndex < _displayChunks.length;
+      displayIndex++
+    ) {
+      for (final range in _displayChunks[displayIndex].effectiveSourceRanges) {
+        if (range.originalChunkIndex != originalChunkIndex) continue;
+        final distance = originalStartOffset < range.originalStartOffset
+            ? range.originalStartOffset - originalStartOffset
+            : originalStartOffset - range.originalEndOffset;
+        final normalizedDistance = distance < 0 ? 0 : distance;
+        if (normalizedDistance < bestDistance) {
+          bestDistance = normalizedDistance;
+          bestDisplayIndex = displayIndex;
+        }
+      }
+    }
+
+    return bestDisplayIndex;
+  }
+
+  int? _displayIndexContainingSourceText(
+    int originalChunkIndex,
+    String normalizedSource,
+  ) {
+    for (
+      var displayIndex = 0;
+      displayIndex < _displayChunks.length;
+      displayIndex++
+    ) {
+      final chunk = _displayChunks[displayIndex];
+      final ranges = chunk.effectiveSourceRanges;
+      if (!ranges.any(
+        (range) => range.originalChunkIndex == originalChunkIndex,
+      )) {
+        continue;
+      }
+      final displayText = _normalizeLocatorText(chunk.text);
+      if (displayText.isEmpty) continue;
+      if (displayText.contains(normalizedSource) ||
+          (displayText.length >= 20 &&
+              normalizedSource.contains(displayText))) {
+        return displayIndex;
+      }
+    }
+    return null;
+  }
+
+  int? _offsetForSourceText(int originalChunkIndex, String normalizedSource) {
+    final source = _chunkByOriginalIndex(originalChunkIndex);
+    final text = source?.text;
+    if (text == null || text.isEmpty) return null;
+    final normalizedText = _normalizeLocatorText(text);
+    final normalizedOffset = normalizedText.indexOf(normalizedSource);
+    if (normalizedOffset < 0) return null;
+    return _approximateOriginalOffsetForNormalizedOffset(
+      text,
+      normalizedOffset,
+    );
+  }
+
+  int _approximateOriginalOffsetForNormalizedOffset(
+    String text,
+    int normalizedOffset,
+  ) {
+    if (normalizedOffset <= 0) return 0;
+    var normalizedCount = 0;
+    var previousWasWhitespace = true;
+    for (var i = 0; i < text.length; i++) {
+      final isWhitespace = text[i].trim().isEmpty;
+      if (isWhitespace) {
+        if (!previousWasWhitespace) {
+          if (normalizedCount == normalizedOffset) return i;
+          normalizedCount++;
+        }
+        previousWasWhitespace = true;
+        continue;
+      }
+
+      if (normalizedCount == normalizedOffset) return i;
+      normalizedCount++;
+      previousWasWhitespace = false;
+    }
+    return text.length;
+  }
+
+  String _normalizeLocatorText(String? text) {
+    return (text ?? '').toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim();
   }
 
   /// Restore the reading position after display chunks change.
   /// Uses text-anchor matching first, then falls back to index/ratio-based positioning.
-  void _restorePosition() {
+  void _restorePosition(int restoreNavigationGeneration) {
     if (_displayChunks.isEmpty) {
       _currentPage = 0;
       _hasCompletedDisplayChunkBuild = true;
@@ -1329,6 +1796,38 @@ class _ReaderScreenState extends State<ReaderScreen>
       } else {
         setState(() {});
       }
+      return;
+    }
+
+    if (_shouldDeferVisibleRestore(restoreNavigationGeneration)) {
+      _deferRestoreUntilResume(restoreNavigationGeneration);
+      return;
+    }
+
+    if (!_isFirstLayout &&
+        restoreNavigationGeneration != _positionSession.navigationGeneration) {
+      _jumpToDisplayIndex(
+        _positionSession.activeVisiblePosition.clamp(
+          0,
+          _displayChunks.length - 1,
+        ),
+      );
+      return;
+    }
+
+    final initialOriginalChunkIndex = widget.initialOriginalChunkIndex;
+    if (!_hasResolvedInitialLocation && initialOriginalChunkIndex != null) {
+      _hasResolvedInitialLocation = true;
+      _isFirstLayout = false;
+      final targetIndex =
+          _displayIndexForSourceLocation(
+            originalChunkIndex: initialOriginalChunkIndex,
+            originalStartOffset: widget.initialOriginalStartOffset,
+            sourceText: widget.initialSourceText,
+          ) ??
+          _originalToDisplay[initialOriginalChunkIndex] ??
+          0;
+      _jumpToDisplayIndex(targetIndex.clamp(0, _displayChunks.length - 1));
       return;
     }
 
@@ -1390,11 +1889,42 @@ class _ReaderScreenState extends State<ReaderScreen>
     _jumpToDisplayIndex(newDisplayIndex);
   }
 
+  bool _shouldDeferVisibleRestore(int restoreNavigationGeneration) {
+    return !_isReaderLifecycleActive && !_isFirstLayout;
+  }
+
+  void _deferRestoreUntilResume(int restoreNavigationGeneration) {
+    _hasDeferredRestoreWhileInactive = true;
+    _deferredRestoreNavigationGeneration = restoreNavigationGeneration;
+    _hasCompletedDisplayChunkBuild = true;
+    _isRebuildingChunks = false;
+  }
+
+  void _applyDeferredRestoreAfterResume() {
+    if (!_hasDeferredRestoreWhileInactive) return;
+    final restoreNavigationGeneration = _deferredRestoreNavigationGeneration;
+    _hasDeferredRestoreWhileInactive = false;
+    _deferredRestoreNavigationGeneration = null;
+    if (restoreNavigationGeneration == null ||
+        restoreNavigationGeneration != _positionSession.navigationGeneration ||
+        _displayChunks.isEmpty) {
+      return;
+    }
+
+    _jumpToDisplayIndex(
+      _positionSession.activeVisiblePosition.clamp(
+        0,
+        _displayChunks.length - 1,
+      ),
+    );
+  }
+
   /// Jump to a display index without animation, then clear rebuilding state.
   void _jumpToDisplayIndex(int index) {
     _hasCompletedDisplayChunkBuild = true;
     _currentPage = index;
     _activeDisplayIndex = index;
+    _positionSession.markVisible(index);
     _syncRestoreTargetFromDisplayIndex(index);
     if (_pageController == null) {
       _pageController = PageController(initialPage: index, keepPage: false);
@@ -1434,6 +1964,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     TextScaler textScaler,
     String cacheKey,
     int generation,
+    int restoreNavigationGeneration,
   ) async {
     if (kDebugMode) {
       debugPrint(
@@ -1476,7 +2007,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       return;
     }
 
-    _restorePosition();
+    _restorePosition(restoreNavigationGeneration);
 
     _bookCacheService.cacheDisplayChunks(
       key: cacheKey,
@@ -2409,6 +2940,8 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   void _runCommittedPageEffects(int index) {
+    _positionSession.markCommitted(index);
+    _cancelPreviewPromotionTimer();
     _recordReadingInsightForPageChange(index);
     if (_speedReadController.isActive) {
       final text = index < _displayChunks.length
@@ -2510,16 +3043,32 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   void _onPageChanged(int index) {
+    if (_positionSession.isNavigationSuspended) {
+      return;
+    }
+
+    final isPreviewChange =
+        _isScrubbing || _pendingPreviewJumpDisplayIndex == index;
+    if (_pendingPreviewJumpDisplayIndex == index) {
+      _pendingPreviewJumpDisplayIndex = null;
+    }
+
+    if (!isPreviewChange && _positionSession.hasActivePreviewPosition) {
+      _promotePreviewToCommitted();
+    }
+
     setState(() {
       _currentPage = index;
       _activeDisplayIndex = index;
-      if (_isScrubbing) {
+      if (isPreviewChange) {
         _scrubPreviewDisplayIndex = index;
       }
     });
+    _positionSession.markVisible(index);
     _syncRestoreTargetFromDisplayIndex(index);
 
-    if (_isScrubbing) {
+    if (isPreviewChange) {
+      _positionSession.updatePreview(index);
       return;
     }
 
@@ -2535,6 +3084,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   void _scheduleReadingPositionSave(int index) {
+    if (!_positionSession.canCommitActiveVisiblePosition) return;
     _pendingPositionSaveIndex = index;
     _positionSaveTimer?.cancel();
     _positionSaveTimer = Timer(const Duration(milliseconds: 1200), () {
@@ -2556,6 +3106,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (index >= _displayToOriginal.length) return;
     final originals = _displayToOriginal[index];
     if (originals.isEmpty) return;
+    if (!_positionSession.canCommitActiveVisiblePosition &&
+        _positionSession.previewPosition == index) {
+      return;
+    }
 
     // If we're on the very last display page, force originalIndex to the very end
     // so progress calculates out to precisely 100%.
@@ -2566,6 +3120,7 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     _prefs ??= await SharedPreferences.getInstance();
     await _prefs!.setInt('last_read_${widget.bookId}', originalIndex);
+    _positionSession.markCommitted(index);
 
     final metadata = _metadataService.getMetadata(widget.bookId);
     if (metadata != null) {
@@ -2676,6 +3231,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final rebuiltDisplayTarget = _originalToDisplay[top.chunkIndex];
     final targetDIndex = rebuiltDisplayTarget ?? top.displayIndex;
 
+    _clearPreviewState(visibleDisplayIndex: targetDIndex);
     _jumpReaderToPage(targetDIndex);
     _lastDwellPage = targetDIndex; // Reset anchor baseline to destination
     // Explicitly update notifier immediately so the chip disappears or updates
@@ -2695,7 +3251,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (originalIndex != null) {
       final targetIndex = _originalToDisplay[originalIndex];
       if (targetIndex != null) {
-        _jumpReaderToPage(targetIndex);
+        _navigateTo(targetIndex);
       }
     } else if (kDebugMode) {
       debugPrint('Anchor not found: $anchor');
@@ -2728,6 +3284,104 @@ class _ReaderScreenState extends State<ReaderScreen>
       _overlayAnimController.reverse();
     }
     unawaited(_syncNativeReaderControlsState());
+  }
+
+  void _handleReaderContentTap(Offset? globalPosition) {
+    if (_positionSession.hasActivePreviewPosition &&
+        !_positionSession.isScrubbing) {
+      _promotePreviewToCommitted();
+    }
+    _toggleOverlay();
+  }
+
+  bool _isReaderViewportTapSuppressed(int generation) {
+    if (_readerViewportTapSuppressedGeneration != generation) return false;
+    final suppressedUntil = _readerViewportTapSuppressedUntil;
+    return suppressedUntil != null && DateTime.now().isBefore(suppressedUntil);
+  }
+
+  void _suppressReaderMenuTapThisFrame() {
+    _readerViewportTapSuppressedGeneration = _readerViewportTapGeneration;
+    _readerViewportTapSuppressedUntil = DateTime.now().add(
+      const Duration(milliseconds: 200),
+    );
+  }
+
+  void _handleReaderViewportPointerDown(PointerDownEvent event) {
+    _readerViewportTapGeneration++;
+    _readerViewportPointer = event.pointer;
+    _readerViewportPointerDownPosition = event.position;
+    _readerViewportPointerMoved = false;
+    _readerViewportPointerHeld = false;
+    _readerViewportDeferredTapTimer?.cancel();
+    _readerViewportDeferredTapTimer = null;
+    _readerViewportLongPressTimer?.cancel();
+    _readerViewportLongPressTimer = Timer(kLongPressTimeout, () {
+      _readerViewportPointerHeld = true;
+    });
+  }
+
+  void _handleReaderViewportPointerMove(PointerMoveEvent event) {
+    if (_readerViewportPointer != event.pointer) return;
+    final downPosition = _readerViewportPointerDownPosition;
+    if (downPosition != null &&
+        (event.position - downPosition).distance > kTouchSlop) {
+      _readerViewportPointerMoved = true;
+    }
+  }
+
+  void _finishReaderViewportPointerTracking() {
+    _readerViewportLongPressTimer?.cancel();
+    _readerViewportLongPressTimer = null;
+  }
+
+  void _handleReaderViewportPointerUp(PointerUpEvent event) {
+    if (_readerViewportPointer != event.pointer) return;
+    final downPosition = _readerViewportPointerDownPosition;
+    _finishReaderViewportPointerTracking();
+    if (downPosition == null) return;
+    if (_readerViewportPointerMoved) return;
+    if (_readerViewportPointerHeld) return;
+    if ((event.position - downPosition).distance > kTouchSlop) return;
+    if (_cardInteractionBlocked) return;
+
+    _scheduleReaderViewportTap(
+      generation: _readerViewportTapGeneration,
+      pointer: event.pointer,
+      globalPosition: event.position,
+    );
+  }
+
+  void _scheduleReaderViewportTap({
+    required int generation,
+    required int pointer,
+    required Offset globalPosition,
+  }) {
+    _readerViewportDeferredTapTimer?.cancel();
+    _readerViewportDeferredTapTimer = Timer(
+      const Duration(milliseconds: 60),
+      () {
+        if (!mounted) return;
+        if (_readerViewportTapGeneration != generation) return;
+        if (_readerViewportPointer != pointer) return;
+        if (_readerViewportTapHandledGeneration == generation) return;
+        if (_isReaderViewportTapSuppressed(generation)) return;
+        if (_readerViewportPointerMoved) return;
+        if (_readerViewportPointerHeld) return;
+        if (_cardInteractionBlocked) return;
+
+        _readerViewportTapHandledGeneration = generation;
+        _handleReaderContentTap(globalPosition);
+      },
+    );
+  }
+
+  void _handleReadingCardTapOutside(Offset? globalPosition) {
+    final generation = _readerViewportTapGeneration;
+    if (_readerViewportTapHandledGeneration == generation) return;
+    if (_isReaderViewportTapSuppressed(generation)) return;
+    _readerViewportTapHandledGeneration = generation;
+    _handleReaderContentTap(globalPosition);
   }
 
   // ─── Bookmark actions ────────────────────────────────────────────────
@@ -2776,21 +3430,11 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   int? _displayIndexForBookmark(Bookmark bookmark) {
-    for (
-      var displayIndex = 0;
-      displayIndex < _displayChunks.length;
-      displayIndex++
-    ) {
-      for (final range in _displayChunks[displayIndex].effectiveSourceRanges) {
-        if (range.originalChunkIndex != bookmark.chunkIndex) continue;
-        final containsOffset =
-            bookmark.originalStartOffset >= range.originalStartOffset &&
-            bookmark.originalStartOffset < range.originalEndOffset;
-        if (containsOffset) return displayIndex;
-      }
-    }
-
-    return _originalToDisplay[bookmark.chunkIndex];
+    return _displayIndexForSourceLocation(
+      originalChunkIndex: bookmark.chunkIndex,
+      originalStartOffset: bookmark.originalStartOffset,
+      sourceText: bookmark.previewText,
+    );
   }
 
   Future<void> _onBookmarkTap(int displayIndex) async {
@@ -3394,10 +4038,20 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   // ─── Navigation ──────────────────────────────────────────────────────
 
-  void _navigateTo(int targetIndex) {
+  void _navigateTo(int targetIndex, {bool exploratory = true}) {
     if (_currentPage != targetIndex) {
-      _commitCurrentPosition(); // Pre-jump commit exception
-      _jumpReaderToPage(targetIndex);
+      if (exploratory) {
+        if (!_positionSession.hasActivePreviewPosition) {
+          _commitCurrentPosition();
+        }
+        _positionSession.startPreview(_currentPage);
+        _jumpReaderToPage(targetIndex, asPreview: true);
+        _positionSession.finishScrub();
+        _schedulePreviewPromotion(targetIndex);
+      } else {
+        _clearPreviewState(visibleDisplayIndex: _currentPage);
+        _jumpReaderToPage(targetIndex);
+      }
     }
   }
 
@@ -3445,12 +4099,17 @@ class _ReaderScreenState extends State<ReaderScreen>
         totalDisplayPages: _displayChunks.length,
         chunkTexts: chunkTexts,
         buildLocationLabel: _buildStorageLocationLabel,
-        onNavigate: (originalIndex) {
-          final targetDIndex = _originalToDisplay[originalIndex];
-          if (targetDIndex != null) {
-            _navigateTo(targetDIndex);
-          }
-        },
+        onNavigate:
+            (originalIndex, {int? originalStartOffset, String? sourceText}) {
+              final targetDIndex = _displayIndexForSourceLocation(
+                originalChunkIndex: originalIndex,
+                originalStartOffset: originalStartOffset,
+                sourceText: sourceText,
+              );
+              if (targetDIndex != null) {
+                _navigateTo(targetDIndex);
+              }
+            },
         highlights: _highlights,
         onRemoveHighlight: (id) async {
           final updated = await _highlightService.remove(id);
@@ -3465,8 +4124,36 @@ class _ReaderScreenState extends State<ReaderScreen>
         onNoteRemoved: _onNoteRemoved,
         dictionaryService: _dictionaryService,
         settings: _settings,
+        initialTab: _lastAnnotationsTab,
+        onTabChanged: _rememberAnnotationsTab,
       );
     });
+  }
+
+  String get _readerDrawerLastTabKey =>
+      'nalori.book.${widget.bookId}$_readerDrawerLastTabKeySuffix';
+
+  AnnotationPanelTab? _annotationPanelTabFromName(String? name) {
+    if (name == null || name.isEmpty) return null;
+    for (final tab in AnnotationPanelTab.values) {
+      if (tab.name == name) return tab;
+    }
+    return null;
+  }
+
+  void _rememberAnnotationsTab(AnnotationPanelTab tab) {
+    if (_lastAnnotationsTab == tab) return;
+    _lastAnnotationsTab = tab;
+    final prefs = _prefs;
+    if (prefs != null) {
+      unawaited(prefs.setString(_readerDrawerLastTabKey, tab.name));
+      return;
+    }
+    unawaited(
+      SharedPreferences.getInstance().then(
+        (prefs) => prefs.setString(_readerDrawerLastTabKey, tab.name),
+      ),
+    );
   }
 
   Future<void> _showPageJumpDialog() async {
@@ -3600,6 +4287,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (previousIndex == null) return;
 
     if (previousIndex == targetIndex) {
+      _clearPreviewState(visibleDisplayIndex: targetIndex);
       _lastDwellPage = targetIndex;
       _scheduleDwellTracking(targetIndex);
       _updatePositionHistoryNotifier();
@@ -3608,13 +4296,15 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     _commitDisplayIndexToHistory(previousIndex);
     _lastDwellPage = targetIndex;
+    _positionSession.updatePreview(targetIndex);
+    _positionSession.finishScrub();
+    _schedulePreviewPromotion(targetIndex);
 
     if (previewAlreadyVisible) {
-      _runCommittedPageEffects(targetIndex);
       return;
     }
 
-    _jumpReaderToPage(targetIndex);
+    _jumpReaderToPage(targetIndex, asPreview: true);
   }
 
   Widget _buildPageScrubber(List<double> markRatios) {
@@ -3704,6 +4394,11 @@ class _ReaderScreenState extends State<ReaderScreen>
                     value: sliderValue,
                     onChangeStart: (_) {
                       _dwellTimer?.cancel();
+                      _cancelPreviewPromotionTimer();
+                      _positionSession.startPreview(
+                        _currentPage,
+                        scrubbing: true,
+                      );
                       setState(() {
                         _isScrubbing = true;
                         _scrubStartDisplayIndex = _currentPage;
@@ -3717,9 +4412,10 @@ class _ReaderScreenState extends State<ReaderScreen>
                       setState(() {
                         _scrubPreviewDisplayIndex = targetIndex;
                       });
+                      _positionSession.updatePreview(targetIndex);
 
                       if (_currentPage != targetIndex) {
-                        _jumpReaderToPage(targetIndex);
+                        _jumpReaderToPage(targetIndex, asPreview: true);
                       }
                     },
                     onChangeEnd: (val) {
@@ -4083,65 +4779,76 @@ class _ReaderScreenState extends State<ReaderScreen>
     final body = Stack(
       children: [
         // ── PageView (always present) ──
-        _ReaderPageView(
-          speedReadController: _speedReadController,
-          cardDeckController: _cardDeckController,
-          activeDisplayIndex: _activeDisplayIndex,
-          pageController: _pageController!,
-          displayChunks: _displayChunks,
-          displayToOriginal: _displayToOriginal,
-          originalToDisplay: _originalToDisplay,
-          flatChapters: _flatChapters,
-          canSwipe:
-              !_overlayVisible &&
-              speedReadAllowsManualNavigation &&
-              _readerSurfaceBlockCount == 0 &&
-              !_cardInteractionBlocked &&
-              !_isCelebrationVisible,
-          settings: _settings,
-          bookmarkService: _bookmarkService,
-          bookmarks: _bookmarks,
-          bookmarkDisplayHints: _bookmarkDisplayHints,
-          onPageChanged: _onPageChanged,
-          onLinkTap: _onLinkTap,
-          onDoubleTap: _onBookmarkTap,
-          onTripleTap: _onTripleTap,
-          onBookmarkLongPress: _onBookmarkLongPress,
-          onImageTap: _openBookImageViewer,
-          highlights: _highlights,
-          characterNames: _buildCharacterNamesMap(),
-          onHighlightCreated: _onHighlightCreated,
-          onQuoteShareRequested: _onQuoteShareRequested,
-          onMappedNoteCreated: _onMappedNoteCreated,
-          onHighlightColorChange: _onHighlightColorChange,
-          onHighlightDeleted: _onHighlightDeleted,
-          onNoteUpdated: _onNoteUpdated,
-          onNoteRemoved: _onNoteRemoved,
-          highlightPalette: _highlightPalette,
-          defaultHighlightColor: _defaultHighlightColor,
-          onDefaultHighlightColorChanged: _onDefaultHighlightColorChanged,
-          onAddCustomHighlightColor: _onAddCustomHighlightColor,
-          onRemoveCustomHighlightColor: _onRemoveCustomHighlightColor,
-          onResetHighlightPalette: _onResetHighlightPalette,
-          defaultBookmarkColorIndex: _defaultBookmarkColorIndex,
-          onDefaultBookmarkColorChanged: (idx) {
-            setState(() => _defaultBookmarkColorIndex = idx);
-          },
-          onDictionaryLookup: _lookupWord,
-          onCardInteractionBlockedChanged: (blocked) {
-            if (_cardInteractionBlocked == blocked) return;
-            setState(() => _cardInteractionBlocked = blocked);
-            if (blocked &&
-                _speedReadController.isActive &&
-                !_speedReadController.isPaused) {
-              _speedReadController.pause();
-              _speedReadCardInteractionAutoPaused = true;
-            } else if (!blocked && _speedReadCardInteractionAutoPaused) {
-              _speedReadCardInteractionAutoPaused = false;
-              _resumeAutoPausedSpeedReadIfReady();
-            }
-          },
-          onTapOutside: (_) => _toggleOverlay(),
+        Positioned.fill(
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: _handleReaderViewportPointerDown,
+            onPointerMove: _handleReaderViewportPointerMove,
+            onPointerUp: _handleReaderViewportPointerUp,
+            onPointerCancel: (_) => _finishReaderViewportPointerTracking(),
+            child: _ReaderPageView(
+              speedReadController: _speedReadController,
+              cardDeckController: _cardDeckController,
+              activeDisplayIndex: _activeDisplayIndex,
+              pageController: _pageController!,
+              displayChunks: _displayChunks,
+              displayToOriginal: _displayToOriginal,
+              originalToDisplay: _originalToDisplay,
+              flatChapters: _flatChapters,
+              canSwipe:
+                  !_overlayVisible &&
+                  speedReadAllowsManualNavigation &&
+                  _readerSurfaceBlockCount == 0 &&
+                  !_cardInteractionBlocked &&
+                  !_isCelebrationVisible,
+              settings: _settings,
+              bookmarkService: _bookmarkService,
+              bookmarks: _bookmarks,
+              bookmarkDisplayHints: _bookmarkDisplayHints,
+              onPageChanged: _onPageChanged,
+              onLinkTap: _onLinkTap,
+              onDoubleTap: _onBookmarkTap,
+              onTripleTap: _onTripleTap,
+              onBookmarkLongPress: _onBookmarkLongPress,
+              onImageTap: _openBookImageViewer,
+              highlights: _highlights,
+              characterNames: _buildCharacterNamesMap(),
+              onHighlightCreated: _onHighlightCreated,
+              onQuoteShareRequested: _onQuoteShareRequested,
+              onMappedNoteCreated: _onMappedNoteCreated,
+              onHighlightColorChange: _onHighlightColorChange,
+              onHighlightDeleted: _onHighlightDeleted,
+              onNoteUpdated: _onNoteUpdated,
+              onNoteRemoved: _onNoteRemoved,
+              onNoteEditorRoute: _runWithReaderPositionPreserved,
+              highlightPalette: _highlightPalette,
+              defaultHighlightColor: _defaultHighlightColor,
+              onDefaultHighlightColorChanged: _onDefaultHighlightColorChanged,
+              onAddCustomHighlightColor: _onAddCustomHighlightColor,
+              onRemoveCustomHighlightColor: _onRemoveCustomHighlightColor,
+              onResetHighlightPalette: _onResetHighlightPalette,
+              defaultBookmarkColorIndex: _defaultBookmarkColorIndex,
+              onDefaultBookmarkColorChanged: (idx) {
+                setState(() => _defaultBookmarkColorIndex = idx);
+              },
+              onDictionaryLookup: _lookupWord,
+              onCardInteractionBlockedChanged: (blocked) {
+                if (_cardInteractionBlocked == blocked) return;
+                setState(() => _cardInteractionBlocked = blocked);
+                if (blocked &&
+                    _speedReadController.isActive &&
+                    !_speedReadController.isPaused) {
+                  _speedReadController.pause();
+                  _speedReadCardInteractionAutoPaused = true;
+                } else if (!blocked && _speedReadCardInteractionAutoPaused) {
+                  _speedReadCardInteractionAutoPaused = false;
+                  _resumeAutoPausedSpeedReadIfReady();
+                }
+              },
+              onTapOutside: _handleReadingCardTapOutside,
+              onSuppressParentReaderTap: _suppressReaderMenuTapThisFrame,
+            ),
+          ),
         ),
 
         // ── Top menu placeholder ──
@@ -5896,6 +6603,12 @@ class _SpeedReadFABState extends State<_SpeedReadFAB>
 // Extracted Widgets — Separation of Concerns & Rebuild Minimization
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+typedef _ReaderNoteEditorRoute =
+    Future<T> Function<T>(
+      Future<T> Function() action, {
+      int? visibleDisplayIndex,
+    });
+
 /// Extracted PageView to isolate its rebuilds from overlay changes.
 class _ReaderPageView extends StatelessWidget {
   final int activeDisplayIndex;
@@ -5921,7 +6634,7 @@ class _ReaderPageView extends StatelessWidget {
   // ── Highlights ──
   final List<Highlight> highlights;
   final Map<String, Color> characterNames;
-  final void Function(
+  final FutureOr<void> Function(
     int displayIndex,
     int startOffset,
     int endOffset,
@@ -5948,8 +6661,9 @@ class _ReaderPageView extends StatelessWidget {
   final void Function(Highlight highlight, Color newColor)?
   onHighlightColorChange;
   final void Function(String id)? onHighlightDeleted;
-  final void Function(String id, String note)? onNoteUpdated;
-  final void Function(String id)? onNoteRemoved;
+  final FutureOr<void> Function(String id, String note)? onNoteUpdated;
+  final FutureOr<void> Function(String id)? onNoteRemoved;
+  final _ReaderNoteEditorRoute? onNoteEditorRoute;
   final List<Color> highlightPalette;
   final Color defaultHighlightColor;
   final ValueChanged<Color>? onDefaultHighlightColorChanged;
@@ -5959,6 +6673,7 @@ class _ReaderPageView extends StatelessWidget {
   final int defaultBookmarkColorIndex;
   final ValueChanged<int>? onDefaultBookmarkColorChanged;
   final void Function(Offset? globalPosition)? onTapOutside;
+  final VoidCallback? onSuppressParentReaderTap;
   final void Function(
     String word, {
     int? originalChunkIndex,
@@ -5998,6 +6713,7 @@ class _ReaderPageView extends StatelessWidget {
     this.onHighlightDeleted,
     this.onNoteUpdated,
     this.onNoteRemoved,
+    this.onNoteEditorRoute,
     this.highlightPalette = kHighlightColors,
     this.defaultHighlightColor = const Color(0xFFEF5350),
     this.onDefaultHighlightColorChanged,
@@ -6007,6 +6723,7 @@ class _ReaderPageView extends StatelessWidget {
     this.defaultBookmarkColorIndex = 0,
     this.onDefaultBookmarkColorChanged,
     this.onTapOutside,
+    this.onSuppressParentReaderTap,
     this.onDictionaryLookup,
     this.onCardInteractionBlockedChanged,
   });
@@ -6169,6 +6886,7 @@ class _ReaderPageView extends StatelessWidget {
       chapterProgress: chapterMeta.progress,
       depthLiftProgress: stackProgress,
       showStackLayers: !useRealStack,
+      enableTextSelection: isCurrent && index == activeDisplayIndex,
       highlights: pageHighlights,
       characterNames: characterNames,
       onHighlightCreated: isCurrent
@@ -6194,6 +6912,10 @@ class _ReaderPageView extends StatelessWidget {
       onHighlightDeleted: isCurrent ? onHighlightDeleted : null,
       onNoteUpdated: isCurrent ? onNoteUpdated : null,
       onNoteRemoved: isCurrent ? onNoteRemoved : null,
+      onNoteEditorRoute: isCurrent && onNoteEditorRoute != null
+          ? <T>(action) =>
+                onNoteEditorRoute!<T>(action, visibleDisplayIndex: index)
+          : null,
       highlightPalette: highlightPalette,
       defaultHighlightColor: defaultHighlightColor,
       onDefaultHighlightColorChanged: isCurrent
@@ -6203,6 +6925,7 @@ class _ReaderPageView extends StatelessWidget {
       onRemoveCustomColor: isCurrent ? onRemoveCustomHighlightColor : null,
       onResetHighlightPalette: isCurrent ? onResetHighlightPalette : null,
       onTapOutside: isCurrent ? onTapOutside : null,
+      onSuppressParentReaderTap: isCurrent ? onSuppressParentReaderTap : null,
       onDictionaryLookup: isCurrent ? onDictionaryLookup : null,
       onInteractionBlockedChanged: isCurrent
           ? onCardInteractionBlockedChanged
@@ -6220,6 +6943,7 @@ class _ReaderPageView extends StatelessWidget {
         currentIndex: activeDisplayIndex,
         itemCount: displayChunks.length,
         canSwipe: canSwipe,
+        cacheCardWidgetsDuringDrag: true,
         axis: settings.resolvedPagingAxis,
         onIndexChanged: onPageChanged,
         cardBuilder: (context, index, stackProgress, isCurrent) =>
@@ -6240,24 +6964,11 @@ class _ReaderPageView extends StatelessWidget {
       physics: const _SnappyPagePhysics(parent: ClampingScrollPhysics()),
       onPageChanged: onPageChanged,
       itemBuilder: (context, index) {
-        return AnimatedBuilder(
-          animation: pageController,
-          builder: (context, _) {
-            final page = pageController.hasClients
-                ? pageController.page ?? activeDisplayIndex.toDouble()
-                : activeDisplayIndex.toDouble();
-            final pageDelta = page - index;
-            final liftProgress =
-                settings.pagingAxis == ReaderPagingAxis.vertical
-                ? pageDelta.clamp(0.0, 1.0).toDouble()
-                : pageDelta.abs().clamp(0.0, 1.0).toDouble();
-            return _buildReadingCard(
-              context,
-              index,
-              liftProgress,
-              index == activeDisplayIndex,
-            );
-          },
+        return _buildReadingCard(
+          context,
+          index,
+          0,
+          index == activeDisplayIndex,
         );
       },
     );
@@ -6392,13 +7103,40 @@ class _SettingsModalContentState extends State<_SettingsModalContent> {
   ReadingSettings? _activePresetSettings;
   _ReaderSettingsCategory _selectedCategory =
       _ReaderSettingsCategory.appearance;
+  bool _hasSelectedCategoryThisSession = false;
   bool _showTypefacePicker = false;
 
   @override
   void initState() {
     super.initState();
     _localSettings = widget.settings;
+    unawaited(_loadLastSelectedCategory());
     unawaited(_loadPresets());
+  }
+
+  Future<void> _loadLastSelectedCategory() async {
+    final savedCategoryName = await _settingsService
+        .loadReaderSettingsLastSection();
+    final savedCategory = _readerSettingsCategoryFromName(savedCategoryName);
+    if (!mounted || savedCategory == null || _hasSelectedCategoryThisSession) {
+      return;
+    }
+    setState(() => _selectedCategory = savedCategory);
+  }
+
+  _ReaderSettingsCategory? _readerSettingsCategoryFromName(String? name) {
+    if (name == null || name.isEmpty) return null;
+    for (final category in _ReaderSettingsCategory.values) {
+      if (category.name == name) return category;
+    }
+    return null;
+  }
+
+  void _selectCategory(_ReaderSettingsCategory category) {
+    if (_selectedCategory == category) return;
+    _hasSelectedCategoryThisSession = true;
+    setState(() => _selectedCategory = category);
+    unawaited(_settingsService.saveReaderSettingsLastSection(category.name));
   }
 
   void _update(ReadingSettings updated, {String? activePresetId}) {
@@ -6928,6 +7666,7 @@ class _SettingsModalContentState extends State<_SettingsModalContent> {
         current.speedReadPageAdvanceMode == preset.speedReadPageAdvanceMode &&
         current.speedReadAdaptivePacing == preset.speedReadAdaptivePacing &&
         current.lineHeight == preset.lineHeight &&
+        current.sideMargin == preset.sideMargin &&
         current.useCustomReaderTheme == preset.useCustomReaderTheme &&
         mapEquals(
           current.customReaderTheme?.toJson(),
@@ -7143,7 +7882,7 @@ class _SettingsModalContentState extends State<_SettingsModalContent> {
                 borderRadius: BorderRadius.circular(8),
               ),
               onSelected: (_) {
-                setState(() => _selectedCategory = category);
+                _selectCategory(category);
               },
             );
           },
@@ -7230,6 +7969,9 @@ class _SettingsModalContentState extends State<_SettingsModalContent> {
               const SizedBox(height: 8),
               _buildSubLabel('Paragraph spacing'),
               _buildParagraphSpacingSlider(),
+              const SizedBox(height: 8),
+              _buildSubLabel('Side margins'),
+              _buildSideMarginSlider(),
             ],
           ),
         ),
@@ -8011,6 +8753,68 @@ class _SettingsModalContentState extends State<_SettingsModalContent> {
                     _localSettings = _localSettings.copyWith(
                       paragraphSpacing: val,
                     );
+                  });
+                },
+                onChangeEnd: (_) => _update(_localSettings),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSideMarginSlider() {
+    final sideMargin = readerHorizontalContentPadding(_localSettings);
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: _controlColor,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: _hairlineColor),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 36,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _selectedControlColor,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: _accent.withValues(alpha: 0.45)),
+            ),
+            child: Text(
+              '${sideMargin.round()}px',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: _accent,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SliderTheme(
+              data: SliderThemeData(
+                trackHeight: 2.5,
+                activeTrackColor: _accent,
+                inactiveTrackColor: _localSettings.mutedColor.withValues(
+                  alpha: 0.18,
+                ),
+                thumbColor: _accent,
+                overlayColor: _accent.withValues(alpha: 0.12),
+              ),
+              child: Slider(
+                min: kReaderSideMarginMin,
+                max: kReaderSideMarginMax,
+                divisions: (kReaderSideMarginMax - kReaderSideMarginMin)
+                    .round(),
+                value: sideMargin,
+                onChanged: (val) {
+                  setState(() {
+                    _localSettings = _localSettings.copyWith(sideMargin: val);
                   });
                 },
                 onChangeEnd: (_) => _update(_localSettings),
@@ -9193,6 +9997,30 @@ class _PageAnchor {
   final String middle;
 
   const _PageAnchor({required this.opening, required this.middle});
+}
+
+class _ReaderVisiblePositionSnapshot {
+  final int displayIndex;
+  final double? pageControllerPage;
+  final int? pageControllerIndex;
+  final _PageAnchor? sourceAnchor;
+  final List<int> sourceOriginalCandidates;
+  final int? displayChunkCount;
+  final bool? cardMode;
+  final double? densityMultiplier;
+  final bool hasPreferredDisplayIndex;
+
+  const _ReaderVisiblePositionSnapshot({
+    required this.displayIndex,
+    this.pageControllerPage,
+    this.pageControllerIndex,
+    this.sourceAnchor,
+    this.sourceOriginalCandidates = const [],
+    this.displayChunkCount,
+    this.cardMode,
+    this.densityMultiplier,
+    this.hasPreferredDisplayIndex = false,
+  });
 }
 
 class _AnalyticsChapter {

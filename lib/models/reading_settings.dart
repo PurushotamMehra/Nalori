@@ -516,6 +516,7 @@ class ReadingSettings {
   final bool speedReadAdaptivePacing;
   final double lineHeight;
   final double paragraphSpacing;
+  final double sideMargin;
   final BookReaderThemePalette? bookThemePalette;
   final bool useCustomReaderTheme;
   final CustomReaderTheme? customReaderTheme;
@@ -543,6 +544,7 @@ class ReadingSettings {
     this.speedReadAdaptivePacing = true,
     this.lineHeight = 1.3,
     this.paragraphSpacing = 1.0,
+    this.sideMargin = 24.0,
     this.bookThemePalette,
     this.useCustomReaderTheme = false,
     this.customReaderTheme,
@@ -589,6 +591,7 @@ class ReadingSettings {
       'speedReadAdaptivePacing': speedReadAdaptivePacing,
       'lineHeight': lineHeight,
       'paragraphSpacing': paragraphSpacing,
+      'sideMargin': sideMargin,
       'useCustomReaderTheme': useCustomReaderTheme,
       'customReaderTheme': customReaderTheme?.toJson(),
     };
@@ -695,6 +698,7 @@ class ReadingSettings {
         json['paragraphSpacing'],
         fallback.paragraphSpacing,
       ),
+      sideMargin: doubleValue(json['sideMargin'], fallback.sideMargin),
       useCustomReaderTheme:
           json['useCustomReaderTheme'] as bool? ??
           fallback.useCustomReaderTheme,
@@ -883,6 +887,7 @@ class ReadingSettings {
     bool? speedReadAdaptivePacing,
     double? lineHeight,
     double? paragraphSpacing,
+    double? sideMargin,
     BookReaderThemePalette? bookThemePalette,
     bool clearBookThemePalette = false,
     bool? useCustomReaderTheme,
@@ -916,6 +921,7 @@ class ReadingSettings {
           speedReadAdaptivePacing ?? this.speedReadAdaptivePacing,
       lineHeight: lineHeight ?? this.lineHeight,
       paragraphSpacing: paragraphSpacing ?? this.paragraphSpacing,
+      sideMargin: sideMargin ?? this.sideMargin,
       bookThemePalette: clearBookThemePalette
           ? null
           : (bookThemePalette ?? this.bookThemePalette),

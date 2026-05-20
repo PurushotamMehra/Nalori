@@ -16,11 +16,17 @@ import 'reader_screen.dart';
 class BookLoadingScreen extends StatefulWidget {
   final File bookFile;
   final ReadingSettings settings;
+  final int? initialOriginalChunkIndex;
+  final int? initialOriginalStartOffset;
+  final String? initialSourceText;
 
   const BookLoadingScreen({
     super.key,
     required this.bookFile,
     required this.settings,
+    this.initialOriginalChunkIndex,
+    this.initialOriginalStartOffset,
+    this.initialSourceText,
   });
 
   @override
@@ -112,6 +118,9 @@ class _BookLoadingScreenState extends State<BookLoadingScreen>
             anchorMap: parsed.anchorMap,
             chapters: parsed.chapters,
             searchIndex: parsed.searchIndex,
+            initialOriginalChunkIndex: widget.initialOriginalChunkIndex,
+            initialOriginalStartOffset: widget.initialOriginalStartOffset,
+            initialSourceText: widget.initialSourceText,
           ),
           transitionsBuilder: (_, animation, __, child) {
             return FadeTransition(opacity: animation, child: child);

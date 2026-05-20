@@ -63,6 +63,7 @@ class _BookMemorySourceDetailScreenState
   Future<void> _goToText({
     int? overrideChunkIndex,
     int? originalStartOffset,
+    String? sourceText,
   }) async {
     final chunkIndex = overrideChunkIndex ?? _preview.originalChunkIndex;
     if (chunkIndex == null) return;
@@ -72,8 +73,14 @@ class _BookMemorySourceDetailScreenState
         builder: (_) => BookLoadingScreen(
           bookFile: widget.bookFile,
           settings: _s,
-          // initialOriginalChunkIndex: chunkIndex,
-          // initialOriginalStartOffset: originalStartOffset,
+          initialOriginalChunkIndex: chunkIndex,
+          initialOriginalStartOffset:
+              originalStartOffset ?? _preview.originalStartOffset,
+          initialSourceText:
+              sourceText ??
+              _preview.sourceText ??
+              _preview.body ??
+              _preview.title,
         ),
       ),
     );
@@ -493,6 +500,7 @@ class _BookMemorySourceDetailScreenState
           onPressed: () => _goToText(
             overrideChunkIndex: item.originalChunkIndex,
             originalStartOffset: item.originalStartOffset,
+            sourceText: item.sourceText ?? item.text,
           ),
         ),
     ];
