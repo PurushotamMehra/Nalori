@@ -19,6 +19,11 @@ class PublicDomainBooksScreen extends StatefulWidget {
   final String title;
   final String subtitle;
   final PublicDomainBookQuery initialQuery;
+  final PublicDomainBookService? catalogService;
+  final PublicDomainDownloadService? downloadService;
+  final LibraryService? libraryService;
+  final BookMetadataService? metadataService;
+  final bool skipLocalBookLoad;
 
   const PublicDomainBooksScreen({
     super.key,
@@ -26,6 +31,11 @@ class PublicDomainBooksScreen extends StatefulWidget {
     this.title = 'Project Gutenberg',
     this.subtitle = 'Explore free public-domain books in the U.S. catalog',
     this.initialQuery = const PublicDomainBookQuery(),
+    this.catalogService,
+    this.downloadService,
+    this.libraryService,
+    this.metadataService,
+    this.skipLocalBookLoad = false,
   });
 
   factory PublicDomainBooksScreen.forAuthor({
@@ -82,10 +92,10 @@ class _PublicDomainDownloadTask {
 }
 
 class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
-  final _catalogService = PublicDomainBookService();
-  final _downloadService = PublicDomainDownloadService();
-  final _libraryService = LibraryService();
-  final _metadataService = BookMetadataService();
+  late final PublicDomainBookService _catalogService;
+  late final PublicDomainDownloadService _downloadService;
+  late final LibraryService _libraryService;
+  late final BookMetadataService _metadataService;
   final _searchController = TextEditingController();
   final _scrollController = ScrollController();
 
@@ -110,6 +120,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   int _page = 1;
   String? _nextPageUrl;
   int _requestGeneration = 0;
+  String? _activeInitialLoadKey;
   Timer? _searchDebounce;
   bool _prefetchingMore = false;
   PublicDomainBookPage? _prefetchedPage;
@@ -120,6 +131,10 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   @override
   void initState() {
     super.initState();
+    _catalogService = widget.catalogService ?? PublicDomainBookService();
+    _downloadService = widget.downloadService ?? PublicDomainDownloadService();
+    _libraryService = widget.libraryService ?? LibraryService();
+    _metadataService = widget.metadataService ?? BookMetadataService();
     _activeQuery = widget.initialQuery;
     _searchController.text = widget.initialQuery.text;
     _scrollController.addListener(_maybePrefetchNextPage);
@@ -135,7 +150,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   }
 
   Future<void> _loadInitialData() async {
-    await _loadLocalBooks();
+    if (!widget.skipLocalBookLoad) await _loadLocalBooks();
     await _loadBooks(reset: true);
   }
 
@@ -206,29 +221,47 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   }
 
   Future<void> _loadBooks({required bool reset}) async {
+    final loadKey = _pageCacheKey(
+      query: _activeQuery,
+      page: reset ? 1 : _page + 1,
+    );
+    if (reset &&
+        _activeInitialLoadKey == loadKey &&
+        (_loading || _refreshing)) {
+      return;
+    }
+    if (!reset && _loadingMore) return;
+    if (reset) _activeInitialLoadKey = loadKey;
+
     final generation = ++_requestGeneration;
     final query = _activeQuery;
     if (reset) {
       _clearPrefetchedPage();
+      final bundled = await _catalogService.readBundledBooks(query: query);
       final cached = await _catalogService.readCachedBooks(query: query);
       if (!mounted || generation != _requestGeneration) return;
       final hasFreshCache = cached != null
           ? await _catalogService.isCacheFresh(query: query)
           : false;
+      final starterBooks = _mergeBookLists(
+        bundled?.books ?? const [],
+        cached?.books ?? const [],
+      );
+      final hasStarterBooks = starterBooks.isNotEmpty;
       setState(() {
-        if (cached != null) {
-          _books = cached.books;
-          _page = cached.page;
-          _hasNextPage = cached.hasNextPage;
-          _nextPageUrl = cached.nextUrl;
+        if (hasStarterBooks) {
+          _books = starterBooks;
+          _page = cached?.page ?? 1;
+          _hasNextPage = cached?.hasNextPage ?? false;
+          _nextPageUrl = cached?.nextUrl;
         }
-        _loading = cached == null;
-        _refreshing = cached != null && !hasFreshCache;
+        _loading = !hasStarterBooks;
+        _refreshing = hasStarterBooks && !hasFreshCache;
         _error = null;
-        _statusMessage = cached != null && !hasFreshCache
+        _statusMessage = hasStarterBooks && !hasFreshCache
             ? 'Refreshing Project Gutenberg in the background'
             : null;
-        if (cached == null) {
+        if (!hasStarterBooks) {
           _page = 1;
           _nextPageUrl = null;
         }
@@ -260,7 +293,9 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
 
       if (!mounted || generation != _requestGeneration) return;
       setState(() {
-        _books = reset ? page.books : [..._books, ...page.books];
+        _books = reset
+            ? _mergeBookLists(_books, page.books)
+            : _appendUniqueBooks(_books, page.books);
         _page = page.page;
         _hasNextPage = page.hasNextPage;
         _nextPageUrl = page.nextUrl;
@@ -273,15 +308,59 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
     } catch (e) {
       if (!mounted || generation != _requestGeneration) return;
       setState(() {
-        _error = _books.isEmpty ? e.toString() : null;
+        _error = _books.isEmpty ? _catalogUnavailableMessage(e) : null;
         _statusMessage = _books.isNotEmpty
-            ? 'Showing saved Project Gutenberg results'
+            ? reset
+                  ? 'Could not refresh. Showing saved Project Gutenberg results.'
+                  : 'Could not load more books. Try again when the catalog responds.'
             : null;
         _loading = false;
         _loadingMore = false;
         _refreshing = false;
       });
+    } finally {
+      if (reset && _activeInitialLoadKey == loadKey) {
+        _activeInitialLoadKey = null;
+      }
     }
+  }
+
+  List<PublicDomainBook> _appendUniqueBooks(
+    List<PublicDomainBook> existing,
+    List<PublicDomainBook> incoming,
+  ) {
+    final seen = existing.map((book) => book.id).toSet();
+    return [
+      ...existing,
+      for (final book in incoming)
+        if (seen.add(book.id)) book,
+    ];
+  }
+
+  List<PublicDomainBook> _mergeBookLists(
+    List<PublicDomainBook> base,
+    List<PublicDomainBook> incoming,
+  ) {
+    final byId = <int, PublicDomainBook>{};
+    final order = <int>[];
+    for (final book in base) {
+      if (byId.containsKey(book.id)) continue;
+      byId[book.id] = book;
+      order.add(book.id);
+    }
+    for (final book in incoming) {
+      if (!byId.containsKey(book.id)) order.add(book.id);
+      byId[book.id] = book;
+    }
+    return [
+      for (final id in order)
+        if (byId[id] != null) byId[id]!,
+    ];
+  }
+
+  String _catalogUnavailableMessage(Object error) {
+    if (error is PublicDomainBookServiceException) return error.message;
+    return 'Check your connection and try again.';
   }
 
   void _clearPrefetchedPage() {
@@ -378,7 +457,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       );
       if (!mounted) return;
       setState(() {
-        _books = page.books;
+        _books = _mergeBookLists(_books, page.books);
         _page = page.page;
         _hasNextPage = page.hasNextPage;
         _nextPageUrl = page.nextUrl;
@@ -393,7 +472,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
         _statusMessage = _books.isNotEmpty
             ? 'Could not refresh. Showing saved results.'
             : null;
-        _error = _books.isEmpty ? e.toString() : null;
+        _error = _books.isEmpty ? _catalogUnavailableMessage(e) : null;
       });
     }
   }
@@ -1167,7 +1246,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       return _buildMessageState(
         icon: Icons.wifi_off_rounded,
         title: 'Catalog unavailable',
-        message: 'Check your connection and try again.',
+        message: _error ?? 'Check your connection and try again.',
         actionLabel: 'Retry',
         onAction: () => _loadBooks(reset: true),
       );

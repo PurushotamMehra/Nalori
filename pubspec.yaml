@@ -29,6 +29,8 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  archive: ^3.6.1
+  image: ^3.3.0
   flutter_lints: ^5.0.0
   mockito: ^5.4.0
   build_runner: ^2.4.0
@@ -40,3 +42,4 @@ flutter:
   assets:
     - assets/images/nalori_mark.svg
     - assets/images/nalori_app_icon.png
+    - assets/catalog/gutenberg_starter_catalog.json
