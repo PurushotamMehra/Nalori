@@ -362,6 +362,7 @@ def build_catalog(args: argparse.Namespace) -> dict:
         temp_dir = tempfile.TemporaryDirectory()
         source_path = Path(temp_dir.name) / "rdf-files.tar.bz2"
         download_source(args.source_url, source_path)
+    source_size = source_path.stat().st_size if source_path.exists() else 0
 
     sqlite_path = output_dir / f"gutenberg_catalog_{args.catalog_version}.sqlite"
     compressed_path = sqlite_path.with_suffix(".sqlite.gz")
@@ -415,7 +416,6 @@ def build_catalog(args: argparse.Namespace) -> dict:
             shutil.copyfileobj(source, dest)
     compressed_bytes = compressed_path.read_bytes()
     digest = hashlib.sha256(compressed_bytes).hexdigest()
-    source_size = source_path.stat().st_size if source_path.exists() else 0
     download_url = f"{args.artifact_base_url.rstrip('/')}/{compressed_path.name}"
     manifest = {
         "schema_version": SCHEMA_VERSION,

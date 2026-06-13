@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import '../models/book_metadata.dart';
 import '../models/public_domain_book.dart';
+import '../models/public_domain_catalog.dart';
 import '../models/reading_settings.dart';
 import '../services/book_metadata_service.dart';
 import '../services/library_service.dart';
@@ -124,6 +125,10 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   bool _prefetchingMore = false;
   PublicDomainBookPage? _prefetchedPage;
   String? _prefetchedPageKey;
+  PublicDomainCatalogManifest? _availableCatalogManifest;
+  String? _statusActionLabel;
+  bool _catalogInstallInProgress = false;
+  double? _catalogInstallProgress;
 
   ReadingSettings get _s => widget.settings;
 
@@ -151,6 +156,69 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   Future<void> _loadInitialData() async {
     if (!widget.skipLocalBookLoad) await _loadLocalBooks();
     await _loadBooks(reset: true);
+    unawaited(_checkForFullCatalog());
+  }
+
+  Future<void> _checkForFullCatalog() async {
+    try {
+      final manifest = await _catalogService.fetchCatalogManifest();
+      if (!mounted || manifest == null) return;
+      setState(() {
+        _availableCatalogManifest = manifest;
+        if (manifest.compressedSizeBytes > 10 * 1024 * 1024) {
+          _statusMessage =
+              'Full Gutenberg catalogue available (${_formatBytes(manifest.compressedSizeBytes)})';
+          _statusActionLabel = 'Download';
+        } else {
+          _statusMessage = 'Downloading full Gutenberg catalogue';
+          _statusActionLabel = null;
+        }
+      });
+      if (manifest.compressedSizeBytes <= 10 * 1024 * 1024) {
+        await _installFullCatalog(manifest);
+      }
+    } catch (_) {
+      if (!mounted || _books.isEmpty) return;
+      setState(() {
+        _statusMessage = 'Could not check for catalogue updates.';
+        _statusActionLabel = 'Retry';
+      });
+    }
+  }
+
+  Future<void> _installFullCatalog(PublicDomainCatalogManifest manifest) async {
+    if (_catalogInstallInProgress) return;
+    setState(() {
+      _catalogInstallInProgress = true;
+      _catalogInstallProgress = null;
+      _statusMessage = 'Downloading full Gutenberg catalogue';
+      _statusActionLabel = null;
+    });
+    try {
+      await _catalogService.installCatalog(
+        manifest,
+        onProgress: (received, total) {
+          if (!mounted || total == null || total <= 0) return;
+          setState(() => _catalogInstallProgress = received / total);
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _catalogInstallInProgress = false;
+        _catalogInstallProgress = null;
+        _availableCatalogManifest = null;
+        _statusMessage = 'Full catalogue available offline';
+      });
+      await _loadBooks(reset: true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _catalogInstallInProgress = false;
+        _catalogInstallProgress = null;
+        _statusMessage = 'Could not update catalogue. Showing saved results.';
+        _statusActionLabel = 'Retry';
+      });
+    }
   }
 
   Future<void> _loadLocalBooks() async {
@@ -241,6 +309,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
         _refreshing = _books.isNotEmpty;
         _error = null;
         _statusMessage = _books.isNotEmpty ? 'Refreshing catalogue' : null;
+        _statusActionLabel = null;
         _page = 1;
       });
     } else {
@@ -270,6 +339,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
         _loadingMore = false;
         _refreshing = false;
         _statusMessage = page.catalogStatusMessage;
+        _statusActionLabel = null;
       });
       if (!reset) _maybePrefetchNextPage();
     } catch (e) {
@@ -281,6 +351,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
                   ? 'Could not refresh. Showing saved Project Gutenberg results.'
                   : 'Could not load more books. Try again when the catalog responds.'
             : null;
+        _statusActionLabel = null;
         _loading = false;
         _loadingMore = false;
         _refreshing = false;
@@ -411,6 +482,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   Future<void> _refreshCurrentQuery() async {
     setState(() {
       _statusMessage = 'Refreshing Project Gutenberg';
+      _statusActionLabel = null;
       _refreshing = true;
     });
     try {
@@ -425,6 +497,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
         _loading = false;
         _refreshing = false;
         _statusMessage = page.catalogStatusMessage;
+        _statusActionLabel = null;
       });
     } catch (e) {
       if (!mounted) return;
@@ -433,6 +506,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
         _statusMessage = _books.isNotEmpty
             ? 'Could not refresh. Showing saved results.'
             : null;
+        _statusActionLabel = null;
         _error = _books.isEmpty ? _catalogUnavailableMessage(e) : null;
       });
     }
@@ -1327,11 +1401,12 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       ),
       child: Row(
         children: [
-          if (_refreshing) ...[
+          if (_refreshing || _catalogInstallInProgress) ...[
             SizedBox(
               width: 14,
               height: 14,
               child: CircularProgressIndicator(
+                value: _catalogInstallProgress,
                 strokeWidth: 2,
                 color: _s.accentColor,
               ),
@@ -1346,9 +1421,32 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
               style: _s.uiText(fontSize: 12, color: _s.mutedColor),
             ),
           ),
+          if (_statusActionLabel != null) ...[
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: _handleStatusAction,
+              style: TextButton.styleFrom(
+                foregroundColor: _s.accentColor,
+                visualDensity: VisualDensity.compact,
+              ),
+              child: Text(
+                _statusActionLabel!,
+                style: _s.uiText(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  void _handleStatusAction() {
+    final manifest = _availableCatalogManifest;
+    if (manifest != null) {
+      unawaited(_installFullCatalog(manifest));
+      return;
+    }
+    unawaited(_checkForFullCatalog());
   }
 
   Widget _buildMessageState({
@@ -1721,5 +1819,15 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       case PublicDomainSort.descending:
         return 'Newest IDs';
     }
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    final kb = bytes / 1024;
+    if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
+    final mb = kb / 1024;
+    if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
+    final gb = mb / 1024;
+    return '${gb.toStringAsFixed(1)} GB';
   }
 }

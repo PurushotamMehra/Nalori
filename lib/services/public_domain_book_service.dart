@@ -12,6 +12,7 @@ import '../models/public_domain_catalog.dart';
 import '../utils/person_name_utils.dart';
 import 'api_client.dart';
 import 'public_domain_catalog_database.dart';
+import 'public_domain_catalog_installer.dart';
 import 'public_domain_catalog_repository.dart';
 
 class PublicDomainBookService {
@@ -21,6 +22,7 @@ class PublicDomainBookService {
     Duration catalogTimeout = _catalogTimeout,
     int catalogMaxRetries = _catalogMaxRetries,
     PublicDomainCatalogRepository? catalogRepository,
+    PublicDomainCatalogInstaller? catalogInstaller,
   }) : _catalogTimeoutForRequest = catalogTimeout,
        _catalogMaxRetriesForRequest = catalogMaxRetries,
        _catalogRepository =
@@ -28,6 +30,11 @@ class PublicDomainBookService {
            PublicDomainCatalogRepository(
              database: PublicDomainCatalogDatabase(),
              assetBundle: assetBundle,
+           ),
+       _catalogInstaller =
+           catalogInstaller ??
+           PublicDomainCatalogInstaller(
+             database: PublicDomainCatalogDatabase(),
            ),
        _client = ApiClient(
          client: client,
@@ -54,6 +61,7 @@ class PublicDomainBookService {
   final Duration _catalogTimeoutForRequest;
   final int _catalogMaxRetriesForRequest;
   final PublicDomainCatalogRepository _catalogRepository;
+  final PublicDomainCatalogInstaller _catalogInstaller;
 
   Future<PublicDomainBookPage> fetchLocalCatalogPage({
     PublicDomainBookQuery query = const PublicDomainBookQuery(),
@@ -69,6 +77,20 @@ class PublicDomainBookService {
 
   Future<PublicDomainBook?> findLocalCatalogBook(int id) {
     return _catalogRepository.bookById(id);
+  }
+
+  Future<PublicDomainCatalogManifest?> fetchCatalogManifest() {
+    return _catalogInstaller.fetchManifest();
+  }
+
+  Future<void> installCatalog(
+    PublicDomainCatalogManifest manifest, {
+    PublicDomainCatalogDownloadProgress? onProgress,
+  }) {
+    return _catalogInstaller.installFromManifest(
+      manifest,
+      onProgress: onProgress,
+    );
   }
 
   Future<PublicDomainBookPage?> readBundledBooks({
