@@ -28,8 +28,10 @@ class PublicDomainCatalogDatabase {
   final int pageSize;
   Database? _db;
 
+  DatabaseFactory? get databaseFactoryForTesting => _databaseFactory;
+
   Future<bool> exists() async {
-    final path = await _path();
+    final path = await databasePath();
     final factory = _databaseFactory ?? databaseFactory;
     return factory.databaseExists(path);
   }
@@ -383,6 +385,10 @@ class PublicDomainCatalogDatabase {
   }
 
   Future<String> _path() async {
+    return databasePath();
+  }
+
+  Future<String> databasePath() async {
     final explicit = _databasePath;
     if (explicit != null) return explicit;
     final dir = await getApplicationDocumentsDirectory();
