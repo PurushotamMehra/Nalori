@@ -1,0 +1,47 @@
+name: Gutenberg Catalog Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      catalog_version:
+        description: "Immutable catalogue version, for example 2026-06-14"
+        required: true
+      source_url:
+        description: "Official Project Gutenberg RDF archive URL"
+        required: false
+        default: "https://www.gutenberg.org/cache/epub/feeds/rdf-files.tar.bz2"
+      artifact_base_url:
+        description: "Final immutable static URL prefix for manifest download_url"
+        required: true
+
+jobs:
+  build-catalog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Generate catalogue
+        run: |
+          python3 tool/generate_gutenberg_catalog.py \
+            --source-url "${{ inputs.source_url }}" \
+            --output-dir build/gutenberg-catalog \
+            --catalog-version "${{ inputs.catalog_version }}" \
+            --artifact-base-url "${{ inputs.artifact_base_url }}"
+
+      - name: Upload generated catalogue
+        uses: actions/upload-artifact@v4
+        with:
+          name: gutenberg-catalog-${{ inputs.catalog_version }}
+          path: |
+            build/gutenberg-catalog/manifest.json
+            build/gutenberg-catalog/generation_report.json
+            build/gutenberg-catalog/*.sqlite
+            build/gutenberg-catalog/*.sqlite.gz
