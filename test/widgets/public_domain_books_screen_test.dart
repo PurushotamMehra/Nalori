@@ -38,11 +38,13 @@ void main() {
     expect(find.text('Emma'), findsOneWidget);
   });
 
-  testWidgets('bundled books display before remote completion', (tester) async {
-    final completer = Completer<PublicDomainBookPage>();
+  testWidgets('starter books display as the immediate local catalogue', (
+    tester,
+  ) async {
     final service = _FakeCatalogService(
-      bundledPage: _page([_book(10, 'Pride and Prejudice')]),
-      initialCompleter: completer,
+      bundledPage: _page([
+        _book(10, 'Pride and Prejudice'),
+      ], statusMessage: 'Showing starter offline catalogue'),
     );
 
     await tester.pumpWidget(_wrap(service));
@@ -50,17 +52,8 @@ void main() {
     await tester.pump();
 
     expect(find.text('Pride and Prejudice'), findsOneWidget);
-    expect(
-      find.text('Refreshing Project Gutenberg in the background'),
-      findsOneWidget,
-    );
+    expect(find.text('Showing starter offline catalogue'), findsOneWidget);
     expect(service.initialRequests, 1);
-
-    completer.complete(_page([_book(11, 'Sense and Sensibility')]));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Pride and Prejudice'), findsOneWidget);
-    expect(find.text('Sense and Sensibility'), findsOneWidget);
   });
 
   testWidgets(
@@ -90,38 +83,27 @@ void main() {
     },
   );
 
-  testWidgets('cached data plus refresh failure keeps book cards visible', (
-    tester,
-  ) async {
+  testWidgets('cached local data keeps book cards visible', (tester) async {
     final service = _FakeCatalogService(
-      cachedPage: _page([_book(3, 'Frankenstein')]),
-      initialErrors: [
-        const PublicDomainBookServiceException(
-          'The catalog is temporarily unavailable.',
-        ),
-      ],
+      cachedPage: _page([
+        _book(3, 'Frankenstein'),
+      ], statusMessage: 'Full catalogue available offline'),
     );
 
     await tester.pumpWidget(_wrap(service));
     await tester.pumpAndSettle();
 
     expect(find.text('Frankenstein'), findsOneWidget);
-    expect(
-      find.text('Could not refresh. Showing saved Project Gutenberg results.'),
-      findsOneWidget,
-    );
+    expect(find.text('Full catalogue available offline'), findsOneWidget);
   });
 
-  testWidgets('bundled data plus refresh failure keeps book cards visible', (
+  testWidgets('bundled data keeps book cards visible without network', (
     tester,
   ) async {
     final service = _FakeCatalogService(
-      bundledPage: _page([_book(12, 'Dracula')]),
-      initialErrors: [
-        const PublicDomainBookServiceException(
-          'The catalog is temporarily unavailable.',
-        ),
-      ],
+      bundledPage: _page([
+        _book(12, 'Dracula'),
+      ], statusMessage: 'Showing starter offline catalogue'),
     );
 
     await tester.pumpWidget(_wrap(service));
@@ -129,10 +111,7 @@ void main() {
 
     expect(find.text('Dracula'), findsOneWidget);
     expect(find.text('Catalog unavailable'), findsNothing);
-    expect(
-      find.text('Could not refresh. Showing saved Project Gutenberg results.'),
-      findsOneWidget,
-    );
+    expect(find.text('Showing starter offline catalogue'), findsOneWidget);
   });
 
   testWidgets('pagination failure preserves loaded books', (tester) async {
@@ -212,6 +191,7 @@ PublicDomainBook _book(int id, String title) {
 PublicDomainBookPage _page(
   List<PublicDomainBook> books, {
   bool hasNextPage = false,
+  String? statusMessage,
 }) {
   return PublicDomainBookPage(
     books: books,
@@ -219,6 +199,7 @@ PublicDomainBookPage _page(
     hasNextPage: hasNextPage,
     page: 1,
     nextUrl: hasNextPage ? 'https://gutendex.com/books?page=2' : null,
+    catalogStatusMessage: statusMessage,
   );
 }
 
@@ -278,6 +259,24 @@ class _FakeCatalogService extends PublicDomainBookService {
     }
     if (initialCompleter != null) return initialCompleter!.future;
     return initialPage ?? cachedPage ?? _page(const []);
+  }
+
+  @override
+  Future<PublicDomainBookPage> fetchLocalCatalogPage({
+    PublicDomainBookQuery query = const PublicDomainBookQuery(),
+    int page = 1,
+  }) async {
+    if (page == 1) {
+      initialRequests += 1;
+      if (bundledPage != null) return bundledPage!;
+      if (cachedPage != null) return cachedPage!;
+      if (initialRequests <= initialErrors.length) {
+        throw initialErrors[initialRequests - 1];
+      }
+      if (initialCompleter != null) return initialCompleter!.future;
+      return initialPage ?? _page(const []);
+    }
+    return fetchBooksCacheFirst(query: query, page: page);
   }
 
   @override

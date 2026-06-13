@@ -8,8 +8,11 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/public_domain_book.dart';
+import '../models/public_domain_catalog.dart';
 import '../utils/person_name_utils.dart';
 import 'api_client.dart';
+import 'public_domain_catalog_database.dart';
+import 'public_domain_catalog_repository.dart';
 
 class PublicDomainBookService {
   PublicDomainBookService({
@@ -17,9 +20,15 @@ class PublicDomainBookService {
     AssetBundle? assetBundle,
     Duration catalogTimeout = _catalogTimeout,
     int catalogMaxRetries = _catalogMaxRetries,
+    PublicDomainCatalogRepository? catalogRepository,
   }) : _catalogTimeoutForRequest = catalogTimeout,
        _catalogMaxRetriesForRequest = catalogMaxRetries,
-       _assetBundle = assetBundle ?? rootBundle,
+       _catalogRepository =
+           catalogRepository ??
+           PublicDomainCatalogRepository(
+             database: PublicDomainCatalogDatabase(),
+             assetBundle: assetBundle,
+           ),
        _client = ApiClient(
          client: client,
          minIntervalByHost: const {'gutendex.com': Duration(milliseconds: 800)},
@@ -36,50 +45,38 @@ class PublicDomainBookService {
   static const _maxAutomaticExactAuthorPages = 2;
   static const _catalogTimeout = Duration(seconds: 20);
   static const _catalogMaxRetries = 1;
-  static const _bundledCatalogAsset =
-      'assets/catalog/gutenberg_starter_catalog.json';
 
   static bool _hasPrefetchedDefaultThisSession = false;
   static DateTime? _lastAutomaticPrefetchAt;
   static final Map<String, Future<PublicDomainBookPage>> _inFlightRequests = {};
 
   final ApiClient _client;
-  final AssetBundle _assetBundle;
   final Duration _catalogTimeoutForRequest;
   final int _catalogMaxRetriesForRequest;
+  final PublicDomainCatalogRepository _catalogRepository;
+
+  Future<PublicDomainBookPage> fetchLocalCatalogPage({
+    PublicDomainBookQuery query = const PublicDomainBookQuery(),
+    int page = 1,
+  }) async {
+    final safePage = page < 1 ? 1 : page;
+    final cursor = PublicDomainCatalogCursor(
+      offset: (safePage - 1) * _catalogRepository.pageSize,
+    );
+    final result = await _catalogRepository.query(query: query, cursor: cursor);
+    return result.toBookPage(page: safePage);
+  }
+
+  Future<PublicDomainBook?> findLocalCatalogBook(int id) {
+    return _catalogRepository.bookById(id);
+  }
 
   Future<PublicDomainBookPage?> readBundledBooks({
     PublicDomainBookQuery query = const PublicDomainBookQuery(),
   }) async {
     try {
-      final raw = await _assetBundle.loadString(_bundledCatalogAsset);
-      final decoded = json.decode(raw);
-      final rawBooks = decoded is Map<String, dynamic>
-          ? decoded['books']
-          : decoded;
-      if (rawBooks is! List) return null;
-
-      final books = <PublicDomainBook>[];
-      for (final rawBook in rawBooks) {
-        if (rawBook is! Map) continue;
-        try {
-          final book = PublicDomainBook.fromCache(
-            Map<String, dynamic>.from(rawBook),
-          );
-          if (!_isEligibleBundledBook(book, query: query)) continue;
-          books.add(book);
-        } catch (_) {
-          continue;
-        }
-      }
-
-      final sorted = _sortLocalBooks(books, query.sort);
-      return PublicDomainBookPage(
-        books: sorted,
-        count: sorted.length,
-        hasNextPage: false,
-        page: 1,
-      );
+      final page = await _catalogRepository.queryStarter(query: query);
+      return page.toBookPage(page: 1);
     } catch (error) {
       if (kDebugMode) {
         debugPrint('Bundled Gutenberg catalog load failed: $error');
@@ -586,62 +583,6 @@ class PublicDomainBookService {
         .whereType<String>()
         .map((value) => value.trim().toLowerCase())
         .contains(languageCode);
-  }
-
-  bool _isEligibleBundledBook(
-    PublicDomainBook book, {
-    required PublicDomainBookQuery query,
-  }) {
-    if (book.epubUrl.trim().isEmpty) return false;
-    final parsedUrl = Uri.tryParse(book.epubUrl);
-    if (parsedUrl == null || !parsedUrl.hasScheme) return false;
-
-    final languageCode = query.languageCode?.trim().toLowerCase();
-    if (languageCode != null && languageCode.isNotEmpty) {
-      final languages = book.languages
-          .map((value) => value.trim().toLowerCase())
-          .toSet();
-      if (!languages.contains(languageCode)) return false;
-    }
-
-    final normalizedAuthor = _normalizePersonName(query.exactAuthor);
-    if (normalizedAuthor != null) {
-      final hasAuthor = book.authorDetails.any(
-        (author) => _normalizePersonName(author.name) == normalizedAuthor,
-      );
-      if (!hasAuthor) return false;
-    }
-
-    final searchText = query.trimmedText.toLowerCase();
-    if (searchText.isEmpty) return true;
-
-    final searchable = query.searchMode == PublicDomainSearchMode.topic
-        ? [...book.subjects, ...book.bookshelves].join(' ')
-        : [
-            book.title,
-            ...book.authors,
-            ...book.authorDetails.map((author) => author.name),
-          ].join(' ');
-    return searchable.toLowerCase().contains(searchText);
-  }
-
-  List<PublicDomainBook> _sortLocalBooks(
-    List<PublicDomainBook> books,
-    PublicDomainSort sort,
-  ) {
-    final sorted = books.toList(growable: false);
-    switch (sort) {
-      case PublicDomainSort.popular:
-        sorted.sort((a, b) => b.downloadCount.compareTo(a.downloadCount));
-        break;
-      case PublicDomainSort.ascending:
-        sorted.sort((a, b) => a.id.compareTo(b.id));
-        break;
-      case PublicDomainSort.descending:
-        sorted.sort((a, b) => b.id.compareTo(a.id));
-        break;
-    }
-    return sorted;
   }
 
   String _sortValue(PublicDomainSort sort) {

@@ -118,7 +118,6 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   bool _refreshing = false;
   bool _hasNextPage = false;
   int _page = 1;
-  String? _nextPageUrl;
   int _requestGeneration = 0;
   String? _activeInitialLoadKey;
   Timer? _searchDebounce;
@@ -237,59 +236,28 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
     final query = _activeQuery;
     if (reset) {
       _clearPrefetchedPage();
-      final bundled = await _catalogService.readBundledBooks(query: query);
-      final cached = await _catalogService.readCachedBooks(query: query);
-      if (!mounted || generation != _requestGeneration) return;
-      final hasFreshCache = cached != null
-          ? await _catalogService.isCacheFresh(query: query)
-          : false;
-      final starterBooks = _mergeBookLists(
-        bundled?.books ?? const [],
-        cached?.books ?? const [],
-      );
-      final hasStarterBooks = starterBooks.isNotEmpty;
       setState(() {
-        if (hasStarterBooks) {
-          _books = starterBooks;
-          _page = cached?.page ?? 1;
-          _hasNextPage = cached?.hasNextPage ?? false;
-          _nextPageUrl = cached?.nextUrl;
-        }
-        _loading = !hasStarterBooks;
-        _refreshing = hasStarterBooks && !hasFreshCache;
+        _loading = _books.isEmpty;
+        _refreshing = _books.isNotEmpty;
         _error = null;
-        _statusMessage = hasStarterBooks && !hasFreshCache
-            ? 'Refreshing Project Gutenberg in the background'
-            : null;
-        if (!hasStarterBooks) {
-          _page = 1;
-          _nextPageUrl = null;
-        }
+        _statusMessage = _books.isNotEmpty ? 'Refreshing catalogue' : null;
+        _page = 1;
       });
-
-      if (cached != null && hasFreshCache) return;
     } else {
       setState(() => _loadingMore = true);
     }
 
     try {
       final requestedPage = reset ? 1 : _page + 1;
-      final nextPageUrl = reset ? null : _nextPageUrl;
       final prefetchedPage = reset
           ? null
           : _takePrefetchedPage(query: query, page: requestedPage);
       final page =
           prefetchedPage ??
-          (reset
-              ? await _catalogService.fetchBooksAndCache(
-                  query: query,
-                  page: requestedPage,
-                )
-              : await _catalogService.fetchBooksCacheFirst(
-                  query: query,
-                  page: requestedPage,
-                  pageUrl: nextPageUrl,
-                ));
+          await _catalogService.fetchLocalCatalogPage(
+            query: query,
+            page: requestedPage,
+          );
 
       if (!mounted || generation != _requestGeneration) return;
       setState(() {
@@ -298,11 +266,10 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
             : _appendUniqueBooks(_books, page.books);
         _page = page.page;
         _hasNextPage = page.hasNextPage;
-        _nextPageUrl = page.nextUrl;
         _loading = false;
         _loadingMore = false;
         _refreshing = false;
-        _statusMessage = null;
+        _statusMessage = page.catalogStatusMessage;
       });
       if (!reset) _maybePrefetchNextPage();
     } catch (e) {
@@ -402,7 +369,6 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
 
     final query = _activeQuery;
     final nextPage = _page + 1;
-    final nextPageUrl = _nextPageUrl;
     final key = _pageCacheKey(query: query, page: nextPage);
     if (_prefetchedPageKey == key && _prefetchedPage != null) return;
 
@@ -410,11 +376,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
     _prefetchedPageKey = key;
     unawaited(
       _catalogService
-          .fetchBooksCacheFirst(
-            query: query,
-            page: nextPage,
-            pageUrl: nextPageUrl,
-          )
+          .fetchLocalCatalogPage(query: query, page: nextPage)
           .then((page) {
             if (!mounted || _prefetchedPageKey != key) return;
             _prefetchedPage = page;
@@ -452,18 +414,17 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       _refreshing = true;
     });
     try {
-      final page = await _catalogService.fetchBooksAndCache(
+      final page = await _catalogService.fetchLocalCatalogPage(
         query: _activeQuery,
       );
       if (!mounted) return;
       setState(() {
-        _books = _mergeBookLists(_books, page.books);
+        _books = page.books;
         _page = page.page;
         _hasNextPage = page.hasNextPage;
-        _nextPageUrl = page.nextUrl;
         _loading = false;
         _refreshing = false;
-        _statusMessage = null;
+        _statusMessage = page.catalogStatusMessage;
       });
     } catch (e) {
       if (!mounted) return;

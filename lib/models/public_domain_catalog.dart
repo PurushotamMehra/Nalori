@@ -82,6 +82,8 @@ class PublicDomainCatalogPage {
       count: totalCount,
       hasNextPage: hasMore,
       page: page,
+      catalogStatusMessage: status.message,
+      isFallbackOnly: status.isFallbackOnly,
     );
   }
 }
