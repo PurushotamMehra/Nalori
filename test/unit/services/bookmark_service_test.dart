@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nalori/services/bookmark_service.dart';
@@ -125,6 +126,72 @@ void main() {
 
         expect(result[0].name, 'My Important Place');
       });
+    });
+
+    group('update', () {
+      test('should save arbitrary bookmark color values', () async {
+        await bookmarkService.add(5);
+
+        final updated = await bookmarkService.update(
+          5,
+          colorIndex: 2,
+          colorValue: bookmarkColorValue(const Color(0xFF123456)),
+        );
+
+        expect(updated.single.colorIndex, 2);
+        expect(
+          updated.single.colorValue,
+          bookmarkColorValue(const Color(0xFF123456)),
+        );
+        expect(updated.single.color, const Color(0xFF123456));
+      });
+
+      test(
+        'should clear custom color values when saving fixed colors',
+        () async {
+          await bookmarkService.add(
+            5,
+            colorValue: bookmarkColorValue(const Color(0xFF123456)),
+          );
+
+          final updated = await bookmarkService.update(
+            5,
+            colorIndex: 2,
+            clearColorValue: true,
+          );
+
+          expect(updated.single.colorValue, isNull);
+          expect(updated.single.color, kBookmarkColors[2]);
+        },
+      );
+    });
+
+    group('default color', () {
+      test('should load legacy default bookmark color index', () async {
+        SharedPreferences.setMockInitialValues({'default_bookmark_color': 2});
+        bookmarkService = BookmarkService(bookId: testBookId);
+
+        expect(await bookmarkService.loadDefaultColor(), kBookmarkColors[2]);
+      });
+
+      test('should persist custom default bookmark color values', () async {
+        await bookmarkService.saveDefaultColor(const Color(0xFF123456));
+
+        expect(
+          await bookmarkService.loadDefaultColor(),
+          const Color(0xFF123456),
+        );
+      });
+
+      test(
+        'saving a fixed default index clears custom default color value',
+        () async {
+          await bookmarkService.saveDefaultColor(const Color(0xFF123456));
+          await bookmarkService.saveDefaultColorIndex(3);
+
+          expect(await bookmarkService.loadDefaultColor(), kBookmarkColors[3]);
+        },
+      );
     });
 
     group('clearAll', () {

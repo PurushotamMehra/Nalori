@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/saved_word.dart';
+import '../models/stable_book_location.dart';
 
 class DictionaryService {
   final String bookId;
@@ -88,6 +89,7 @@ class DictionaryService {
     int? originalChunkIndex,
     int? originalStartOffset,
     int? originalEndOffset,
+    StableBookLocation? stableLocation,
   }) async {
     final newWord = SavedWord(
       id: _uuid.v4(),
@@ -99,6 +101,7 @@ class DictionaryService {
       originalChunkIndex: originalChunkIndex,
       originalStartOffset: originalStartOffset,
       originalEndOffset: originalEndOffset,
+      stableLocation: stableLocation,
     );
 
     // Avoid exact duplicates

@@ -1,11 +1,17 @@
 library epubx;
 
+export 'package:archive/archive.dart' show Archive;
+
 export 'src/utils/enum_from_string.dart';
 
 export 'src/epub_reader.dart';
 export 'src/epub_writer.dart';
 export 'src/ref_entities/epub_book_ref.dart';
+export 'src/ref_entities/epub_byte_content_file_ref.dart';
 export 'src/ref_entities/epub_chapter_ref.dart';
+export 'src/ref_entities/epub_content_file_ref.dart';
+export 'src/ref_entities/epub_content_ref.dart';
+export 'src/ref_entities/epub_text_content_file_ref.dart';
 export 'src/entities/epub_book.dart';
 export 'src/entities/epub_chapter.dart';
 export 'src/entities/epub_content.dart';
@@ -22,6 +28,7 @@ export 'src/schema/opf/epub_manifest.dart';
 export 'src/schema/opf/epub_manifest_item.dart';
 export 'src/schema/opf/epub_metadata.dart';
 export 'src/schema/opf/epub_metadata_creator.dart';
+export 'src/schema/opf/epub_metadata_meta.dart';
 export 'src/schema/opf/epub_package.dart';
 export 'src/schema/opf/epub_version.dart';
 export 'src/schema/navigation/epub_metadata.dart';

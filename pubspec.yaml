@@ -47,3 +47,5 @@ flutter:
     - assets/images/nalori_mark.svg
     - assets/images/nalori_app_icon.png
     - assets/catalog/gutenberg_starter_catalog.json
+    - test/fixtures/books/feature_rich_lazy_reader.epub
+    - Dialogues -- Plato.epub

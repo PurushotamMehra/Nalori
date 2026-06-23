@@ -19,9 +19,13 @@ class SchemaReader {
     var package = await PackageReader.readPackage(epubArchive, rootFilePath);
     result.Package = package;
 
-    var navigation = await NavigationReader.readNavigation(
-        epubArchive, contentDirectoryPath, package);
-    result.Navigation = navigation;
+    try {
+      var navigation = await NavigationReader.readNavigation(
+          epubArchive, contentDirectoryPath, package);
+      result.Navigation = navigation;
+    } on Exception {
+      result.Navigation = null;
+    }
 
     return result;
   }

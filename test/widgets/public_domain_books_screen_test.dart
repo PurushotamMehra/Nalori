@@ -166,6 +166,154 @@ void main() {
     expect(find.text('The Time Machine'), findsOneWidget);
     expect(find.text('The Invisible Man'), findsOneWidget);
   });
+
+  testWidgets('keyboard search submits query and replaces results', (
+    tester,
+  ) async {
+    final service = _FakeCatalogService(
+      firstPageResults: [
+        _page([_book(1, 'Emma')]),
+        _page([_book(2, 'Persuasion')]),
+      ],
+    );
+
+    await tester.pumpWidget(_wrap(service));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'persuasion');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Emma'), findsNothing);
+    expect(find.text('Persuasion'), findsOneWidget);
+    expect(service.requestedQueries.last.trimmedText, 'persuasion');
+    expect(service.requestedPages.last, 1);
+  });
+
+  testWidgets('arrow search submits through the same query reload path', (
+    tester,
+  ) async {
+    final service = _FakeCatalogService(
+      firstPageResults: [
+        _page([_book(1, 'Emma')]),
+        _page([_book(3, 'Mansfield Park')]),
+      ],
+    );
+
+    await tester.pumpWidget(_wrap(service));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'mansfield');
+    await tester.tap(find.byTooltip('Search'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Emma'), findsNothing);
+    expect(find.text('Mansfield Park'), findsOneWidget);
+    expect(service.requestedQueries.last.trimmedText, 'mansfield');
+    expect(service.requestedPages.last, 1);
+  });
+
+  testWidgets('clear search immediately restores active-filter results', (
+    tester,
+  ) async {
+    final service = _FakeCatalogService(
+      firstPageResults: [
+        _page([_book(1, 'Emma')]),
+        _page([_book(2, 'Persuasion')]),
+        _page([_book(4, 'Jane Eyre')]),
+      ],
+    );
+
+    await tester.pumpWidget(_wrap(service));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'persuasion');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Clear search'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Persuasion'), findsNothing);
+    expect(find.text('Jane Eyre'), findsOneWidget);
+    expect(service.requestedQueries.last.trimmedText, '');
+    expect(service.requestedQueries.last.languageCode, 'en');
+    expect(service.requestedPages.last, 1);
+  });
+
+  testWidgets('apply filters immediately executes selected query', (
+    tester,
+  ) async {
+    final service = _FakeCatalogService(
+      firstPageResults: [
+        _page([_book(1, 'Emma')]),
+        _page([_book(5, 'Les Miserables')]),
+      ],
+    );
+
+    await tester.pumpWidget(_wrap(service));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Filters'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Any language'));
+    await tester.tap(find.text('Oldest IDs'));
+    await tester.tap(find.text('Apply Filters'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Emma'), findsNothing);
+    expect(find.text('Les Miserables'), findsOneWidget);
+    expect(service.requestedQueries.last.languageCode, isNull);
+    expect(service.requestedQueries.last.sort, PublicDomainSort.ascending);
+    expect(service.requestedPages.last, 1);
+  });
+
+  testWidgets('new query resets pagination and ignores stale responses', (
+    tester,
+  ) async {
+    final olderSearch = Completer<PublicDomainBookPage>();
+    final newerSearch = Completer<PublicDomainBookPage>();
+    final service = _FakeCatalogService(
+      firstPageResults: [
+        _page([_book(1, 'Emma')], hasNextPage: true),
+        olderSearch.future,
+        newerSearch.future,
+      ],
+      nextPages: [
+        _page([_book(2, 'Northanger Abbey')], page: 2),
+      ],
+    );
+
+    await tester.pumpWidget(_wrap(service));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Load more'));
+    await tester.pumpAndSettle();
+    expect(find.text('Northanger Abbey'), findsOneWidget);
+    expect(service.requestedPages.last, 2);
+
+    await tester.enterText(find.byType(TextField), 'old');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField), 'new');
+    await tester.testTextInput.receiveAction(TextInputAction.search);
+    await tester.pump();
+
+    newerSearch.complete(_page([_book(3, 'New Result')]));
+    await tester.pumpAndSettle();
+    olderSearch.complete(_page([_book(4, 'Old Result')]));
+    await tester.pumpAndSettle();
+
+    expect(find.text('New Result'), findsOneWidget);
+    expect(find.text('Old Result'), findsNothing);
+    expect(find.text('Emma'), findsNothing);
+    expect(find.text('Northanger Abbey'), findsNothing);
+    expect(service.requestedPages.sublist(service.requestedPages.length - 2), [
+      1,
+      1,
+    ]);
+  });
 }
 
 Widget _wrap(PublicDomainBookService service) {
@@ -191,13 +339,14 @@ PublicDomainBook _book(int id, String title) {
 PublicDomainBookPage _page(
   List<PublicDomainBook> books, {
   bool hasNextPage = false,
+  int page = 1,
   String? statusMessage,
 }) {
   return PublicDomainBookPage(
     books: books,
     count: books.length,
     hasNextPage: hasNextPage,
-    page: 1,
+    page: page,
     nextUrl: hasNextPage ? 'https://gutendex.com/books?page=2' : null,
     catalogStatusMessage: statusMessage,
   );
@@ -208,6 +357,7 @@ class _FakeCatalogService extends PublicDomainBookService {
     this.bundledPage,
     this.cachedPage,
     this.initialPage,
+    this.firstPageResults = const [],
     this.initialCompleter,
     this.initialErrors = const [],
     this.pageErrors = const [],
@@ -217,12 +367,15 @@ class _FakeCatalogService extends PublicDomainBookService {
   final PublicDomainBookPage? bundledPage;
   final PublicDomainBookPage? cachedPage;
   final PublicDomainBookPage? initialPage;
+  final List<FutureOr<PublicDomainBookPage>> firstPageResults;
   final Completer<PublicDomainBookPage>? initialCompleter;
   final List<Object> initialErrors;
   final List<Object> pageErrors;
   final List<PublicDomainBookPage> nextPages;
   int initialRequests = 0;
   int pageRequests = 0;
+  final List<PublicDomainBookQuery> requestedQueries = [];
+  final List<int> requestedPages = [];
 
   @override
   Future<PublicDomainBookPage?> readBundledBooks({
@@ -266,12 +419,18 @@ class _FakeCatalogService extends PublicDomainBookService {
     PublicDomainBookQuery query = const PublicDomainBookQuery(),
     int page = 1,
   }) async {
+    requestedQueries.add(query);
+    requestedPages.add(page);
     if (page == 1) {
       initialRequests += 1;
       if (bundledPage != null) return bundledPage!;
       if (cachedPage != null) return cachedPage!;
       if (initialRequests <= initialErrors.length) {
         throw initialErrors[initialRequests - 1];
+      }
+      final responseIndex = initialRequests - initialErrors.length - 1;
+      if (responseIndex < firstPageResults.length) {
+        return Future.value(firstPageResults[responseIndex]);
       }
       if (initialCompleter != null) return initialCompleter!.future;
       return initialPage ?? _page(const []);

@@ -12,6 +12,7 @@ import '../services/user_education_service.dart';
 import '../ui/continue_reading_colors.dart';
 import 'book_list_screen.dart';
 import 'how_to_use_screen.dart';
+import 'reader_screen.dart';
 
 /// The app's entry screen — shows a quick-resume card for the last-read book
 /// or falls through to the library if nothing has been read yet.
@@ -37,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen>
   bool _lastBookHasCover = false;
   bool _hasSeenHowToUse = true;
   bool _loading = true;
+  bool _resumeOpening = false;
 
   late final AnimationController _fadeController;
   late final Animation<double> _fadeAnim;
@@ -69,14 +71,18 @@ class _HomeScreenState extends State<HomeScreen>
     File? lastFile;
 
     if (allMeta.isNotEmpty) {
-      // Verify the file still exists on disk
-      final books = await _libraryService.getLocalBooks();
-      final bookPaths = {for (final f in books) f.path};
-
       for (final meta in allMeta) {
-        // Find the matching file
-        final match = books.where((f) => f.path.endsWith(meta.id)).firstOrNull;
-        if (match != null && bookPaths.contains(match.path)) {
+        final match = await _libraryService.localBookForMetadata(
+          bookId: meta.id,
+          managedFilePath: meta.managedFilePath,
+        );
+        if (match != null) {
+          if (meta.managedFilePath != match.path) {
+            await _metadataService.updateManagedFilePath(
+              bookId: meta.id,
+              managedFilePath: match.path,
+            );
+          }
           // Calculate progress to determine if book is basically finished
           final progress = meta.totalChunks > 1
               ? meta.lastReadIndex / (meta.totalChunks - 1)
@@ -85,7 +91,9 @@ class _HomeScreenState extends State<HomeScreen>
           // Only show resume if user has actually started reading (index > 0)
           // AND hasn't finished the book yet (progress < 99%)
           if (meta.lastReadIndex > 0 && progress < 0.99) {
-            lastRead = meta;
+            lastRead = meta.managedFilePath == match.path
+                ? meta
+                : meta.copyWith(managedFilePath: match.path);
             lastFile = match;
             break; // Stop looking after the first most recently active/unfinished book
           }
@@ -124,14 +132,46 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Future<void> _resumeReading() async {
-    if (_lastBookFile == null) return;
+    if (_resumeOpening || _lastBook == null || _lastBookFile == null) return;
+    setState(() => _resumeOpening = true);
+    final bookFile = await _libraryService.localBookForMetadata(
+      bookId: _lastBook!.id,
+      managedFilePath: _lastBook!.managedFilePath,
+    );
+    if (!mounted) return;
+    if (bookFile == null) {
+      setState(() => _resumeOpening = false);
+      await Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const BookListScreen()),
+      );
+      _init();
+      return;
+    }
+
+    final metadata = _lastBook!.managedFilePath == bookFile.path
+        ? _lastBook!
+        : _lastBook!.copyWith(managedFilePath: bookFile.path);
+    if (_lastBook!.managedFilePath != bookFile.path) {
+      await _metadataService.updateManagedFilePath(
+        bookId: metadata.id,
+        managedFilePath: bookFile.path,
+      );
+      if (!mounted) return;
+    }
+
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => BookListScreen(initiallyOpenFile: _lastBookFile!),
+        builder: (_) => ReaderScreen.directContinue(
+          bookFile: bookFile,
+          metadata: metadata,
+          settings: _settings,
+        ),
       ),
     );
-    // Refresh after returning from reader / library
+    if (!mounted) return;
+    setState(() => _resumeOpening = false);
     _init();
   }
 

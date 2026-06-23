@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'stable_book_location.dart';
+
 enum HighlightType { highlight, character, note }
 
 /// Available highlight colors.
@@ -68,6 +70,7 @@ class Highlight {
 
   /// User-authored note text for note annotations.
   final String? note;
+  final StableBookLocation? stableLocation;
 
   const Highlight({
     required this.id,
@@ -80,6 +83,7 @@ class Highlight {
     this.type = HighlightType.highlight,
     required this.createdAt,
     this.note,
+    this.stableLocation,
   });
 
   bool get isCharacter => type == HighlightType.character;
@@ -103,6 +107,7 @@ class Highlight {
     Object? colorValue = _unsetColorValue,
     HighlightType? type,
     Object? note = _unsetNote,
+    StableBookLocation? stableLocation,
   }) {
     return Highlight(
       id: id,
@@ -117,6 +122,7 @@ class Highlight {
       type: type ?? this.type,
       createdAt: createdAt,
       note: identical(note, _unsetNote) ? this.note : note as String?,
+      stableLocation: stableLocation ?? this.stableLocation,
     );
   }
 
@@ -131,6 +137,7 @@ class Highlight {
     'tp': type.index,
     'ca': createdAt.toIso8601String(),
     if (note != null) 'nt': note,
+    if (stableLocation != null) 'loc': stableLocation!.toJson(),
   };
 
   factory Highlight.fromJson(Map<String, dynamic> json) => Highlight(
@@ -144,6 +151,7 @@ class Highlight {
     type: _typeFromJson(json),
     createdAt: DateTime.parse(json['ca'] as String),
     note: json['nt'] as String?,
+    stableLocation: StableBookLocation.maybeFromJson(json['loc']),
   );
 
   static String encodeList(List<Highlight> list) =>
@@ -181,6 +189,7 @@ class Highlight {
             type: HighlightType.note,
             createdAt: base.createdAt,
             note: legacyNote,
+            stableLocation: base.stableLocation,
           ),
         );
       }

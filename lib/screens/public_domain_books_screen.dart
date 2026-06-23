@@ -306,6 +306,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       _clearPrefetchedPage();
       setState(() {
         _loading = _books.isEmpty;
+        _loadingMore = false;
         _refreshing = _books.isNotEmpty;
         _error = null;
         _statusMessage = _books.isNotEmpty ? 'Refreshing catalogue' : null;
@@ -330,9 +331,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
 
       if (!mounted || generation != _requestGeneration) return;
       setState(() {
-        _books = reset
-            ? _mergeBookLists(_books, page.books)
-            : _appendUniqueBooks(_books, page.books);
+        _books = reset ? page.books : _appendUniqueBooks(_books, page.books);
         _page = page.page;
         _hasNextPage = page.hasNextPage;
         _loading = false;
@@ -372,27 +371,6 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       ...existing,
       for (final book in incoming)
         if (seen.add(book.id)) book,
-    ];
-  }
-
-  List<PublicDomainBook> _mergeBookLists(
-    List<PublicDomainBook> base,
-    List<PublicDomainBook> incoming,
-  ) {
-    final byId = <int, PublicDomainBook>{};
-    final order = <int>[];
-    for (final book in base) {
-      if (byId.containsKey(book.id)) continue;
-      byId[book.id] = book;
-      order.add(book.id);
-    }
-    for (final book in incoming) {
-      if (!byId.containsKey(book.id)) order.add(book.id);
-      byId[book.id] = book;
-    }
-    return [
-      for (final id in order)
-        if (byId[id] != null) byId[id]!,
     ];
   }
 
@@ -466,10 +444,22 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   }
 
   void _submitSearch() {
-    _searchDebounce?.cancel();
     final nextText = _searchController.text.trim();
-    if (nextText == _activeQuery.trimmedText && !_loading) return;
-    setState(() => _activeQuery = _activeQuery.copyWith(text: nextText));
+    _reloadQuery(_activeQuery.copyWith(text: nextText));
+  }
+
+  void _clearSearch() {
+    _searchController.clear();
+    _reloadQuery(_activeQuery.copyWith(text: ''));
+  }
+
+  void _reloadQuery(PublicDomainBookQuery nextQuery) {
+    _searchDebounce?.cancel();
+    if (nextQuery.cacheKey == _activeQuery.cacheKey && !_loading) return;
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+    setState(() => _activeQuery = nextQuery);
     _loadBooks(reset: true);
   }
 
@@ -479,38 +469,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
     setState(() {});
   }
 
-  Future<void> _refreshCurrentQuery() async {
-    setState(() {
-      _statusMessage = 'Refreshing Project Gutenberg';
-      _statusActionLabel = null;
-      _refreshing = true;
-    });
-    try {
-      final page = await _catalogService.fetchLocalCatalogPage(
-        query: _activeQuery,
-      );
-      if (!mounted) return;
-      setState(() {
-        _books = page.books;
-        _page = page.page;
-        _hasNextPage = page.hasNextPage;
-        _loading = false;
-        _refreshing = false;
-        _statusMessage = page.catalogStatusMessage;
-        _statusActionLabel = null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _refreshing = false;
-        _statusMessage = _books.isNotEmpty
-            ? 'Could not refresh. Showing saved results.'
-            : null;
-        _statusActionLabel = null;
-        _error = _books.isEmpty ? _catalogUnavailableMessage(e) : null;
-      });
-    }
-  }
+  Future<void> _refreshCurrentQuery() => _loadBooks(reset: true);
 
   Future<void> _openFilters() async {
     var nextMode = _activeQuery.searchMode;
@@ -648,15 +607,14 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
                         child: ElevatedButton(
                           onPressed: () {
                             Navigator.pop(ctx);
-                            setState(() {
-                              _activeQuery = _activeQuery.copyWith(
+                            _reloadQuery(
+                              _activeQuery.copyWith(
                                 languageCode: nextLanguage,
                                 clearLanguageCode: nextLanguage == null,
                                 searchMode: nextMode,
                                 sort: nextSort,
-                              );
-                            });
-                            _loadBooks(reset: true);
+                              ),
+                            );
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: _s.accentColor,
@@ -911,6 +869,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
     if (updated != null) {
       await _metadataService.updateMetadata(
         updated.copyWith(
+          managedFilePath: downloadedFile.path,
           source: 'gutenberg',
           gutenbergId: book.id,
           sourceUrl: 'https://www.gutenberg.org/ebooks/${book.id}',
@@ -1078,20 +1037,21 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
+                    tooltip: 'Filters',
                     onPressed: _openFilters,
                     icon: Icon(Icons.tune_rounded, color: _s.mutedColor),
                   ),
+                  if (_searchController.text.trim().isNotEmpty)
+                    IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: _clearSearch,
+                      icon: Icon(Icons.close_rounded, color: _s.mutedColor),
+                    ),
                   IconButton(
-                    onPressed: _searchController.text.trim().isEmpty
-                        ? _submitSearch
-                        : () {
-                            _searchController.clear();
-                            _submitSearch();
-                          },
+                    tooltip: 'Search',
+                    onPressed: _submitSearch,
                     icon: Icon(
-                      _searchController.text.trim().isEmpty
-                          ? Icons.arrow_forward_rounded
-                          : Icons.close_rounded,
+                      Icons.arrow_forward_rounded,
                       color: _s.mutedColor,
                     ),
                   ),
@@ -1134,10 +1094,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
             InputChip(
               label: Text('Author: ${_activeQuery.exactAuthor!}'),
               onDeleted: () {
-                setState(() {
-                  _activeQuery = _activeQuery.copyWith(clearExactAuthor: true);
-                });
-                _loadBooks(reset: true);
+                _reloadQuery(_activeQuery.copyWith(clearExactAuthor: true));
               },
               backgroundColor: _s.menuColor,
               side: BorderSide(color: _s.mutedColor.withValues(alpha: 0.12)),
@@ -1294,11 +1251,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
         message: 'Try a shorter search or adjust the filters.',
         actionLabel: 'Clear search',
         onAction: () {
-          _searchController.clear();
-          setState(() {
-            _activeQuery = _activeQuery.copyWith(text: '');
-          });
-          _loadBooks(reset: true);
+          _clearSearch();
         },
       );
     }

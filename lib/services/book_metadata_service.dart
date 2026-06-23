@@ -1,13 +1,13 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:epubx/epubx.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/book_metadata.dart';
 import '../utils/person_name_utils.dart';
+import 'lazy_epub_index_service.dart';
 import 'open_library_metadata_service.dart';
 
 /// Service managing persistent metadata for all imported books.
@@ -105,67 +105,60 @@ class BookMetadataService {
   /// Returns null if the file is corrupted.
   Future<BookMetadata?> extractAndCacheMetadata(File epubFile) async {
     final bookId = p.basename(epubFile.path);
-    final bytes = await epubFile.readAsBytes();
-
-    EpubBook? book;
+    LazyEpubBookHandle? handle;
     try {
-      book = await EpubReader.readBook(bytes);
+      handle = await const LazyEpubIndexService().openBookIndex(epubFile);
     } catch (e) {
-      debugPrint('BookMetadataService: Failed to parse EPUB ($bookId): $e');
+      debugPrint('BookMetadataService: Failed to index EPUB ($bookId): $e');
       return null; // File is completely unreadable
     }
 
-    String title;
-    String author;
-    String? coverPath;
-
-    title = book.Title ?? '';
-    if (title.isEmpty) {
-      title = _cleanFileName(bookId);
-    }
-    author = book.Author ?? 'Unknown Author';
-    author = normalizePersonNameForDisplay(author);
-
-    final coverImage = book.CoverImage;
-    if (coverImage != null) {
-      // Save it locally
-      final coversDir = await _getCoversDirectory();
-      if (!await coversDir.exists()) {
-        await coversDir.create(recursive: true);
+    try {
+      final index = handle.index;
+      var title = index.title.trim();
+      if (title.isEmpty) {
+        title = _cleanFileName(bookId);
       }
-      final outPath = p.join(coversDir.path, '${bookId}_cover.png');
-      final outFile = File(outPath);
+      var author = index.author.trim().isEmpty
+          ? 'Unknown Author'
+          : index.author;
+      author = normalizePersonNameForDisplay(author);
 
+      String? coverPath;
       try {
-        final coverKey = book.Content?.Images?.keys.firstWhere(
-          (k) => k.toLowerCase().contains('cover'),
-          orElse: () => '',
-        );
-        if (coverKey != null && coverKey.isNotEmpty) {
-          final coverBytes = book.Content?.Images?[coverKey]?.Content;
-          if (coverBytes != null) {
-            await outFile.writeAsBytes(coverBytes);
-            coverPath = outPath;
-          }
+        final coverResource = await handle.readCoverResource();
+        if (coverResource != null && coverResource.bytes.isNotEmpty) {
+          coverPath = await _saveCoverBytes(
+            bookId: bookId,
+            source: 'embedded',
+            bytes: coverResource.bytes,
+            extension: _extensionForCoverResource(
+              mediaType: coverResource.mediaType,
+              path: coverResource.path,
+            ),
+          );
         }
       } catch (e) {
         debugPrint('Failed to extract raw cover for $bookId: $e');
       }
+
+      final newMeta = BookMetadata(
+        id: bookId,
+        managedFilePath: epubFile.path,
+        title: title,
+        author: author,
+        embeddedTitle: title,
+        embeddedAuthor: author,
+        coverImagePath: coverPath,
+        coverSource: coverPath == null ? null : 'embedded',
+        lastReadTime: DateTime.now().millisecondsSinceEpoch,
+      );
+
+      await updateMetadata(newMeta);
+      return newMeta;
+    } finally {
+      await handle.close();
     }
-
-    final newMeta = BookMetadata(
-      id: bookId,
-      title: title,
-      author: author,
-      embeddedTitle: title,
-      embeddedAuthor: author,
-      coverImagePath: coverPath,
-      coverSource: coverPath == null ? null : 'embedded',
-      lastReadTime: DateTime.now().millisecondsSinceEpoch,
-    );
-
-    await updateMetadata(newMeta);
-    return newMeta;
   }
 
   /// Improve title, author, and cover by matching the current metadata against
@@ -365,6 +358,18 @@ class BookMetadataService {
       extension: _extensionForCoverFile(sourceFile.path),
     );
     final updated = current.copyWith(coverImagePath: coverPath);
+    await updateMetadata(updated);
+    return updated;
+  }
+
+  Future<BookMetadata?> updateManagedFilePath({
+    required String bookId,
+    required String managedFilePath,
+  }) async {
+    await init();
+    final current = _cache[bookId];
+    if (current == null) return null;
+    final updated = current.copyWith(managedFilePath: managedFilePath);
     await updateMetadata(updated);
     return updated;
   }
@@ -607,6 +612,24 @@ class BookMetadataService {
     final extension = p.extension(filePath).toLowerCase();
     const allowed = {'.jpg', '.jpeg', '.png', '.webp'};
     return allowed.contains(extension) ? extension : '.jpg';
+  }
+
+  String _extensionForCoverResource({
+    required String mediaType,
+    required String path,
+  }) {
+    switch (mediaType.toLowerCase()) {
+      case 'image/jpeg':
+      case 'image/jpg':
+        return '.jpg';
+      case 'image/png':
+        return '.png';
+      case 'image/webp':
+        return '.webp';
+      case 'image/svg+xml':
+        return '.svg';
+    }
+    return _extensionForCoverFile(path);
   }
 
   Future<void> _save() async {

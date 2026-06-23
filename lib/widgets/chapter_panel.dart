@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/bookmark.dart';
 import '../models/position_history.dart';
 import '../models/reading_settings.dart';
+import '../models/stable_book_location.dart';
+import '../services/chapter_navigation_service.dart';
 import 'reading_card.dart' show kBookmarkPink;
 
 /// A side-drawer panel for "Chapters" and "Bookmarks".
@@ -12,8 +14,11 @@ import 'reading_card.dart' show kBookmarkPink;
 class ChapterPanel extends StatefulWidget {
   final List<ChapterInfo> chapters;
   final int currentPage;
+  final StableBookLocation? currentStableLocation;
+  final List<ChapterNavigationTarget> chapterNavigationTargets;
   final Map<int, int> originalToDisplay;
   final ValueChanged<int> onNavigate;
+  final ValueChanged<ChapterInfo>? onNavigateChapter;
   final ValueChanged<Bookmark>? onNavigateBookmark;
   final ValueNotifier<PositionHistory?>? positionHistoryNotifier;
   final VoidCallback? onGoBack;
@@ -33,8 +38,11 @@ class ChapterPanel extends StatefulWidget {
     super.key,
     required this.chapters,
     required this.currentPage,
+    this.currentStableLocation,
+    this.chapterNavigationTargets = const [],
     required this.originalToDisplay,
     required this.onNavigate,
+    this.onNavigateChapter,
     this.onNavigateBookmark,
     this.positionHistoryNotifier,
     this.onGoBack,
@@ -54,8 +62,11 @@ class ChapterPanel extends StatefulWidget {
     BuildContext context, {
     required List<ChapterInfo> chapters,
     required int currentPage,
+    StableBookLocation? currentStableLocation,
+    List<ChapterNavigationTarget> chapterNavigationTargets = const [],
     required Map<int, int> originalToDisplay,
     required ValueChanged<int> onNavigate,
+    ValueChanged<ChapterInfo>? onNavigateChapter,
     ValueChanged<Bookmark>? onNavigateBookmark,
     ValueNotifier<PositionHistory?>? positionHistoryNotifier,
     VoidCallback? onGoBack,
@@ -83,6 +94,8 @@ class ChapterPanel extends StatefulWidget {
             child: ChapterPanel(
               chapters: chapters,
               currentPage: currentPage,
+              currentStableLocation: currentStableLocation,
+              chapterNavigationTargets: chapterNavigationTargets,
               originalToDisplay: originalToDisplay,
               positionHistoryNotifier: positionHistoryNotifier,
               settings: settings,
@@ -94,6 +107,12 @@ class ChapterPanel extends StatefulWidget {
                 Navigator.pop(ctx);
                 onNavigate(index);
               },
+              onNavigateChapter: onNavigateChapter == null
+                  ? null
+                  : (chapter) {
+                      Navigator.pop(ctx);
+                      onNavigateChapter(chapter);
+                    },
               onNavigateBookmark: onNavigateBookmark == null
                   ? null
                   : (bookmark) {
@@ -296,6 +315,14 @@ class _ChapterPanelState extends State<ChapterPanel>
   }
 
   bool _sectionContainsPage(ChapterInfo section, int page) {
+    if (widget.chapterNavigationTargets.isNotEmpty &&
+        widget.currentStableLocation != null) {
+      return _chapterOrDescendantIsCurrent(section);
+    }
+    if (widget.currentStableLocation != null &&
+        section.stableLocation != null) {
+      return _chapterReadState(section) == _ChapterReadState.current;
+    }
     final sectionDisplayIdx =
         widget.originalToDisplay[section.chunkIndex] ?? section.chunkIndex;
     if (page < sectionDisplayIdx) return false;
@@ -317,6 +344,42 @@ class _ChapterPanelState extends State<ChapterPanel>
       widget.originalToDisplay[chapter.chunkIndex] ?? chapter.chunkIndex;
 
   _ChapterReadState _chapterReadState(ChapterInfo chapter) {
+    final currentStable = widget.currentStableLocation;
+    final chapterStable = chapter.stableLocation;
+    final canonicalTargets = widget.chapterNavigationTargets;
+    if (currentStable != null && canonicalTargets.isNotEmpty) {
+      final target = _targetForChapter(chapter);
+      final currentTarget = ChapterNavigationService.currentTarget(
+        canonicalTargets,
+        currentStable,
+      );
+      if (target == null || currentTarget == null) {
+        return _ChapterReadState.unread;
+      }
+      if (identical(target, currentTarget)) return _ChapterReadState.current;
+      return ChapterNavigationService.compareTargets(target, currentTarget) < 0
+          ? _ChapterReadState.completed
+          : _ChapterReadState.unread;
+    }
+
+    if (currentStable != null && chapterStable != null) {
+      final flat = _flattenChapters(
+        widget.chapters,
+      ).where((entry) => entry.stableLocation != null).toList();
+      final position = flat.indexWhere(
+        (candidate) =>
+            candidate.stableLocation == chapterStable &&
+            candidate.title == chapter.title &&
+            candidate.depth == chapter.depth,
+      );
+      final currentOrder = _currentStableChapterIndex(flat, currentStable);
+      if (position < 0 || currentOrder < 0) return _ChapterReadState.unread;
+      if (position == currentOrder) return _ChapterReadState.current;
+      return position < currentOrder
+          ? _ChapterReadState.completed
+          : _ChapterReadState.unread;
+    }
+
     final start = _displayIndexForChapter(chapter);
     final flat = _flattenChapters(widget.chapters);
     final position = flat.indexWhere(
@@ -339,6 +402,13 @@ class _ChapterPanelState extends State<ChapterPanel>
 
   _ChapterReadState _sectionReadState(ChapterInfo chapter) {
     if (chapter.children.isEmpty) return _chapterReadState(chapter);
+    if (widget.chapterNavigationTargets.isNotEmpty &&
+        widget.currentStableLocation != null) {
+      if (_chapterOrDescendantIsCurrent(chapter)) {
+        return _ChapterReadState.current;
+      }
+      return _chapterReadState(chapter);
+    }
     if (_sectionContainsPage(chapter, widget.currentPage)) {
       return _ChapterReadState.current;
     }
@@ -346,6 +416,52 @@ class _ChapterPanelState extends State<ChapterPanel>
     return widget.currentPage > start
         ? _ChapterReadState.completed
         : _ChapterReadState.unread;
+  }
+
+  ChapterNavigationTarget? _targetForChapter(ChapterInfo chapter) {
+    return widget.chapterNavigationTargets
+        .cast<ChapterNavigationTarget?>()
+        .firstWhere(
+          (target) =>
+              target != null &&
+              ChapterNavigationService.sameTarget(target, chapter),
+          orElse: () => null,
+        );
+  }
+
+  bool _chapterOrDescendantIsCurrent(ChapterInfo chapter) {
+    if (_chapterReadState(chapter) == _ChapterReadState.current) return true;
+    for (final child in chapter.children) {
+      if (_chapterOrDescendantIsCurrent(child)) return true;
+    }
+    return false;
+  }
+
+  int _currentStableChapterIndex(
+    List<ChapterInfo> flat,
+    StableBookLocation current,
+  ) {
+    var currentIndex = -1;
+    for (var i = 0; i < flat.length; i++) {
+      final location = flat[i].stableLocation;
+      if (location == null) continue;
+      if (_compareLocations(location, current) <= 0) {
+        currentIndex = i;
+      } else {
+        break;
+      }
+    }
+    return currentIndex;
+  }
+
+  int _compareLocations(StableBookLocation a, StableBookLocation b) {
+    final spine = a.spineIndex.compareTo(b.spineIndex);
+    if (spine != 0) return spine;
+    final aChunk = a.localChunkIndex ?? 0;
+    final bChunk = b.localChunkIndex ?? 0;
+    final chunk = aChunk.compareTo(bChunk);
+    if (chunk != 0) return chunk;
+    return a.textOffset.compareTo(b.textOffset);
   }
 
   Color _stateColor(_ChapterReadState state) {
@@ -358,6 +474,9 @@ class _ChapterPanelState extends State<ChapterPanel>
 
   String _displayPageLabel(int chunkIndex) {
     final dp = widget.originalToDisplay[chunkIndex] ?? chunkIndex;
+    if (dp >= widget.totalDisplayPages && widget.totalDisplayPages > 0) {
+      return 'Unloaded';
+    }
     return 'Page ${dp + 1}';
   }
 
@@ -664,7 +783,12 @@ class _ChapterPanelState extends State<ChapterPanel>
         depth: chapter.depth,
         itemKey: _keyForChapter(chapter),
         onTap: () {
-          widget.onNavigate(chapter.chunkIndex);
+          final chapterCallback = widget.onNavigateChapter;
+          if (chapterCallback != null) {
+            chapterCallback(chapter);
+          } else {
+            widget.onNavigate(chapter.chunkIndex);
+          }
         },
       );
     }
@@ -682,7 +806,12 @@ class _ChapterPanelState extends State<ChapterPanel>
       iconColor: _stateColor(_sectionReadState(chapter)),
       initiallyExpanded: containsCurrentPage,
       onHeaderTap: () {
-        widget.onNavigate(chapter.chunkIndex);
+        final chapterCallback = widget.onNavigateChapter;
+        if (chapterCallback != null) {
+          chapterCallback(chapter);
+        } else {
+          widget.onNavigate(chapter.chunkIndex);
+        }
       },
       children: chapter.children,
     );
@@ -714,93 +843,101 @@ class _ChapterPanelState extends State<ChapterPanel>
             state,
           ).withValues(alpha: state == _ChapterReadState.completed ? 0.86 : 1);
 
-    return Theme(
-      data: ThemeData(
-        useMaterial3: true,
-        brightness: _colors.isDark ? Brightness.dark : Brightness.light,
-        dividerColor: Colors.transparent,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _colors.accent,
+    return Semantics(
+      selected: state == _ChapterReadState.current,
+      child: Theme(
+        data: ThemeData(
+          useMaterial3: true,
           brightness: _colors.isDark ? Brightness.dark : Brightness.light,
-          surface: _colors.surface,
-          onSurface: _colors.text,
-          primary: _colors.accent,
-        ),
-      ),
-      child: Container(
-        key: chapter == null ? null : _keyForChapter(chapter),
-        margin: const EdgeInsets.symmetric(vertical: 2),
-        decoration: BoxDecoration(
-          color: state == _ChapterReadState.current
-              ? _colors.accent.withValues(alpha: 0.09)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: ExpansionTile(
-          leading: _ChapterStateIndicator(
-            color: _stateColor(state),
-            active: state == _ChapterReadState.current,
-            completed: state == _ChapterReadState.completed,
-            child: Icon(icon, color: iconColor, size: 21),
+          dividerColor: Colors.transparent,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: _colors.accent,
+            brightness: _colors.isDark ? Brightness.dark : Brightness.light,
+            surface: _colors.surface,
+            onSurface: _colors.text,
+            primary: _colors.accent,
           ),
-          title: GestureDetector(
-            onTap: onHeaderTap,
-            child: Text(
-              title,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: state == _ChapterReadState.current
-                    ? FontWeight.w800
-                    : FontWeight.w700,
-                color: titleColor,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+        ),
+        child: Container(
+          key: chapter == null ? null : _keyForChapter(chapter),
+          margin: const EdgeInsets.symmetric(vertical: 2),
+          decoration: BoxDecoration(
+            color: state == _ChapterReadState.current
+                ? _colors.accent.withValues(alpha: 0.09)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: ExpansionTile(
+            leading: _ChapterStateIndicator(
+              color: _stateColor(state),
+              active: state == _ChapterReadState.current,
+              completed: state == _ChapterReadState.completed,
+              child: Icon(icon, color: iconColor, size: 21),
             ),
-          ),
-          subtitle: chapter == null
-              ? null
-              : Text(
-                  _displayPageLabel(chapter.chunkIndex),
-                  style: TextStyle(fontSize: 11, color: _colors.tertiaryText),
+            title: GestureDetector(
+              onTap: onHeaderTap,
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: state == _ChapterReadState.current
+                      ? FontWeight.w800
+                      : FontWeight.w700,
+                  color: titleColor,
                 ),
-          initiallyExpanded: expanded,
-          onExpansionChanged: (value) {
-            setState(() {
-              if (value) {
-                _expandedSectionKeys.add(sectionKey);
-                _expandedSectionKeys.remove('closed:$sectionKey');
-              } else {
-                _expandedSectionKeys.remove(sectionKey);
-                _expandedSectionKeys.add('closed:$sectionKey');
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            subtitle: chapter == null
+                ? null
+                : Text(
+                    _displayPageLabel(chapter.chunkIndex),
+                    style: TextStyle(fontSize: 11, color: _colors.tertiaryText),
+                  ),
+            initiallyExpanded: expanded,
+            onExpansionChanged: (value) {
+              setState(() {
+                if (value) {
+                  _expandedSectionKeys.add(sectionKey);
+                  _expandedSectionKeys.remove('closed:$sectionKey');
+                } else {
+                  _expandedSectionKeys.remove(sectionKey);
+                  _expandedSectionKeys.add('closed:$sectionKey');
+                }
+              });
+            },
+            tilePadding: const EdgeInsets.only(left: 8, right: 6),
+            childrenPadding: const EdgeInsets.only(left: 18, bottom: 4),
+            iconColor: _colors.secondaryText,
+            collapsedIconColor: _colors.secondaryText,
+            dense: true,
+            visualDensity: VisualDensity.compact,
+            children: children.map((ch) {
+              if (ch.children.isNotEmpty) {
+                return _buildChapterEntry(context, ch);
               }
-            });
-          },
-          tilePadding: const EdgeInsets.only(left: 8, right: 6),
-          childrenPadding: const EdgeInsets.only(left: 18, bottom: 4),
-          iconColor: _colors.secondaryText,
-          collapsedIconColor: _colors.secondaryText,
-          dense: true,
-          visualDensity: VisualDensity.compact,
-          children: children.map((ch) {
-            if (ch.children.isNotEmpty) {
-              return _buildChapterEntry(context, ch);
-            }
-            final childState = _chapterReadState(ch);
-            return _buildNavTile(
-              context,
-              icon: Icons.article_outlined,
-              iconColor: _stateColor(childState),
-              title: ch.title,
-              subtitle: _displayPageLabel(ch.chunkIndex),
-              state: childState,
-              depth: ch.depth,
-              itemKey: _keyForChapter(ch),
-              onTap: () {
-                widget.onNavigate(ch.chunkIndex);
-              },
-            );
-          }).toList(),
+              final childState = _chapterReadState(ch);
+              return _buildNavTile(
+                context,
+                icon: Icons.article_outlined,
+                iconColor: _stateColor(childState),
+                title: ch.title,
+                subtitle: _displayPageLabel(ch.chunkIndex),
+                state: childState,
+                depth: ch.depth,
+                itemKey: _keyForChapter(ch),
+                onTap: () {
+                  final chapterCallback = widget.onNavigateChapter;
+                  if (chapterCallback != null) {
+                    chapterCallback(ch);
+                  } else {
+                    widget.onNavigate(ch.chunkIndex);
+                  }
+                },
+              );
+            }).toList(),
+          ),
         ),
       ),
     );
@@ -828,6 +965,7 @@ class _ChapterPanelState extends State<ChapterPanel>
 
     return Semantics(
       button: true,
+      selected: isCurrent,
       label: title,
       hint: subtitle,
       child: Container(

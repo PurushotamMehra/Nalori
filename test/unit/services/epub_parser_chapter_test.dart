@@ -6,6 +6,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/book_chunk.dart';
 import 'package:nalori/services/epub_parser.dart';
+import 'package:nalori/utils/reader_content_parser.dart';
 
 void main() {
   group('EpubParserService chapter navigation', () {
@@ -102,6 +103,32 @@ void main() {
 
       expect(normal.blockRole, BookBlockRole.paragraph);
       expect(normal.usesPublisherLayout, isFalse);
+    });
+  });
+
+  group('EpubParserService table parsing', () {
+    test('preserves HTML table structure for reader rendering', () async {
+      final dir = await Directory.systemTemp.createTemp('epub_table_');
+      addTearDown(() => dir.delete(recursive: true));
+
+      final file = File('${dir.path}/table.epub');
+      await file.writeAsBytes(_buildTableEpub());
+
+      final result = await EpubParserService().loadAndParseFromFile(file);
+      final tableChunk = result.chunks.firstWhere(
+        (chunk) => chunk.blockRole == BookBlockRole.table,
+      );
+      final blocks = parseReaderContentBlocks(tableChunk.text!);
+      final table = blocks.single.table!;
+
+      expect(blocks.single.type, ReaderContentBlockType.table);
+      expect(table.headers, ['Speaker', 'Line', '']);
+      expect(table.rows.first, ['Ada', 'First remark', 'Tone']);
+      expect(table.rows[1], ['Ada', 'Second remark', 'Aside']);
+      expect(table.cellRows.first[1].columnSpan, 2);
+      expect(table.cellRows[1].first.rowSpan, 2);
+      expect(tableChunk.text, isNot(contains('│')));
+      expect(tableChunk.text, isNot(contains('First remark Tone')));
     });
   });
 }
@@ -324,6 +351,81 @@ List<int> _buildSpecialBlockEpub() {
       <p>A quoted passage that keeps its book declared alignment and indentation.</p>
     </blockquote>
     <p>This ordinary paragraph should continue to follow reader density and alignment settings.</p>
+  </body>
+</html>''',
+      ),
+    );
+
+  return ZipEncoder().encode(archive)!;
+}
+
+List<int> _buildTableEpub() {
+  final archive = Archive()
+    ..addFile(
+      ArchiveFile.string(
+        'META-INF/container.xml',
+        '''<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>''',
+      ),
+    )
+    ..addFile(
+      ArchiveFile.string(
+        'OEBPS/content.opf',
+        '''<?xml version="1.0" encoding="UTF-8"?>
+<package version="2.0" unique-identifier="bookid" xmlns="http://www.idpf.org/2007/opf">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Table Test Book</dc:title>
+    <dc:creator>Test Author</dc:creator>
+    <dc:language>en</dc:language>
+    <dc:identifier id="bookid">table-test</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="body" href="text/body.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="body"/>
+  </spine>
+</package>''',
+      ),
+    )
+    ..addFile(
+      ArchiveFile.string(
+        'OEBPS/toc.ncx',
+        '''<?xml version="1.0" encoding="UTF-8"?>
+<ncx version="2005-1" xmlns="http://www.daisy.org/z3986/2005/ncx/">
+  <head>
+    <meta name="dtb:uid" content="table-test"/>
+  </head>
+  <docTitle><text>Table Test Book</text></docTitle>
+  <navMap>
+    <navPoint id="nav1" playOrder="1">
+      <navLabel><text>Chapter One</text></navLabel>
+      <content src="text/body.xhtml#ch1"/>
+    </navPoint>
+  </navMap>
+</ncx>''',
+      ),
+    )
+    ..addFile(
+      ArchiveFile.string(
+        'OEBPS/text/body.xhtml',
+        '''<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><title>Table Test Book</title></head>
+  <body>
+    <h1 id="ch1">Chapter One</h1>
+    <p>Before the table.</p>
+    <table>
+      <tr><th>Speaker</th><th colspan="2">Line</th></tr>
+      <tr><td rowspan="2">Ada</td><td>First remark</td><td>Tone</td></tr>
+      <tr><td>Second remark</td><td>Aside</td></tr>
+    </table>
+    <p>After the table.</p>
   </body>
 </html>''',
       ),

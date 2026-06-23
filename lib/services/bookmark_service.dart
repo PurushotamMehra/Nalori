@@ -1,6 +1,8 @@
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/bookmark.dart';
+import '../models/stable_book_location.dart';
 
 /// Persistent storage for user-created bookmarks.
 ///
@@ -14,6 +16,7 @@ class BookmarkService {
 
   String get _key => 'bookmarks_$bookId';
   static const String _defaultColorKey = 'default_bookmark_color';
+  static const String _defaultColorValueKey = 'default_bookmark_color_value';
 
   Future<SharedPreferences> get _cachedPrefs async {
     _prefs ??= await SharedPreferences.getInstance();
@@ -37,10 +40,37 @@ class BookmarkService {
     return prefs.getInt(_defaultColorKey) ?? 0;
   }
 
+  /// Load the user's preferred default bookmark color.
+  ///
+  /// Falls back to the legacy fixed palette index key for older installs.
+  Future<Color> loadDefaultColor() async {
+    final prefs = await _cachedPrefs;
+    final rawColorValue = prefs.getInt(_defaultColorValueKey);
+    if (rawColorValue != null) {
+      return Color(bookmarkColorValue(Color(rawColorValue)));
+    }
+
+    final colorIndex = prefs.getInt(_defaultColorKey) ?? 0;
+    return kBookmarkColors[colorIndex % kBookmarkColors.length];
+  }
+
   /// Save the user's preferred default bookmark color index.
   Future<void> saveDefaultColorIndex(int colorIndex) async {
     final prefs = await _cachedPrefs;
     await prefs.setInt(_defaultColorKey, colorIndex);
+    await prefs.remove(_defaultColorValueKey);
+  }
+
+  /// Save the user's preferred default bookmark color.
+  Future<void> saveDefaultColor(Color color) async {
+    final prefs = await _cachedPrefs;
+    final normalized = Color(bookmarkColorValue(color));
+    await prefs.setInt(_defaultColorValueKey, bookmarkColorValue(normalized));
+
+    final fixedIndex = defaultBookmarkColorIndex(normalized);
+    if (fixedIndex != null) {
+      await prefs.setInt(_defaultColorKey, fixedIndex);
+    }
   }
 
   // ── Write ─────────────────────────────────────────────────────────────
@@ -51,6 +81,7 @@ class BookmarkService {
     String? previewText,
     int colorIndex = 0,
     int? colorValue,
+    StableBookLocation? stableLocation,
   }) async {
     final list = await load();
 
@@ -79,6 +110,7 @@ class BookmarkService {
         previewText: previewText,
         colorIndex: colorIndex,
         colorValue: colorValue,
+        stableLocation: stableLocation,
       ),
     );
 

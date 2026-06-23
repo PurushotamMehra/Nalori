@@ -9,6 +9,60 @@ import 'package:path_provider/path_provider.dart';
 import '../models/book_chunk.dart';
 import '../models/bookmark.dart';
 
+const bool _bookCacheDiagEnabled = bool.fromEnvironment('NALORI_EPUB_DIAG');
+const String _bookCacheDiagPrefix = 'NALORI_EPUB_DIAG';
+
+int _bookCacheDiagRssBytes() {
+  try {
+    return ProcessInfo.currentRss;
+  } catch (_) {
+    return -1;
+  }
+}
+
+void _bookCacheDiagLog(String phase, Map<String, Object?> fields) {
+  if (!_bookCacheDiagEnabled) return;
+  final isolateName = Isolate.current.debugName;
+  final parts = <String>[
+    _bookCacheDiagPrefix,
+    'phase=$phase',
+    'ts=${DateTime.now().toIso8601String()}',
+    'rss=${_bookCacheDiagRssBytes()}',
+    'isolate=${isolateName == null || isolateName.isEmpty ? Isolate.current.hashCode : isolateName}',
+    for (final entry in fields.entries)
+      if (entry.value != null) '${entry.key}=${entry.value}',
+  ];
+  // ignore: avoid_print
+  print(parts.join(' '));
+}
+
+Future<T> _bookCacheDiagAsync<T>(
+  String phase,
+  Map<String, Object?> fields,
+  Future<T> Function() body,
+) async {
+  if (!_bookCacheDiagEnabled) return body();
+  final sw = Stopwatch()..start();
+  _bookCacheDiagLog('${phase}_start', fields);
+  try {
+    final result = await body();
+    sw.stop();
+    _bookCacheDiagLog('${phase}_end', {
+      ...fields,
+      'elapsedMs': sw.elapsedMilliseconds,
+    });
+    return result;
+  } catch (error) {
+    sw.stop();
+    _bookCacheDiagLog('${phase}_error', {
+      ...fields,
+      'elapsedMs': sw.elapsedMilliseconds,
+      'error': error.runtimeType,
+    });
+    rethrow;
+  }
+}
+
 /// Cached result of parsing an EPUB book.
 class CachedBook {
   final String title;
@@ -55,6 +109,9 @@ class BookCacheService {
   static const String _cacheDirName = 'book_cache';
   static const String _manifestFileName = 'manifest.json';
   static const String _displayManifestFileName = 'display_manifest.json';
+  static const int parsedBookCacheFormatVersion = 4;
+  static const int displayCacheFormatVersion = 2;
+  static const String displayLayoutVersion = 'v11';
 
   /// Maximum total cache size in bytes (10 MB).
   static const int _maxCacheSizeBytes = 10 * 1024 * 1024;
@@ -166,9 +223,22 @@ class BookCacheService {
 
     try {
       // Serialize + compress in an isolate
-      final compressedBytes = await Isolate.run(
-        () => _serializeBook(title, chunks, anchorMap, chapters, searchIndex),
+      final compressedBytes = await _bookCacheDiagAsync(
+        'cache_book_serialize',
+        {
+          'book': bookId,
+          'chunks': chunks.length,
+          'anchors': anchorMap.length,
+          'chapters': chapters.length,
+        },
+        () => Isolate.run(
+          () => _serializeBook(title, chunks, anchorMap, chapters, searchIndex),
+        ),
       );
+      _bookCacheDiagLog('cache_book_serialized', {
+        'book': bookId,
+        'compressedBytes': compressedBytes.length,
+      });
 
       // Check if this single file exceeds budget
       if (compressedBytes.length > _maxCacheSizeBytes) {
@@ -186,7 +256,11 @@ class BookCacheService {
 
       // Write the file
       final file = _fileFor(bookId);
-      await file.writeAsBytes(compressedBytes);
+      await _bookCacheDiagAsync('cache_book_write', {
+        'book': bookId,
+        'bytes': compressedBytes.length,
+        'path': file.path,
+      }, () => file.writeAsBytes(compressedBytes));
 
       // Update manifest
       _manifest[bookId] = _CacheEntry(
@@ -261,16 +335,16 @@ class BookCacheService {
     required double safeAreaLeft,
     required double safeAreaRight,
   }) {
-    const layoutVersion = 'v11';
+    String fixed(double value) => value.toStringAsFixed(3);
     final String cardModeStr = enableCardDepth ? '1' : '0';
     final String textScalerStr = textScaleFactor.toStringAsFixed(2);
     final String safeAreaStr =
         '${safeAreaTop.round()}_${safeAreaBottom.round()}_'
         '${safeAreaLeft.round()}_${safeAreaRight.round()}';
 
-    return '${bookId}_dc_${layoutVersion}_${fontSize}_${fontFamily}_${fontWeight}_'
-        '${density}_lineHeight_${lineHeight}_paragraphSpacing_${paragraphSpacing}_'
-        'sideMargin_${sideMargin}_'
+    return '${bookId}_dc_${displayLayoutVersion}_${fixed(fontSize)}_${fontFamily}_${fontWeight}_'
+        '${fixed(density)}_lineHeight_${fixed(lineHeight)}_paragraphSpacing_${fixed(paragraphSpacing)}_'
+        'sideMargin_${fixed(sideMargin)}_'
         '${screenW.toInt()}x${screenH.toInt()}_${cardModeStr}_${textScalerStr}_$safeAreaStr';
   }
 
@@ -319,23 +393,60 @@ class BookCacheService {
     required List<BookChunk> displayChunks,
     required List<List<int>> displayToOriginal,
     required Map<int, int> originalToDisplay,
+    bool Function()? shouldWrite,
   }) async {
     await _ensureInit();
     try {
-      final compressedBytes = await Isolate.run(
-        () => _serializeDisplayChunks(
-          displayChunks,
-          displayToOriginal,
-          originalToDisplay,
+      if (shouldWrite != null && !shouldWrite()) {
+        _bookCacheDiagLog('display_cache_write_skipped_stale', {'key': key});
+        return;
+      }
+      final compressedBytes = await _bookCacheDiagAsync(
+        'display_cache_serialize',
+        {
+          'key': key,
+          'displayChunks': displayChunks.length,
+          'displayToOriginal': displayToOriginal.length,
+          'originalToDisplay': originalToDisplay.length,
+        },
+        () => Isolate.run(
+          () => _serializeDisplayChunks(
+            displayChunks,
+            displayToOriginal,
+            originalToDisplay,
+          ),
         ),
       );
+      _bookCacheDiagLog('display_cache_serialized', {
+        'key': key,
+        'compressedBytes': compressedBytes.length,
+      });
+
+      if (shouldWrite != null && !shouldWrite()) {
+        _bookCacheDiagLog('display_cache_write_skipped_stale', {'key': key});
+        return;
+      }
 
       // Don't cache unusually large individual layouts.
       if (compressedBytes.length > _maxDisplayCacheFileSizeBytes) return;
       await _evictDisplayUntilFits(compressedBytes.length, exclude: key);
 
       final file = _fileFor(key);
-      await file.writeAsBytes(compressedBytes);
+      await _bookCacheDiagAsync('display_cache_write', {
+        'key': key,
+        'bytes': compressedBytes.length,
+        'path': file.path,
+      }, () => file.writeAsBytes(compressedBytes));
+      if (shouldWrite != null && !shouldWrite()) {
+        try {
+          if (await file.exists()) await file.delete();
+        } catch (_) {}
+        _bookCacheDiagLog('display_cache_write_discarded_stale', {
+          'key': key,
+          'path': file.path,
+        });
+        return;
+      }
       _displayManifest[key] = _CacheEntry(
         fileSizeBytes: compressedBytes.length,
         cachedAtMs: DateTime.now().millisecondsSinceEpoch,
@@ -359,17 +470,30 @@ class BookCacheService {
   /// Delete all display chunk caches for a given book.
   Future<void> deleteDisplayChunks(String bookId) async {
     await _ensureInit();
-    final dir = _cacheDir!;
     final prefix = _sanitizeKey(bookId);
-    await for (final entity in dir.list()) {
-      if (entity is File && p.basename(entity.path).startsWith(prefix)) {
-        await entity.delete();
+    final deletedPaths = <String>[];
+    final removedKeys = _displayManifest.keys
+        .where((key) => _sanitizeKey(key).startsWith(prefix))
+        .toList();
+
+    for (final key in removedKeys) {
+      final file = _fileFor(key);
+      if (await file.exists()) {
+        await file.delete();
+        deletedPaths.add(file.path);
       }
     }
+
     _displayManifest.removeWhere(
       (key, _) => _sanitizeKey(key).startsWith(prefix),
     );
     await _saveDisplayManifest();
+    _bookCacheDiagLog('display_cache_delete_for_book', {
+      'book': bookId,
+      'prefix': prefix,
+      'removedKeys': removedKeys,
+      'deletedPaths': deletedPaths,
+    });
   }
 
   // ─── Serialization (runs in isolate) ────────────────────────────────
@@ -380,7 +504,7 @@ class BookCacheService {
     Map<int, int> originalToDisplay,
   ) {
     final data = {
-      'v': 2,
+      'v': displayCacheFormatVersion,
       'dc': displayChunks.map((c) => c.toJson()).toList(),
       'dto': displayToOriginal,
       'otd': originalToDisplay.map((k, v) => MapEntry(k.toString(), v)),
@@ -424,7 +548,7 @@ class BookCacheService {
     Map<String, List<int>> searchIndex,
   ) {
     final data = {
-      'v': 4, // cache format version
+      'v': parsedBookCacheFormatVersion,
       'title': title,
       'chunks': chunks.map((c) => c.toJson()).toList(),
       'anchors': anchorMap,
@@ -441,7 +565,7 @@ class BookCacheService {
     final jsonBytes = gzip.decode(compressedBytes);
     final jsonStr = utf8.decode(jsonBytes);
     final data = jsonDecode(jsonStr) as Map<String, dynamic>;
-    if (data['v'] != 4) {
+    if (data['v'] != parsedBookCacheFormatVersion) {
       throw const FormatException('Unsupported parsed book cache version');
     }
 
