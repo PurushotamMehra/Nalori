@@ -25,6 +25,37 @@ class LibraryService {
     return epubs;
   }
 
+  Future<File?> localBookForMetadata({
+    required String bookId,
+    String? managedFilePath,
+  }) async {
+    if (managedFilePath != null && managedFilePath.isNotEmpty) {
+      final exact = File(managedFilePath);
+      if (await _isReadableEpubFile(exact)) return exact;
+    }
+
+    final legacy = await deterministicManagedBookFile(bookId);
+    if (await _isReadableEpubFile(legacy)) return legacy;
+    return null;
+  }
+
+  Future<File> deterministicManagedBookFile(String bookId) async {
+    final booksDir = await _getBooksDirectory();
+    return File(p.join(booksDir.path, p.basename(bookId)));
+  }
+
+  Future<bool> isReadableEpubFile(File file) => _isReadableEpubFile(file);
+
+  Future<bool> _isReadableEpubFile(File file) async {
+    if (p.extension(file.path).toLowerCase() != '.epub') return false;
+    try {
+      final stat = await file.stat();
+      return stat.type == FileSystemEntityType.file && stat.size > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Returns the internal books directory, creating it if necessary.
   Future<Directory> _getBooksDirectory() async {
     final appDir = await getApplicationDocumentsDirectory();

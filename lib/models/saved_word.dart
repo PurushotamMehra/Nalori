@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'stable_book_location.dart';
+
 class SavedWord {
   final String id;
   final String word;
@@ -12,6 +14,7 @@ class SavedWord {
   final int? originalChunkIndex;
   final int? originalStartOffset;
   final int? originalEndOffset;
+  final StableBookLocation? stableLocation;
 
   const SavedWord({
     required this.id,
@@ -23,6 +26,7 @@ class SavedWord {
     this.originalChunkIndex,
     this.originalStartOffset,
     this.originalEndOffset,
+    this.stableLocation,
   });
 
   SavedWord copyWith({
@@ -35,6 +39,7 @@ class SavedWord {
     int? originalChunkIndex,
     int? originalStartOffset,
     int? originalEndOffset,
+    StableBookLocation? stableLocation,
   }) {
     return SavedWord(
       id: id ?? this.id,
@@ -46,6 +51,7 @@ class SavedWord {
       originalChunkIndex: originalChunkIndex ?? this.originalChunkIndex,
       originalStartOffset: originalStartOffset ?? this.originalStartOffset,
       originalEndOffset: originalEndOffset ?? this.originalEndOffset,
+      stableLocation: stableLocation ?? this.stableLocation,
     );
   }
 
@@ -60,6 +66,7 @@ class SavedWord {
       'originalChunkIndex': originalChunkIndex,
       'originalStartOffset': originalStartOffset,
       'originalEndOffset': originalEndOffset,
+      if (stableLocation != null) 'stableLocation': stableLocation!.toJson(),
     };
   }
 
@@ -74,6 +81,7 @@ class SavedWord {
       originalChunkIndex: map['originalChunkIndex'] as int?,
       originalStartOffset: map['originalStartOffset'] as int?,
       originalEndOffset: map['originalEndOffset'] as int?,
+      stableLocation: StableBookLocation.maybeFromJson(map['stableLocation']),
     );
   }
 

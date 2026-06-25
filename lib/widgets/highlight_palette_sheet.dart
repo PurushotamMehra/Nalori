@@ -399,6 +399,9 @@ class _HighlightPaletteSheetState extends State<_HighlightPaletteSheet> {
                               children: [
                                 for (final color in _palette) ...[
                                   _PaletteSwatch(
+                                    key: ValueKey(
+                                      'highlight_palette_${highlightColorHex(color)}',
+                                    ),
                                     color: color,
                                     isSelected: isSameHighlightColor(
                                       color,
@@ -659,6 +662,7 @@ class _PaletteSwatch extends StatelessWidget {
   final VoidCallback onTap;
 
   const _PaletteSwatch({
+    super.key,
     required this.color,
     required this.isSelected,
     required this.selectionColor,

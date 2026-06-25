@@ -1,18 +1,45 @@
 import 'dart:convert';
+import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/public_domain_book.dart';
+import '../models/public_domain_catalog.dart';
 import '../utils/person_name_utils.dart';
 import 'api_client.dart';
+import 'public_domain_catalog_database.dart';
+import 'public_domain_catalog_installer.dart';
+import 'public_domain_catalog_repository.dart';
 
 class PublicDomainBookService {
-  PublicDomainBookService({http.Client? client})
-    : _client = ApiClient(
-        client: client,
-        minIntervalByHost: const {'gutendex.com': Duration(milliseconds: 800)},
-      );
+  PublicDomainBookService({
+    http.Client? client,
+    AssetBundle? assetBundle,
+    Duration catalogTimeout = _catalogTimeout,
+    int catalogMaxRetries = _catalogMaxRetries,
+    PublicDomainCatalogRepository? catalogRepository,
+    PublicDomainCatalogInstaller? catalogInstaller,
+  }) : _catalogTimeoutForRequest = catalogTimeout,
+       _catalogMaxRetriesForRequest = catalogMaxRetries,
+       _catalogRepository =
+           catalogRepository ??
+           PublicDomainCatalogRepository(
+             database: PublicDomainCatalogDatabase(),
+             assetBundle: assetBundle,
+           ),
+       _catalogInstaller =
+           catalogInstaller ??
+           PublicDomainCatalogInstaller(
+             database: PublicDomainCatalogDatabase(),
+           ),
+       _client = ApiClient(
+         client: client,
+         minIntervalByHost: const {'gutendex.com': Duration(milliseconds: 800)},
+       );
 
   static const userAgent = ApiClient.userAgent;
   static const _baseUri = 'gutendex.com';
@@ -23,12 +50,62 @@ class PublicDomainBookService {
   static const _detailCacheTtl = Duration(days: 30);
   static const _minimumAutomaticPrefetchInterval = Duration(minutes: 30);
   static const _maxAutomaticExactAuthorPages = 2;
+  static const _catalogTimeout = Duration(seconds: 20);
+  static const _catalogMaxRetries = 1;
 
   static bool _hasPrefetchedDefaultThisSession = false;
   static DateTime? _lastAutomaticPrefetchAt;
   static final Map<String, Future<PublicDomainBookPage>> _inFlightRequests = {};
 
   final ApiClient _client;
+  final Duration _catalogTimeoutForRequest;
+  final int _catalogMaxRetriesForRequest;
+  final PublicDomainCatalogRepository _catalogRepository;
+  final PublicDomainCatalogInstaller _catalogInstaller;
+
+  Future<PublicDomainBookPage> fetchLocalCatalogPage({
+    PublicDomainBookQuery query = const PublicDomainBookQuery(),
+    int page = 1,
+  }) async {
+    final safePage = page < 1 ? 1 : page;
+    final cursor = PublicDomainCatalogCursor(
+      offset: (safePage - 1) * _catalogRepository.pageSize,
+    );
+    final result = await _catalogRepository.query(query: query, cursor: cursor);
+    return result.toBookPage(page: safePage);
+  }
+
+  Future<PublicDomainBook?> findLocalCatalogBook(int id) {
+    return _catalogRepository.bookById(id);
+  }
+
+  Future<PublicDomainCatalogManifest?> fetchCatalogManifest() {
+    return _catalogInstaller.fetchManifest();
+  }
+
+  Future<void> installCatalog(
+    PublicDomainCatalogManifest manifest, {
+    PublicDomainCatalogDownloadProgress? onProgress,
+  }) {
+    return _catalogInstaller.installFromManifest(
+      manifest,
+      onProgress: onProgress,
+    );
+  }
+
+  Future<PublicDomainBookPage?> readBundledBooks({
+    PublicDomainBookQuery query = const PublicDomainBookQuery(),
+  }) async {
+    try {
+      final page = await _catalogRepository.queryStarter(query: query);
+      return page.toBookPage(page: 1);
+    } catch (error) {
+      if (kDebugMode) {
+        debugPrint('Bundled Gutenberg catalog load failed: $error');
+      }
+      return null;
+    }
+  }
 
   Future<PublicDomainBookPage?> readCachedBooks({
     PublicDomainBookQuery query = const PublicDomainBookQuery(),
@@ -224,49 +301,106 @@ class PublicDomainBookService {
     required int page,
     String? pageUrl,
   }) async {
-    final params = <String, String>{
-      'copyright': 'false',
-      'mime_type': 'application/epub+zip',
-      'page': page.toString(),
-      'sort': _sortValue(query.sort),
-    };
+    final params = <String, String>{};
 
-    if (query.languageCode != null && query.languageCode!.trim().isNotEmpty) {
-      params['languages'] = query.languageCode!;
+    if (pageUrl == null) {
+      final seededText = _seededText(query);
+      if (seededText != null) {
+        final key = query.searchMode == PublicDomainSearchMode.topic
+            ? 'topic'
+            : 'search';
+        params[key] = seededText;
+      }
+      if (query.sort != PublicDomainSort.popular) {
+        params['sort'] = _sortValue(query.sort);
+      }
+      if (page > 1) {
+        params['page'] = page.toString();
+      }
     }
 
-    final seededText = _seededText(query);
-    if (seededText != null) {
-      final key = query.searchMode == PublicDomainSearchMode.topic
-          ? 'topic'
-          : 'search';
-      params[key] = seededText;
-    }
-
-    final parsedPageUri = pageUrl == null ? null : Uri.tryParse(pageUrl);
-    final uri = parsedPageUri ?? Uri.https(_baseUri, '/books', params);
-    final response = await _client.get(uri, headers: _headers);
-    if (response.statusCode != 200) {
+    final uri = _catalogUri(page: page, pageUrl: pageUrl, params: params);
+    http.Response response;
+    try {
+      response = await _client.get(
+        uri,
+        headers: _headers,
+        timeout: _catalogTimeoutForRequest,
+        maxRetries: _catalogMaxRetriesForRequest,
+      );
+    } on Object catch (error) {
+      final category = _categoryForTransportError(error);
+      _debugCatalogLog(uri: uri, page: page, category: category, error: error);
       throw PublicDomainBookServiceException(
-        'Book catalog request failed (${response.statusCode})',
+        _messageForCategory(category),
+        category: category,
+      );
+    }
+    if (response.statusCode != 200) {
+      final category = _categoryForStatusCode(response.statusCode);
+      _debugCatalogLog(
+        uri: uri,
+        page: page,
+        category: category,
+        statusCode: response.statusCode,
+      );
+      throw PublicDomainBookServiceException(
+        _messageForCategory(category),
+        category: category,
       );
     }
 
-    final decoded = json.decode(response.body);
+    Object? decoded;
+    try {
+      decoded = json.decode(response.body);
+    } on FormatException catch (error) {
+      _debugCatalogLog(
+        uri: uri,
+        page: page,
+        category: PublicDomainCatalogFailureCategory.parsing,
+        error: error,
+      );
+      throw const PublicDomainBookServiceException(
+        'The catalog response could not be read.',
+        category: PublicDomainCatalogFailureCategory.parsing,
+      );
+    }
     if (decoded is! Map<String, dynamic>) {
-      throw const PublicDomainBookServiceException('Invalid catalog response');
+      throw const PublicDomainBookServiceException(
+        'The catalog returned an invalid response.',
+        category: PublicDomainCatalogFailureCategory.invalidResponse,
+      );
     }
 
     final rawResults = decoded['results'];
     if (rawResults is! List) {
-      throw const PublicDomainBookServiceException('Missing catalog results');
+      throw const PublicDomainBookServiceException(
+        'The catalog returned an invalid response.',
+        category: PublicDomainCatalogFailureCategory.invalidResponse,
+      );
     }
 
-    final books = rawResults
-        .whereType<Map<String, dynamic>>()
-        .where(_isPublicDomainEpub)
-        .map(PublicDomainBook.fromGutendex)
-        .toList(growable: false);
+    final books = <PublicDomainBook>[];
+    try {
+      for (final result in rawResults) {
+        if (result is! Map<String, dynamic>) {
+          throw const FormatException('Catalog result is not an object');
+        }
+        if (!_isEligibleBookResult(result, query: query)) continue;
+        books.add(PublicDomainBook.fromGutendex(result));
+      }
+    } on Object catch (error) {
+      _debugCatalogLog(
+        uri: uri,
+        page: page,
+        category: PublicDomainCatalogFailureCategory.parsing,
+        error: error,
+      );
+      throw const PublicDomainBookServiceException(
+        'The catalog response could not be read.',
+        category: PublicDomainCatalogFailureCategory.parsing,
+      );
+    }
 
     return PublicDomainBookPage(
       books: books,
@@ -292,6 +426,87 @@ class PublicDomainBookService {
       DateTime.now().millisecondsSinceEpoch,
     );
     return result;
+  }
+
+  Uri _catalogUri({
+    required int page,
+    required String? pageUrl,
+    required Map<String, String> params,
+  }) {
+    if (pageUrl == null) {
+      return params.isEmpty
+          ? _baseBooksUri()
+          : Uri.https(_baseUri, '/books/', params);
+    }
+
+    final parsed = Uri.tryParse(pageUrl);
+    if (parsed == null) {
+      return params.isEmpty
+          ? _baseBooksUri()
+          : Uri.https(_baseUri, '/books/', params);
+    }
+    if (parsed.hasScheme) return parsed;
+
+    final path = parsed.path.isEmpty ? '/books/' : parsed.path;
+    return Uri.https(_baseUri, path, parsed.queryParametersAll);
+  }
+
+  Uri _baseBooksUri() {
+    return Uri(scheme: 'https', host: _baseUri, path: '/books/');
+  }
+
+  PublicDomainCatalogFailureCategory _categoryForTransportError(Object error) {
+    if (error is TimeoutException) {
+      return PublicDomainCatalogFailureCategory.timeout;
+    }
+    if (error is SocketException || error is http.ClientException) {
+      return PublicDomainCatalogFailureCategory.network;
+    }
+    return PublicDomainCatalogFailureCategory.unknown;
+  }
+
+  PublicDomainCatalogFailureCategory _categoryForStatusCode(int statusCode) {
+    if (statusCode >= 500 || statusCode == 429) {
+      return PublicDomainCatalogFailureCategory.temporaryServer;
+    }
+    return PublicDomainCatalogFailureCategory.invalidResponse;
+  }
+
+  String _messageForCategory(PublicDomainCatalogFailureCategory category) {
+    switch (category) {
+      case PublicDomainCatalogFailureCategory.timeout:
+        return 'The catalog is taking too long to respond.';
+      case PublicDomainCatalogFailureCategory.network:
+        return 'The catalog could not be reached.';
+      case PublicDomainCatalogFailureCategory.temporaryServer:
+        return 'The catalog is temporarily unavailable.';
+      case PublicDomainCatalogFailureCategory.invalidResponse:
+        return 'The catalog returned an invalid response.';
+      case PublicDomainCatalogFailureCategory.parsing:
+        return 'The catalog response could not be read.';
+      case PublicDomainCatalogFailureCategory.empty:
+        return 'The catalog did not return any books.';
+      case PublicDomainCatalogFailureCategory.cacheFallback:
+        return 'Showing saved Project Gutenberg results.';
+      case PublicDomainCatalogFailureCategory.pagination:
+        return 'More books could not be loaded.';
+      case PublicDomainCatalogFailureCategory.unknown:
+        return 'The catalog could not be loaded.';
+    }
+  }
+
+  void _debugCatalogLog({
+    required Uri uri,
+    required int page,
+    required PublicDomainCatalogFailureCategory category,
+    Object? error,
+    int? statusCode,
+  }) {
+    if (!kDebugMode) return;
+    debugPrint(
+      'Gutendex catalog request failed: url=$uri page=$page '
+      'category=${category.name} status=$statusCode error=$error',
+    );
   }
 
   String? _seededText(PublicDomainBookQuery query) {
@@ -375,6 +590,23 @@ class PublicDomainBookService {
     );
   }
 
+  bool _isEligibleBookResult(
+    Map<String, dynamic> json, {
+    required PublicDomainBookQuery query,
+  }) {
+    if (!_isPublicDomainEpub(json)) return false;
+
+    final languageCode = query.languageCode?.trim().toLowerCase();
+    if (languageCode == null || languageCode.isEmpty) return true;
+
+    final languages = json['languages'];
+    if (languages is! List) return false;
+    return languages
+        .whereType<String>()
+        .map((value) => value.trim().toLowerCase())
+        .contains(languageCode);
+  }
+
   String _sortValue(PublicDomainSort sort) {
     switch (sort) {
       case PublicDomainSort.popular:
@@ -398,10 +630,26 @@ class PublicDomainBookService {
   };
 }
 
+enum PublicDomainCatalogFailureCategory {
+  timeout,
+  network,
+  temporaryServer,
+  invalidResponse,
+  parsing,
+  empty,
+  cacheFallback,
+  pagination,
+  unknown,
+}
+
 class PublicDomainBookServiceException implements Exception {
   final String message;
+  final PublicDomainCatalogFailureCategory category;
 
-  const PublicDomainBookServiceException(this.message);
+  const PublicDomainBookServiceException(
+    this.message, {
+    this.category = PublicDomainCatalogFailureCategory.unknown,
+  });
 
   @override
   String toString() => message;

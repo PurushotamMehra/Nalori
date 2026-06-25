@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 
 import '../models/book_metadata.dart';
 import '../models/public_domain_book.dart';
+import '../models/public_domain_catalog.dart';
 import '../models/reading_settings.dart';
 import '../services/book_metadata_service.dart';
 import '../services/library_service.dart';
@@ -19,6 +20,11 @@ class PublicDomainBooksScreen extends StatefulWidget {
   final String title;
   final String subtitle;
   final PublicDomainBookQuery initialQuery;
+  final PublicDomainBookService? catalogService;
+  final PublicDomainDownloadService? downloadService;
+  final LibraryService? libraryService;
+  final BookMetadataService? metadataService;
+  final bool skipLocalBookLoad;
 
   const PublicDomainBooksScreen({
     super.key,
@@ -26,6 +32,11 @@ class PublicDomainBooksScreen extends StatefulWidget {
     this.title = 'Project Gutenberg',
     this.subtitle = 'Explore free public-domain books in the U.S. catalog',
     this.initialQuery = const PublicDomainBookQuery(),
+    this.catalogService,
+    this.downloadService,
+    this.libraryService,
+    this.metadataService,
+    this.skipLocalBookLoad = false,
   });
 
   factory PublicDomainBooksScreen.forAuthor({
@@ -82,10 +93,10 @@ class _PublicDomainDownloadTask {
 }
 
 class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
-  final _catalogService = PublicDomainBookService();
-  final _downloadService = PublicDomainDownloadService();
-  final _libraryService = LibraryService();
-  final _metadataService = BookMetadataService();
+  late final PublicDomainBookService _catalogService;
+  late final PublicDomainDownloadService _downloadService;
+  late final LibraryService _libraryService;
+  late final BookMetadataService _metadataService;
   final _searchController = TextEditingController();
   final _scrollController = ScrollController();
 
@@ -108,18 +119,26 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   bool _refreshing = false;
   bool _hasNextPage = false;
   int _page = 1;
-  String? _nextPageUrl;
   int _requestGeneration = 0;
+  String? _activeInitialLoadKey;
   Timer? _searchDebounce;
   bool _prefetchingMore = false;
   PublicDomainBookPage? _prefetchedPage;
   String? _prefetchedPageKey;
+  PublicDomainCatalogManifest? _availableCatalogManifest;
+  String? _statusActionLabel;
+  bool _catalogInstallInProgress = false;
+  double? _catalogInstallProgress;
 
   ReadingSettings get _s => widget.settings;
 
   @override
   void initState() {
     super.initState();
+    _catalogService = widget.catalogService ?? PublicDomainBookService();
+    _downloadService = widget.downloadService ?? PublicDomainDownloadService();
+    _libraryService = widget.libraryService ?? LibraryService();
+    _metadataService = widget.metadataService ?? BookMetadataService();
     _activeQuery = widget.initialQuery;
     _searchController.text = widget.initialQuery.text;
     _scrollController.addListener(_maybePrefetchNextPage);
@@ -135,8 +154,71 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   }
 
   Future<void> _loadInitialData() async {
-    await _loadLocalBooks();
+    if (!widget.skipLocalBookLoad) await _loadLocalBooks();
     await _loadBooks(reset: true);
+    unawaited(_checkForFullCatalog());
+  }
+
+  Future<void> _checkForFullCatalog() async {
+    try {
+      final manifest = await _catalogService.fetchCatalogManifest();
+      if (!mounted || manifest == null) return;
+      setState(() {
+        _availableCatalogManifest = manifest;
+        if (manifest.compressedSizeBytes > 10 * 1024 * 1024) {
+          _statusMessage =
+              'Full Gutenberg catalogue available (${_formatBytes(manifest.compressedSizeBytes)})';
+          _statusActionLabel = 'Download';
+        } else {
+          _statusMessage = 'Downloading full Gutenberg catalogue';
+          _statusActionLabel = null;
+        }
+      });
+      if (manifest.compressedSizeBytes <= 10 * 1024 * 1024) {
+        await _installFullCatalog(manifest);
+      }
+    } catch (_) {
+      if (!mounted || _books.isEmpty) return;
+      setState(() {
+        _statusMessage = 'Could not check for catalogue updates.';
+        _statusActionLabel = 'Retry';
+      });
+    }
+  }
+
+  Future<void> _installFullCatalog(PublicDomainCatalogManifest manifest) async {
+    if (_catalogInstallInProgress) return;
+    setState(() {
+      _catalogInstallInProgress = true;
+      _catalogInstallProgress = null;
+      _statusMessage = 'Downloading full Gutenberg catalogue';
+      _statusActionLabel = null;
+    });
+    try {
+      await _catalogService.installCatalog(
+        manifest,
+        onProgress: (received, total) {
+          if (!mounted || total == null || total <= 0) return;
+          setState(() => _catalogInstallProgress = received / total);
+        },
+      );
+      if (!mounted) return;
+      setState(() {
+        _catalogInstallInProgress = false;
+        _catalogInstallProgress = null;
+        _availableCatalogManifest = null;
+        _statusMessage = 'Full catalogue available offline';
+      });
+      await _loadBooks(reset: true);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _catalogInstallInProgress = false;
+        _catalogInstallProgress = null;
+        _statusMessage = 'Could not update catalogue. Showing saved results.';
+        _statusActionLabel = 'Retry';
+      });
+    }
   }
 
   Future<void> _loadLocalBooks() async {
@@ -206,82 +288,95 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   }
 
   Future<void> _loadBooks({required bool reset}) async {
+    final loadKey = _pageCacheKey(
+      query: _activeQuery,
+      page: reset ? 1 : _page + 1,
+    );
+    if (reset &&
+        _activeInitialLoadKey == loadKey &&
+        (_loading || _refreshing)) {
+      return;
+    }
+    if (!reset && _loadingMore) return;
+    if (reset) _activeInitialLoadKey = loadKey;
+
     final generation = ++_requestGeneration;
     final query = _activeQuery;
     if (reset) {
       _clearPrefetchedPage();
-      final cached = await _catalogService.readCachedBooks(query: query);
-      if (!mounted || generation != _requestGeneration) return;
-      final hasFreshCache = cached != null
-          ? await _catalogService.isCacheFresh(query: query)
-          : false;
       setState(() {
-        if (cached != null) {
-          _books = cached.books;
-          _page = cached.page;
-          _hasNextPage = cached.hasNextPage;
-          _nextPageUrl = cached.nextUrl;
-        }
-        _loading = cached == null;
-        _refreshing = cached != null && !hasFreshCache;
+        _loading = _books.isEmpty;
+        _loadingMore = false;
+        _refreshing = _books.isNotEmpty;
         _error = null;
-        _statusMessage = cached != null && !hasFreshCache
-            ? 'Refreshing Project Gutenberg in the background'
-            : null;
-        if (cached == null) {
-          _page = 1;
-          _nextPageUrl = null;
-        }
+        _statusMessage = _books.isNotEmpty ? 'Refreshing catalogue' : null;
+        _statusActionLabel = null;
+        _page = 1;
       });
-
-      if (cached != null && hasFreshCache) return;
     } else {
       setState(() => _loadingMore = true);
     }
 
     try {
       final requestedPage = reset ? 1 : _page + 1;
-      final nextPageUrl = reset ? null : _nextPageUrl;
       final prefetchedPage = reset
           ? null
           : _takePrefetchedPage(query: query, page: requestedPage);
       final page =
           prefetchedPage ??
-          (reset
-              ? await _catalogService.fetchBooksAndCache(
-                  query: query,
-                  page: requestedPage,
-                )
-              : await _catalogService.fetchBooksCacheFirst(
-                  query: query,
-                  page: requestedPage,
-                  pageUrl: nextPageUrl,
-                ));
+          await _catalogService.fetchLocalCatalogPage(
+            query: query,
+            page: requestedPage,
+          );
 
       if (!mounted || generation != _requestGeneration) return;
       setState(() {
-        _books = reset ? page.books : [..._books, ...page.books];
+        _books = reset ? page.books : _appendUniqueBooks(_books, page.books);
         _page = page.page;
         _hasNextPage = page.hasNextPage;
-        _nextPageUrl = page.nextUrl;
         _loading = false;
         _loadingMore = false;
         _refreshing = false;
-        _statusMessage = null;
+        _statusMessage = page.catalogStatusMessage;
+        _statusActionLabel = null;
       });
       if (!reset) _maybePrefetchNextPage();
     } catch (e) {
       if (!mounted || generation != _requestGeneration) return;
       setState(() {
-        _error = _books.isEmpty ? e.toString() : null;
+        _error = _books.isEmpty ? _catalogUnavailableMessage(e) : null;
         _statusMessage = _books.isNotEmpty
-            ? 'Showing saved Project Gutenberg results'
+            ? reset
+                  ? 'Could not refresh. Showing saved Project Gutenberg results.'
+                  : 'Could not load more books. Try again when the catalog responds.'
             : null;
+        _statusActionLabel = null;
         _loading = false;
         _loadingMore = false;
         _refreshing = false;
       });
+    } finally {
+      if (reset && _activeInitialLoadKey == loadKey) {
+        _activeInitialLoadKey = null;
+      }
     }
+  }
+
+  List<PublicDomainBook> _appendUniqueBooks(
+    List<PublicDomainBook> existing,
+    List<PublicDomainBook> incoming,
+  ) {
+    final seen = existing.map((book) => book.id).toSet();
+    return [
+      ...existing,
+      for (final book in incoming)
+        if (seen.add(book.id)) book,
+    ];
+  }
+
+  String _catalogUnavailableMessage(Object error) {
+    if (error is PublicDomainBookServiceException) return error.message;
+    return 'Check your connection and try again.';
   }
 
   void _clearPrefetchedPage() {
@@ -323,7 +418,6 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
 
     final query = _activeQuery;
     final nextPage = _page + 1;
-    final nextPageUrl = _nextPageUrl;
     final key = _pageCacheKey(query: query, page: nextPage);
     if (_prefetchedPageKey == key && _prefetchedPage != null) return;
 
@@ -331,11 +425,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
     _prefetchedPageKey = key;
     unawaited(
       _catalogService
-          .fetchBooksCacheFirst(
-            query: query,
-            page: nextPage,
-            pageUrl: nextPageUrl,
-          )
+          .fetchLocalCatalogPage(query: query, page: nextPage)
           .then((page) {
             if (!mounted || _prefetchedPageKey != key) return;
             _prefetchedPage = page;
@@ -354,10 +444,22 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   }
 
   void _submitSearch() {
-    _searchDebounce?.cancel();
     final nextText = _searchController.text.trim();
-    if (nextText == _activeQuery.trimmedText && !_loading) return;
-    setState(() => _activeQuery = _activeQuery.copyWith(text: nextText));
+    _reloadQuery(_activeQuery.copyWith(text: nextText));
+  }
+
+  void _clearSearch() {
+    _searchController.clear();
+    _reloadQuery(_activeQuery.copyWith(text: ''));
+  }
+
+  void _reloadQuery(PublicDomainBookQuery nextQuery) {
+    _searchDebounce?.cancel();
+    if (nextQuery.cacheKey == _activeQuery.cacheKey && !_loading) return;
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(0);
+    }
+    setState(() => _activeQuery = nextQuery);
     _loadBooks(reset: true);
   }
 
@@ -367,36 +469,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
     setState(() {});
   }
 
-  Future<void> _refreshCurrentQuery() async {
-    setState(() {
-      _statusMessage = 'Refreshing Project Gutenberg';
-      _refreshing = true;
-    });
-    try {
-      final page = await _catalogService.fetchBooksAndCache(
-        query: _activeQuery,
-      );
-      if (!mounted) return;
-      setState(() {
-        _books = page.books;
-        _page = page.page;
-        _hasNextPage = page.hasNextPage;
-        _nextPageUrl = page.nextUrl;
-        _loading = false;
-        _refreshing = false;
-        _statusMessage = null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _refreshing = false;
-        _statusMessage = _books.isNotEmpty
-            ? 'Could not refresh. Showing saved results.'
-            : null;
-        _error = _books.isEmpty ? e.toString() : null;
-      });
-    }
-  }
+  Future<void> _refreshCurrentQuery() => _loadBooks(reset: true);
 
   Future<void> _openFilters() async {
     var nextMode = _activeQuery.searchMode;
@@ -534,15 +607,14 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
                         child: ElevatedButton(
                           onPressed: () {
                             Navigator.pop(ctx);
-                            setState(() {
-                              _activeQuery = _activeQuery.copyWith(
+                            _reloadQuery(
+                              _activeQuery.copyWith(
                                 languageCode: nextLanguage,
                                 clearLanguageCode: nextLanguage == null,
                                 searchMode: nextMode,
                                 sort: nextSort,
-                              );
-                            });
-                            _loadBooks(reset: true);
+                              ),
+                            );
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: _s.accentColor,
@@ -797,6 +869,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
     if (updated != null) {
       await _metadataService.updateMetadata(
         updated.copyWith(
+          managedFilePath: downloadedFile.path,
           source: 'gutenberg',
           gutenbergId: book.id,
           sourceUrl: 'https://www.gutenberg.org/ebooks/${book.id}',
@@ -964,20 +1037,21 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
+                    tooltip: 'Filters',
                     onPressed: _openFilters,
                     icon: Icon(Icons.tune_rounded, color: _s.mutedColor),
                   ),
+                  if (_searchController.text.trim().isNotEmpty)
+                    IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: _clearSearch,
+                      icon: Icon(Icons.close_rounded, color: _s.mutedColor),
+                    ),
                   IconButton(
-                    onPressed: _searchController.text.trim().isEmpty
-                        ? _submitSearch
-                        : () {
-                            _searchController.clear();
-                            _submitSearch();
-                          },
+                    tooltip: 'Search',
+                    onPressed: _submitSearch,
                     icon: Icon(
-                      _searchController.text.trim().isEmpty
-                          ? Icons.arrow_forward_rounded
-                          : Icons.close_rounded,
+                      Icons.arrow_forward_rounded,
                       color: _s.mutedColor,
                     ),
                   ),
@@ -1020,10 +1094,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
             InputChip(
               label: Text('Author: ${_activeQuery.exactAuthor!}'),
               onDeleted: () {
-                setState(() {
-                  _activeQuery = _activeQuery.copyWith(clearExactAuthor: true);
-                });
-                _loadBooks(reset: true);
+                _reloadQuery(_activeQuery.copyWith(clearExactAuthor: true));
               },
               backgroundColor: _s.menuColor,
               side: BorderSide(color: _s.mutedColor.withValues(alpha: 0.12)),
@@ -1167,7 +1238,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       return _buildMessageState(
         icon: Icons.wifi_off_rounded,
         title: 'Catalog unavailable',
-        message: 'Check your connection and try again.',
+        message: _error ?? 'Check your connection and try again.',
         actionLabel: 'Retry',
         onAction: () => _loadBooks(reset: true),
       );
@@ -1180,11 +1251,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
         message: 'Try a shorter search or adjust the filters.',
         actionLabel: 'Clear search',
         onAction: () {
-          _searchController.clear();
-          setState(() {
-            _activeQuery = _activeQuery.copyWith(text: '');
-          });
-          _loadBooks(reset: true);
+          _clearSearch();
         },
       );
     }
@@ -1287,11 +1354,12 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       ),
       child: Row(
         children: [
-          if (_refreshing) ...[
+          if (_refreshing || _catalogInstallInProgress) ...[
             SizedBox(
               width: 14,
               height: 14,
               child: CircularProgressIndicator(
+                value: _catalogInstallProgress,
                 strokeWidth: 2,
                 color: _s.accentColor,
               ),
@@ -1306,9 +1374,32 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
               style: _s.uiText(fontSize: 12, color: _s.mutedColor),
             ),
           ),
+          if (_statusActionLabel != null) ...[
+            const SizedBox(width: 8),
+            TextButton(
+              onPressed: _handleStatusAction,
+              style: TextButton.styleFrom(
+                foregroundColor: _s.accentColor,
+                visualDensity: VisualDensity.compact,
+              ),
+              child: Text(
+                _statusActionLabel!,
+                style: _s.uiText(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  void _handleStatusAction() {
+    final manifest = _availableCatalogManifest;
+    if (manifest != null) {
+      unawaited(_installFullCatalog(manifest));
+      return;
+    }
+    unawaited(_checkForFullCatalog());
   }
 
   Widget _buildMessageState({
@@ -1681,5 +1772,15 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       case PublicDomainSort.descending:
         return 'Newest IDs';
     }
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    final kb = bytes / 1024;
+    if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
+    final mb = kb / 1024;
+    if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
+    final gb = mb / 1024;
+    return '${gb.toStringAsFixed(1)} GB';
   }
 }

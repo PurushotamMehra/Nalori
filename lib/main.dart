@@ -1,13 +1,22 @@
+import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:flutter/services.dart';
 
 import 'l10n/app_localizations.dart';
+import 'models/book_metadata.dart';
 import 'models/reading_settings.dart';
 import 'screens/home_screen.dart';
+import 'screens/reader_screen.dart';
+import 'services/book_metadata_service.dart';
 import 'services/reading_settings_service.dart';
 import 'ui/app_visuals.dart';
+
+const String _diagReaderBookPath = String.fromEnvironment(
+  'NALORI_READER_DIAG_BOOK_PATH',
+);
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -76,9 +85,78 @@ class _NaloriAppState extends State<NaloriApp> {
                   )
                 : settings.copyWith(clearReaderTheme: true),
           ),
-          home: const HomeScreen(),
+          home: _diagReaderBookPath.isEmpty
+              ? const HomeScreen()
+              : _DiagReaderLauncher(
+                  path: _diagReaderBookPath,
+                  settings: settings,
+                ),
         );
       },
     );
   }
+}
+
+class _DiagReaderLauncher extends StatelessWidget {
+  const _DiagReaderLauncher({required this.path, required this.settings});
+
+  final String path;
+  final ReadingSettings settings;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<_DiagReaderLaunchData>(
+      future: _resolveDiagReaderLaunchData(path),
+      builder: (context, snapshot) {
+        final data = snapshot.data;
+        if (data == null) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        return ReaderScreen.directContinue(
+          bookFile: data.file,
+          metadata: data.metadata,
+          settings: settings,
+        );
+      },
+    );
+  }
+}
+
+class _DiagReaderLaunchData {
+  const _DiagReaderLaunchData({required this.file, required this.metadata});
+
+  final File file;
+  final BookMetadata metadata;
+}
+
+Future<_DiagReaderLaunchData> _resolveDiagReaderLaunchData(String path) async {
+  final file = await _resolveDiagBookFile(path);
+  final bookId = file.path.split(Platform.pathSeparator).last;
+  final metadataService = BookMetadataService();
+  await metadataService.init();
+  final saved = metadataService.getMetadata(bookId);
+  final metadata =
+      saved?.copyWith(managedFilePath: file.path) ??
+      BookMetadata(
+        id: bookId,
+        managedFilePath: file.path,
+        title: 'Nalori Diagnostics',
+        author: 'Diagnostics',
+      );
+  if (saved == null || saved.managedFilePath != file.path) {
+    await metadataService.updateMetadata(metadata);
+  }
+  return _DiagReaderLaunchData(file: file, metadata: metadata);
+}
+
+Future<File> _resolveDiagBookFile(String path) async {
+  if (!path.startsWith('asset:')) return File(path);
+  final assetPath = path.substring('asset:'.length);
+  final bytes = await rootBundle.load(assetPath);
+  final fileName = assetPath.split('/').last;
+  final file = File('${Directory.systemTemp.path}/$fileName');
+  await file.writeAsBytes(bytes.buffer.asUint8List(), flush: true);
+  return file;
 }

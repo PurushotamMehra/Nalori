@@ -251,6 +251,23 @@ void main() {
     expect(disposeCount, 0);
   });
 
+  testWidgets('ignores late pointer events after disposal', (tester) async {
+    await tester.pumpWidget(buildHarness(itemCount: 3));
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(ReadingCardDeck)),
+    );
+    await gesture.moveBy(const Offset(0, -90));
+    await tester.pump();
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await gesture.moveBy(const Offset(0, -90));
+    await gesture.up();
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('drag transforms reuse existing card widgets', (tester) async {
     var buildCount = 0;
 

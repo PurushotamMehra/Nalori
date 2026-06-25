@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
@@ -11,6 +12,106 @@ import 'package:path/path.dart' as p;
 
 import '../models/book_chunk.dart';
 import '../models/bookmark.dart';
+import 'lazy_parsed_book.dart';
+import '../utils/reader_content_parser.dart';
+
+const bool _epubDiagEnabled = bool.fromEnvironment('NALORI_EPUB_DIAG');
+const String _epubDiagPrefix = 'NALORI_EPUB_DIAG';
+
+String _newEpubDiagRunId() {
+  final now = DateTime.now().microsecondsSinceEpoch.toRadixString(16);
+  final isolate = Isolate.current.hashCode.toUnsigned(20).toRadixString(16);
+  return '$now-$isolate';
+}
+
+String _epubDiagIsolateLabel() {
+  final name = Isolate.current.debugName;
+  return name == null || name.isEmpty
+      ? 'isolate@${Isolate.current.hashCode}'
+      : name;
+}
+
+int _epubDiagRssBytes() {
+  try {
+    return ProcessInfo.currentRss;
+  } catch (_) {
+    return -1;
+  }
+}
+
+void _epubDiagLog(String runId, String phase, Map<String, Object?> fields) {
+  if (!_epubDiagEnabled) return;
+  final parts = <String>[
+    _epubDiagPrefix,
+    'run=$runId',
+    'phase=$phase',
+    'ts=${DateTime.now().toIso8601String()}',
+    'rss=${_epubDiagRssBytes()}',
+    'isolate=${_epubDiagIsolateLabel()}',
+    for (final entry in fields.entries)
+      if (entry.value != null) '${entry.key}=${entry.value}',
+  ];
+  // Use print instead of debugPrint so profile-mode diagnostics are preserved.
+  // Keep payloads scalar and privacy-safe.
+  // ignore: avoid_print
+  print(parts.join(' '));
+}
+
+T _epubDiagSync<T>(
+  String runId,
+  String phase,
+  Map<String, Object?> fields,
+  T Function() body,
+) {
+  if (!_epubDiagEnabled) return body();
+  final sw = Stopwatch()..start();
+  _epubDiagLog(runId, '${phase}_start', fields);
+  try {
+    final result = body();
+    sw.stop();
+    _epubDiagLog(runId, '${phase}_end', {
+      ...fields,
+      'elapsedMs': sw.elapsedMilliseconds,
+    });
+    return result;
+  } catch (error) {
+    sw.stop();
+    _epubDiagLog(runId, '${phase}_error', {
+      ...fields,
+      'elapsedMs': sw.elapsedMilliseconds,
+      'error': error.runtimeType,
+    });
+    rethrow;
+  }
+}
+
+Future<T> _epubDiagAsync<T>(
+  String runId,
+  String phase,
+  Map<String, Object?> fields,
+  Future<T> Function() body,
+) async {
+  if (!_epubDiagEnabled) return body();
+  final sw = Stopwatch()..start();
+  _epubDiagLog(runId, '${phase}_start', fields);
+  try {
+    final result = await body();
+    sw.stop();
+    _epubDiagLog(runId, '${phase}_end', {
+      ...fields,
+      'elapsedMs': sw.elapsedMilliseconds,
+    });
+    return result;
+  } catch (error) {
+    sw.stop();
+    _epubDiagLog(runId, '${phase}_error', {
+      ...fields,
+      'elapsedMs': sw.elapsedMilliseconds,
+      'error': error.runtimeType,
+    });
+    rethrow;
+  }
+}
 
 /// Service responsible for loading, parsing, and chunking EPUB content.
 ///
@@ -31,7 +132,7 @@ Future<
 >
 _parseInIsolate(Uint8List bytes) {
   final service = EpubParserService();
-  return service._parseBytes(bytes);
+  return service._parseBytes(bytes, runId: _newEpubDiagRunId());
 }
 
 const _dialogueQuoteChars = ['"', '\u201C', '\u201D', '\u00AB', '\u00BB'];
@@ -143,7 +244,20 @@ class EpubParserService {
     })
   >
   parseFileInBackground(File file) async {
-    final Uint8List bytes = await file.readAsBytes();
+    final runId = _newEpubDiagRunId();
+    _epubDiagLog(runId, 'parse_file_background_begin', {
+      'path': file.path,
+      'book': p.basename(file.path),
+      'mainIsolate': _epubDiagIsolateLabel() == 'main',
+    });
+    final Uint8List bytes = await _epubDiagAsync(runId, 'read_as_bytes', {
+      'path': file.path,
+      'book': p.basename(file.path),
+    }, file.readAsBytes);
+    _epubDiagLog(runId, 'isolate_message_send', {
+      'bytes': bytes.length,
+      'book': p.basename(file.path),
+    });
     return Isolate.run(() => _parseInIsolate(bytes));
   }
 
@@ -158,9 +272,12 @@ class EpubParserService {
     })
   >
   loadAndParse(String assetPath) async {
-    final ByteData data = await rootBundle.load(assetPath);
+    final runId = _newEpubDiagRunId();
+    final ByteData data = await _epubDiagAsync(runId, 'asset_load', {
+      'assetPath': assetPath,
+    }, () => rootBundle.load(assetPath));
     final Uint8List bytes = data.buffer.asUint8List();
-    return _parseBytes(bytes);
+    return _parseBytes(bytes, runId: runId);
   }
 
   /// Loads the EPUB file from a local [File].
@@ -174,8 +291,113 @@ class EpubParserService {
     })
   >
   loadAndParseFromFile(File file) async {
-    final Uint8List bytes = await file.readAsBytes();
-    return _parseBytes(bytes);
+    final runId = _newEpubDiagRunId();
+    final Uint8List bytes = await _epubDiagAsync(runId, 'read_as_bytes', {
+      'path': file.path,
+      'book': p.basename(file.path),
+    }, file.readAsBytes);
+    return _parseBytes(bytes, runId: runId);
+  }
+
+  ParsedSection parseLazySection({
+    required LazySectionIdentity identity,
+    required String html,
+    ChunkSection section = ChunkSection.content,
+    Map<String, Uint8List> resourceBytes = const {},
+    Map<String, String> resourceMediaTypes = const {},
+    Map<String, String> footnoteContentById = const {},
+    String? runId,
+  }) {
+    final diagRun = runId ?? _newEpubDiagRunId();
+    _epubDiagLog(diagRun, 'lazy_section_parse_begin', {
+      'book': identity.bookId,
+      'spineIndex': identity.spineIndex,
+      'href': identity.href,
+      'htmlChars': html.length,
+    });
+    final textFile = EpubTextContentFile()
+      ..FileName = identity.href
+      ..ContentMimeType = 'application/xhtml+xml'
+      ..ContentType = EpubContentType.XHTML_1_1
+      ..Content = html;
+    final book = EpubBook()
+      ..Title = identity.bookId
+      ..Content = (EpubContent()
+        ..Html = {identity.href: textFile}
+        ..Css = {}
+        ..Images = _lazyImageContentFiles(resourceBytes, resourceMediaTypes)
+        ..Fonts = {}
+        ..AllFiles = {
+          identity.href: textFile,
+          ..._lazyImageContentFiles(resourceBytes, resourceMediaTypes),
+        })
+      ..Chapters = const [];
+
+    final parsed = _extractContent(
+      book,
+      runId: diagRun,
+      singleSectionOverride: section,
+      externalFootnoteContent: footnoteContentById,
+    );
+    final textChunks = parsed.chunks.where((chunk) => chunk.text != null);
+    final textCharCount = textChunks.fold<int>(
+      0,
+      (sum, chunk) => sum + (chunk.text?.length ?? 0),
+    );
+    final wordCount = textChunks.fold<int>(
+      0,
+      (sum, chunk) => sum + _wordCount(chunk.text ?? ''),
+    );
+    final parsedSection = ParsedSection(
+      identity: identity,
+      chunks: parsed.chunks,
+      anchorMap: parsed.anchorMap,
+      chapters: parsed.chapters,
+      wordCount: wordCount,
+      textCharCount: textCharCount,
+      resourceHrefs: extractSectionResourceHrefs(html),
+      parserVersion: lazyParsedSectionParserVersion,
+    );
+    _epubDiagLog(diagRun, 'lazy_section_parse_end', {
+      'book': identity.bookId,
+      'spineIndex': identity.spineIndex,
+      'href': identity.href,
+      'chunks': parsedSection.chunks.length,
+      'anchors': parsedSection.anchorMap.length,
+      'chapters': parsedSection.chapters.length,
+      'wordCount': parsedSection.wordCount,
+      'textCharCount': parsedSection.textCharCount,
+      'resources': parsedSection.resourceHrefs.length,
+    });
+    return parsedSection;
+  }
+
+  Map<String, EpubByteContentFile> _lazyImageContentFiles(
+    Map<String, Uint8List> resourceBytes,
+    Map<String, String> resourceMediaTypes,
+  ) {
+    final images = <String, EpubByteContentFile>{};
+    for (final entry in resourceBytes.entries) {
+      final mediaType = resourceMediaTypes[entry.key] ?? '';
+      if (!mediaType.toLowerCase().startsWith('image/')) continue;
+      images[entry.key] = EpubByteContentFile()
+        ..FileName = entry.key
+        ..ContentMimeType = mediaType
+        ..ContentType = _imageContentType(mediaType)
+        ..Content = entry.value;
+    }
+    return images;
+  }
+
+  EpubContentType _imageContentType(String mediaType) {
+    return switch (mediaType.toLowerCase()) {
+      'image/gif' => EpubContentType.IMAGE_GIF,
+      'image/jpeg' || 'image/jpg' => EpubContentType.IMAGE_JPEG,
+      'image/png' => EpubContentType.IMAGE_PNG,
+      'image/svg+xml' => EpubContentType.IMAGE_SVG,
+      'image/bmp' => EpubContentType.IMAGE_BMP,
+      _ => EpubContentType.OTHER,
+    };
   }
 
   // ─── Core parsing ────────────────────────────────────────────────────
@@ -189,12 +411,27 @@ class EpubParserService {
       Map<String, List<int>> searchIndex,
     })
   >
-  _parseBytes(Uint8List bytes) async {
-    final EpubBook book = await EpubReader.readBook(bytes);
+  _parseBytes(Uint8List bytes, {String? runId}) async {
+    final diagRun = runId ?? _newEpubDiagRunId();
+    _epubDiagLog(diagRun, 'parse_bytes_begin', {'bytes': bytes.length});
+    final EpubBook book = await _epubDiagAsync(
+      diagRun,
+      'epub_reader_read_book',
+      {'bytes': bytes.length},
+      () => EpubReader.readBook(bytes),
+    );
     final String title = book.Title ?? 'Unknown Title';
+    _epubDiagLog(diagRun, 'epub_book_created', {
+      'titleChars': title.length,
+      'htmlFiles': book.Content?.Html?.length,
+      'images': book.Content?.Images?.length,
+      'fonts': book.Content?.Fonts?.length,
+      'css': book.Content?.Css?.length,
+      'chapters': book.Chapters?.length,
+    });
 
     try {
-      final result = _extractContent(book);
+      final result = _extractContent(book, runId: diagRun);
       if (kDebugMode) {
         debugPrint(
           'EpubParser: parsed "$title" -> ${result.chunks.length} chunks, '
@@ -208,7 +445,9 @@ class EpubParserService {
             'EpubParser: DOM parsing produced 0 chunks, trying fallback',
           );
         }
-        final fallback = _fallbackExtract(book);
+        final fallback = _epubDiagSync(diagRun, 'fallback_extract', {
+          'reason': 'empty_chunks',
+        }, () => _fallbackExtract(book));
         return (
           title: title,
           chunks: fallback,
@@ -228,7 +467,9 @@ class EpubParserService {
       if (kDebugMode) {
         debugPrint('EpubParser: _extractContent failed: $e\n$stack');
       }
-      final fallback = _fallbackExtract(book);
+      final fallback = _epubDiagSync(diagRun, 'fallback_extract', {
+        'reason': 'extract_exception',
+      }, () => _fallbackExtract(book));
       return (
         title: title,
         chunks: fallback,
@@ -338,7 +579,14 @@ class EpubParserService {
     List<ChapterInfo> chapters,
     Map<String, List<int>> searchIndex,
   })
-  _extractContent(EpubBook book) {
+  _extractContent(
+    EpubBook book, {
+    String? runId,
+    ChunkSection? singleSectionOverride,
+    Map<String, String> externalFootnoteContent = const {},
+  }) {
+    final diagRun = runId ?? _newEpubDiagRunId();
+    final extractStopwatch = Stopwatch()..start();
     final List<BookChunk> chunks = [];
     final Map<String, int> anchorMap = {};
     final Map<String, List<int>> searchIndex = {};
@@ -346,6 +594,7 @@ class EpubParserService {
 
     final contentMap = book.Content?.Html;
     if (contentMap == null || contentMap.isEmpty) {
+      _epubDiagLog(diagRun, 'extract_content_empty', {});
       return (
         chunks: chunks,
         anchorMap: anchorMap,
@@ -356,6 +605,10 @@ class EpubParserService {
 
     // Determine which key marks the start of real content.
     final firstContentKey = _findFirstContentKey(contentMap, book);
+    _epubDiagLog(diagRun, 'extract_content_begin', {
+      'htmlFiles': contentMap.length,
+      'firstContentKey': firstContentKey,
+    });
     bool reachedContent = false;
 
     // Current card buffer.
@@ -496,22 +749,14 @@ class EpubParserService {
     }
 
     // ── Footnote content storage (D-13) ──
-    final Map<String, String> footnoteContentMap = {};
+    final Map<String, String> footnoteContentMap = {...externalFootnoteContent};
 
-    void prescanFootnotes(dom.Element body) {
-      for (final el in body.querySelectorAll('[id]')) {
-        final id = el.id;
-        if (id.isEmpty) continue;
-        if (id.startsWith('fn') ||
-            id.startsWith('note') ||
-            id.startsWith('footnote') ||
-            id.startsWith('endnote')) {
-          final text = el.text.trim();
-          if (text.isNotEmpty) {
-            footnoteContentMap[id] = text;
-          }
-        }
+    int prescanFootnotes(dom.Element body) {
+      final content = _collectFootnoteContentFromBody(body);
+      for (final entry in content.entries) {
+        footnoteContentMap[entry.key] = entry.value;
       }
+      return content.length;
     }
 
     // Flush the buffer into a new card chunk.
@@ -605,40 +850,75 @@ class EpubParserService {
       debugPrint('EpubParser: first content key = $firstContentKey');
     }
 
+    var entryIndex = 0;
+    var lastAggregateMs = 0;
     for (final entry in contentMap.entries) {
+      final chapterStopwatch = Stopwatch()..start();
       final key = entry.key;
       final htmlContent = entry.value;
       final htmlString = htmlContent.Content;
       if (htmlString == null || htmlString.isEmpty) continue;
+      final chapterStartChunkCount = chunks.length;
+      final chapterStartAnchorCount = anchorMap.length;
+      var visitedNodes = 0;
+      var textNodeCount = 0;
+      var elementCount = 0;
+      var tableCount = 0;
+      var imageCount = 0;
+      var extractedTextChars = 0;
+      var maxDepth = 0;
 
       currentKey = key;
 
-      if (!reachedContent) {
-        if (key == firstContentKey ||
-            p.basename(key) ==
-                (firstContentKey != null ? p.basename(firstContentKey) : '')) {
-          reachedContent = true;
-          currentSection = ChunkSection.content;
-        } else {
-          currentSection = ChunkSection.frontMatter;
-        }
+      if (singleSectionOverride != null) {
+        reachedContent = singleSectionOverride == ChunkSection.content;
+        currentSection = singleSectionOverride;
       } else {
-        currentSection = _isFrontMatterFile(key)
-            ? ChunkSection.frontMatter
-            : ChunkSection.content;
+        if (!reachedContent) {
+          if (key == firstContentKey ||
+              p.basename(key) ==
+                  (firstContentKey != null
+                      ? p.basename(firstContentKey)
+                      : '')) {
+            reachedContent = true;
+            currentSection = ChunkSection.content;
+          } else {
+            currentSection = ChunkSection.frontMatter;
+          }
+        } else {
+          currentSection = _isFrontMatterFile(key)
+              ? ChunkSection.frontMatter
+              : ChunkSection.content;
+        }
       }
 
       try {
-        final document = html_parser.parse(htmlString);
+        _epubDiagLog(diagRun, 'chapter_begin', {
+          'index': entryIndex,
+          'key': key,
+          'htmlChars': htmlString.length,
+          'chunksSoFar': chunks.length,
+        });
+        final document = _epubDiagSync(diagRun, 'html_to_dom', {
+          'index': entryIndex,
+          'key': key,
+          'htmlChars': htmlString.length,
+        }, () => html_parser.parse(htmlString));
         final body = document.body;
         if (body == null) continue;
 
         // Pre-scan for footnote content in this chapter (D-13).
-        prescanFootnotes(body);
+        final footnotesFound = _epubDiagSync(diagRun, 'footnote_prescan', {
+          'index': entryIndex,
+          'key': key,
+        }, () => prescanFootnotes(body));
 
         // Recursive DOM walker.
-        void visit(dom.Node node) {
+        void visit(dom.Node node, [int depth = 0]) {
+          visitedNodes++;
+          maxDepth = math.max(maxDepth, depth);
           if (node is dom.Element) {
+            elementCount++;
             void recordAnchor(String anchor) {
               final decodedAnchor = _decodeUriValue(anchor).trim();
               if (decodedAnchor.isEmpty) return;
@@ -695,7 +975,7 @@ class EpubParserService {
               insideVerse = insideVerse || currentPreserveLineBreaks;
 
               for (final child in node.nodes) {
-                visit(child);
+                visit(child, depth + 1);
               }
               flush();
 
@@ -715,6 +995,7 @@ class EpubParserService {
               if (src != null) {
                 final imageBytes = _resolveImage(book, src);
                 if (imageBytes != null) {
+                  imageCount++;
                   flush();
                   chunks.add(
                     BookChunk(
@@ -765,7 +1046,7 @@ class EpubParserService {
 
               final startIdx = textBuffer.length;
               for (final child in node.nodes) {
-                visit(child);
+                visit(child, depth + 1);
               }
               final endIdx = textBuffer.length;
               if (endIdx > startIdx) {
@@ -784,8 +1065,12 @@ class EpubParserService {
 
             // ── Tables (D-14) ──
             if (tag == 'table') {
+              tableCount++;
               flush();
-              final tableText = _renderTable(node);
+              final parsedTable = _parseHtmlTable(node);
+              final tableText = parsedTable == null
+                  ? _renderPlainTextTable(node)
+                  : encodeReaderTableBlock(parsedTable);
               if (tableText.isNotEmpty) {
                 chunks.add(
                   BookChunk(
@@ -807,7 +1092,7 @@ class EpubParserService {
               activeStyles.add(InlineStyleType.bold);
               final startPos = textBuffer.length;
               for (final child in node.nodes) {
-                visit(child);
+                visit(child, depth + 1);
               }
               final endPos = textBuffer.length;
               activeStyles.removeLast();
@@ -828,7 +1113,7 @@ class EpubParserService {
               activeStyles.add(InlineStyleType.italic);
               final startPos = textBuffer.length;
               for (final child in node.nodes) {
-                visit(child);
+                visit(child, depth + 1);
               }
               final endPos = textBuffer.length;
               activeStyles.removeLast();
@@ -850,7 +1135,7 @@ class EpubParserService {
               final wasUl = insideUl;
               insideUl = true;
               for (final child in node.nodes) {
-                visit(child);
+                visit(child, depth + 1);
               }
               insideUl = wasUl;
               flush();
@@ -864,7 +1149,7 @@ class EpubParserService {
               insideOl = true;
               olCounter = 0;
               for (final child in node.nodes) {
-                visit(child);
+                visit(child, depth + 1);
               }
               insideOl = wasOl;
               olCounter = prevCounter;
@@ -884,7 +1169,7 @@ class EpubParserService {
                 textBuffer.write('• ');
               }
               for (final child in node.nodes) {
-                visit(child);
+                visit(child, depth + 1);
               }
               return;
             }
@@ -902,7 +1187,7 @@ class EpubParserService {
               flush();
               insideVerse = true;
               for (final child in node.nodes) {
-                visit(child);
+                visit(child, depth + 1);
               }
               insideVerse = false;
               flush();
@@ -928,7 +1213,7 @@ class EpubParserService {
             if (isHeadingNode) currentIsHeading = true;
 
             for (final child in node.nodes) {
-              visit(child);
+              visit(child, depth + 1);
             }
 
             if (isBlock && !insideVerse) {
@@ -936,6 +1221,7 @@ class EpubParserService {
             }
             if (isHeadingNode) currentIsHeading = wasHeading;
           } else if (node is dom.Text) {
+            textNodeCount++;
             String text;
             if (currentPreserveWhitespace) {
               text = node.text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
@@ -948,6 +1234,7 @@ class EpubParserService {
               text = node.text.replaceAll(RegExp(r'\s+'), ' ').trim();
             }
             if (text.isNotEmpty) {
+              extractedTextChars += text.length;
               final style = currentStyle();
               final startPos = textBuffer.length;
 
@@ -970,18 +1257,53 @@ class EpubParserService {
           }
         }
 
-        visit(body);
+        _epubDiagSync(diagRun, 'dom_traversal', {
+          'index': entryIndex,
+          'key': key,
+        }, () => visit(body));
         flush(); // end of chapter
+        chapterStopwatch.stop();
+        _epubDiagLog(diagRun, 'chapter_end', {
+          'index': entryIndex,
+          'key': key,
+          'elapsedMs': chapterStopwatch.elapsedMilliseconds,
+          'htmlChars': htmlString.length,
+          'nodes': visitedNodes,
+          'elements': elementCount,
+          'textNodes': textNodeCount,
+          'maxDepth': maxDepth,
+          'tables': tableCount,
+          'images': imageCount,
+          'footnotesFound': footnotesFound,
+          'extractedTextChars': extractedTextChars,
+          'chunksAdded': chunks.length - chapterStartChunkCount,
+          'anchorsAdded': anchorMap.length - chapterStartAnchorCount,
+          'chunksTotal': chunks.length,
+        });
       } catch (e) {
         if (kDebugMode) {
           debugPrint('EpubParser: error parsing chapter: $e');
         }
       }
+      entryIndex++;
+      if (_epubDiagEnabled &&
+          extractStopwatch.elapsedMilliseconds - lastAggregateMs > 5000) {
+        lastAggregateMs = extractStopwatch.elapsedMilliseconds;
+        _epubDiagLog(diagRun, 'extract_progress', {
+          'processedHtmlFiles': entryIndex,
+          'totalHtmlFiles': contentMap.length,
+          'chunksTotal': chunks.length,
+          'anchorsTotal': anchorMap.length,
+          'elapsedMs': extractStopwatch.elapsedMilliseconds,
+        });
+      }
     }
 
     // Merge tiny chunks (< 10 words) with the next chunk to avoid
     // cards with just one or two words.
-    final mergeResult = _mergeTinyChunks(chunks);
+    final mergeResult = _epubDiagSync(diagRun, 'merge_tiny_chunks', {
+      'chunksBefore': chunks.length,
+    }, () => _mergeTinyChunks(chunks));
     final merged = mergeResult.chunks;
     final mergedAnchorMap = _remapAnchorMap(
       anchorMap,
@@ -989,7 +1311,12 @@ class EpubParserService {
     );
 
     // Extract chapters from EPUB Table of Contents.
-    final chapters = _extractTocChapters(book, merged, mergedAnchorMap);
+    final chapters = _epubDiagSync(
+      diagRun,
+      'toc_chapters_extract',
+      {'chunks': merged.length, 'anchorMap': mergedAnchorMap.length},
+      () => _extractTocChapters(book, merged, mergedAnchorMap),
+    );
 
     // Log section breakdown.
     final fmCount = merged
@@ -1003,6 +1330,15 @@ class EpubParserService {
         'EpubParser: $fmCount front-matter chunks, $contentCount content chunks',
       );
     }
+    extractStopwatch.stop();
+    _epubDiagLog(diagRun, 'extract_content_end', {
+      'elapsedMs': extractStopwatch.elapsedMilliseconds,
+      'chunks': merged.length,
+      'anchors': mergedAnchorMap.length,
+      'chapters': chapters.length,
+      'frontMatterChunks': fmCount,
+      'contentChunks': contentCount,
+    });
 
     // Build the search index
     // Note: Search Index generation has been moved out of eager load.
@@ -1174,6 +1510,51 @@ class EpubParserService {
       final mergedIndex = originalToMerged[originalIndex] ?? originalIndex;
       return MapEntry(anchor, mergedIndex);
     });
+  }
+
+  static List<String> extractSectionResourceHrefs(String html) {
+    try {
+      final document = html_parser.parse(html);
+      final refs = <String>{};
+      for (final element in document.querySelectorAll('[src], [href]')) {
+        final src = element.attributes['src'];
+        if (src != null && src.trim().isNotEmpty) refs.add(src.trim());
+        final href = element.attributes['href'];
+        if (href != null && href.trim().isNotEmpty) refs.add(href.trim());
+      }
+      return refs.toList(growable: false)..sort();
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  static Map<String, String> extractFootnoteContentById(String html) {
+    try {
+      final document = html_parser.parse(html);
+      final body = document.body;
+      if (body == null) return const {};
+      return _collectFootnoteContentFromBody(body);
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  static Map<String, String> _collectFootnoteContentFromBody(dom.Element body) {
+    final content = <String, String>{};
+    for (final el in body.querySelectorAll('[id]')) {
+      final id = el.id;
+      if (id.isEmpty) continue;
+      if (id.startsWith('fn') ||
+          id.startsWith('note') ||
+          id.startsWith('footnote') ||
+          id.startsWith('endnote')) {
+        final text = el.text.trim();
+        if (text.isNotEmpty) {
+          content[id] = text;
+        }
+      }
+    }
+    return content;
   }
 
   String _decodeUriValue(String value) {
@@ -1354,16 +1735,72 @@ class EpubParserService {
 
   // ─── Table rendering (D-14) ──────────────────────────────────────────
 
-  /// Renders an HTML <table> element as formatted plain text.
-  /// Simple tables get aligned columns; complex ones get row-per-line.
-  String _renderTable(dom.Element tableNode) {
+  ReaderTableBlock? _parseHtmlTable(dom.Element tableNode) {
+    final cellRows = <List<ReaderTableCell>>[];
+
+    for (final tr in tableNode.querySelectorAll('tr')) {
+      if (_closestTable(tr) != tableNode) continue;
+
+      final row = <ReaderTableCell>[];
+      for (final cell in tr.children) {
+        final tag = cell.localName;
+        if (tag != 'td' && tag != 'th') continue;
+
+        final text = _normalizedTableCellText(cell);
+        final columnSpan = _parseTableSpan(cell.attributes['colspan']);
+        final rowSpan = _parseTableSpan(cell.attributes['rowspan']);
+        row.add(
+          ReaderTableCell(
+            text: text,
+            isHeader: tag == 'th',
+            columnSpan: columnSpan,
+            rowSpan: rowSpan,
+          ),
+        );
+      }
+
+      if (row.any((cell) => cell.text.isNotEmpty)) {
+        cellRows.add(row);
+      }
+    }
+
+    if (cellRows.length < 2) return null;
+    final table = ReaderTableBlock.fromCellRows(cellRows);
+    if (table.columnCount < 2 || table.rows.isEmpty) return null;
+    return table;
+  }
+
+  dom.Element? _closestTable(dom.Element node) {
+    dom.Element? current = node;
+    while (current != null) {
+      if (current.localName == 'table') return current;
+      current = current.parent;
+    }
+    return null;
+  }
+
+  int _parseTableSpan(String? value) {
+    if (value == null) return 1;
+    return (int.tryParse(value.trim()) ?? 1).clamp(1, 24);
+  }
+
+  String _normalizedTableCellText(dom.Element cell) {
+    return cell.text
+        .replaceAll('\u00A0', ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  /// Fallback for malformed HTML tables that cannot be preserved safely.
+  String _renderPlainTextTable(dom.Element tableNode) {
     final rows = <List<String>>[];
 
     for (final tr in tableNode.querySelectorAll('tr')) {
+      if (_closestTable(tr) != tableNode) continue;
       final cells = <String>[];
       for (final cell in tr.children) {
         if (cell.localName == 'td' || cell.localName == 'th') {
-          cells.add(cell.text.trim());
+          cells.add(_normalizedTableCellText(cell));
         }
       }
       if (cells.isNotEmpty) {

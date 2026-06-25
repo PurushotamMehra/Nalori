@@ -353,6 +353,8 @@ class PublicDomainBookPage {
   final int page;
   final String? nextUrl;
   final String? previousUrl;
+  final String? catalogStatusMessage;
+  final bool isFallbackOnly;
 
   const PublicDomainBookPage({
     required this.books,
@@ -361,6 +363,8 @@ class PublicDomainBookPage {
     required this.page,
     this.nextUrl,
     this.previousUrl,
+    this.catalogStatusMessage,
+    this.isFallbackOnly = false,
   });
 
   factory PublicDomainBookPage.fromCache(Map<String, dynamic> json) {
@@ -382,6 +386,8 @@ class PublicDomainBookPage {
       page: (json['page'] as num?)?.toInt() ?? 1,
       nextUrl: (json['nextUrl'] as String?)?.trim(),
       previousUrl: (json['previousUrl'] as String?)?.trim(),
+      catalogStatusMessage: (json['catalogStatusMessage'] as String?)?.trim(),
+      isFallbackOnly: json['isFallbackOnly'] == true,
     );
   }
 
@@ -392,5 +398,7 @@ class PublicDomainBookPage {
     'page': page,
     'nextUrl': nextUrl,
     'previousUrl': previousUrl,
+    'catalogStatusMessage': catalogStatusMessage,
+    'isFallbackOnly': isFallbackOnly,
   };
 }

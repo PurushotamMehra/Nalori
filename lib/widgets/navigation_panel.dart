@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/highlight.dart';
 import '../models/reading_settings.dart';
+import '../models/stable_book_location.dart';
 import '../services/dictionary_service.dart';
 import 'highlight_palette_sheet.dart';
 import 'note_sheets.dart';
@@ -11,6 +12,7 @@ typedef AnnotationNavigateCallback =
       int originalChunkIndex, {
       int? originalStartOffset,
       String? sourceText,
+      StableBookLocation? stableLocation,
     });
 
 enum AnnotationPanelTab { highlights, notes, dictionary }
@@ -109,14 +111,21 @@ class AnnotationsPanel extends StatefulWidget {
         totalDisplayPages: totalDisplayPages,
         chunkTexts: chunkTexts,
         buildLocationLabel: buildLocationLabel,
-        onNavigate: (index, {int? originalStartOffset, String? sourceText}) {
-          Navigator.pop(context); // close sheet first
-          onNavigate(
-            index,
-            originalStartOffset: originalStartOffset,
-            sourceText: sourceText,
-          );
-        },
+        onNavigate:
+            (
+              index, {
+              int? originalStartOffset,
+              String? sourceText,
+              StableBookLocation? stableLocation,
+            }) {
+              Navigator.pop(context); // close sheet first
+              onNavigate(
+                index,
+                originalStartOffset: originalStartOffset,
+                sourceText: sourceText,
+                stableLocation: stableLocation,
+              );
+            },
         highlights: highlights,
         onRemoveHighlight: onRemoveHighlight,
         onChangeHighlightColor: onChangeHighlightColor,
@@ -650,6 +659,7 @@ class _AnnotationsPanelState extends State<AnnotationsPanel>
             hl.originalChunkIndex,
             originalStartOffset: hl.startOffset,
             sourceText: hl.text,
+            stableLocation: hl.stableLocation,
           ),
           onLongPress: () => _showColorPicker(context, hl),
           child: Ink(
@@ -1018,6 +1028,7 @@ class _AnnotationsPanelState extends State<AnnotationsPanel>
         hl.originalChunkIndex,
         originalStartOffset: hl.startOffset,
         sourceText: hl.text,
+        stableLocation: hl.stableLocation,
       ),
       onEdit: () => _showNoteEditDialog(context, hl),
       onDelete: () {
@@ -1070,17 +1081,23 @@ class _AnnotationsPanelState extends State<AnnotationsPanel>
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
                     final savedWord = filteredWords[index];
-                    final canNavigate = savedWord.originalChunkIndex != null;
+                    final stableLocation = savedWord.stableLocation;
+                    final canNavigate =
+                        savedWord.originalChunkIndex != null ||
+                        stableLocation != null;
                     return Material(
                       color: Colors.transparent,
                       child: InkWell(
                         borderRadius: BorderRadius.circular(8),
                         onTap: canNavigate
                             ? () => widget.onNavigate(
-                                savedWord.originalChunkIndex!,
+                                savedWord.originalChunkIndex ??
+                                    stableLocation!.legacyGlobalChunkIndex ??
+                                    0,
                                 originalStartOffset:
                                     savedWord.originalStartOffset,
                                 sourceText: savedWord.word,
+                                stableLocation: stableLocation,
                               )
                             : null,
                         child: Ink(

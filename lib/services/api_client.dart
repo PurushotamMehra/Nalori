@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:http/http.dart' as http;
@@ -34,9 +35,15 @@ class ApiClient {
     Uri uri, {
     Map<String, String>? headers,
     bool dedupe = true,
+    Duration? timeout,
+    int? maxRetries,
   }) {
     final requestHeaders = _headers(headers);
-    final key = '${uri.toString()}|${requestHeaders.entries.join('&')}';
+    final requestTimeout = timeout ?? this.timeout;
+    final requestMaxRetries = maxRetries ?? this.maxRetries;
+    final key =
+        '${uri.toString()}|${requestHeaders.entries.join('&')}|'
+        '${requestTimeout.inMilliseconds}|$requestMaxRetries';
     if (dedupe) {
       final existing = _inFlightGets[key];
       if (existing != null) return existing;
@@ -44,9 +51,11 @@ class ApiClient {
 
     final future = _sendWithRetry(() {
       return _withHostTurn(uri, () {
-        return _client.get(uri, headers: requestHeaders).timeout(timeout);
+        return _client
+            .get(uri, headers: requestHeaders)
+            .timeout(requestTimeout);
       });
-    });
+    }, maxRetries: requestMaxRetries);
     if (!dedupe) return future;
 
     _inFlightGets[key] = future;
@@ -68,8 +77,9 @@ class ApiClient {
   }
 
   Future<http.Response> _sendWithRetry(
-    Future<http.Response> Function() send,
-  ) async {
+    Future<http.Response> Function() send, {
+    required int maxRetries,
+  }) async {
     var attempt = 0;
     while (true) {
       try {
@@ -77,12 +87,20 @@ class ApiClient {
         final retryDelay = _retryDelayFor(response, attempt);
         if (retryDelay == null || attempt >= maxRetries) return response;
         await Future<void>.delayed(retryDelay);
-      } on TimeoutException {
-        if (attempt >= maxRetries) rethrow;
+      } on Object catch (error) {
+        if (!_isRetryableTransportError(error) || attempt >= maxRetries) {
+          rethrow;
+        }
         await Future<void>.delayed(_jitteredBackoff(attempt));
       }
       attempt += 1;
     }
+  }
+
+  bool _isRetryableTransportError(Object error) {
+    return error is TimeoutException ||
+        error is SocketException ||
+        error is http.ClientException;
   }
 
   Duration? _retryDelayFor(http.Response response, int attempt) {

@@ -9,6 +9,7 @@ void main() {
     test('persists online metadata fields', () {
       final metadata = BookMetadata(
         id: 'book.epub',
+        managedFilePath: '/app/books/book.epub',
         title: 'The Book of Five Rings',
         author: 'Miyamoto Musashi',
         embeddedTitle: 'Go Rin No Sho',
@@ -25,6 +26,7 @@ void main() {
       final restored = BookMetadata.fromMap(metadata.toMap());
 
       expect(restored.metadataSource, 'open_library');
+      expect(restored.managedFilePath, '/app/books/book.epub');
       expect(restored.embeddedTitle, 'Go Rin No Sho');
       expect(restored.embeddedAuthor, 'Musashi Miyamoto');
       expect(restored.titleSource, 'open_library');
@@ -43,6 +45,7 @@ void main() {
 
       final updated = metadata.copyWith(
         title: 'Clean Title',
+        managedFilePath: '/app/books/old-title.epub',
         author: 'Known Author',
         embeddedTitle: 'Original Title',
         embeddedAuthor: 'Original Author',
@@ -54,6 +57,7 @@ void main() {
       );
 
       expect(updated.title, 'Clean Title');
+      expect(updated.managedFilePath, '/app/books/old-title.epub');
       expect(updated.author, 'Known Author');
       expect(updated.embeddedTitle, 'Original Title');
       expect(updated.embeddedAuthor, 'Original Author');

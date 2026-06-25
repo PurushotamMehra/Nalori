@@ -21,6 +21,8 @@ dependencies:
   google_fonts: ^8.0.2
   url_launcher: ^6.3.2
   http: ^1.6.0
+  crypto: ^3.0.6
+  sqflite: ^2.4.1
   uuid: ^4.5.3
   share_plus: ^12.0.1
   flutter_svg: ^2.0.10+1
@@ -29,10 +31,14 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  archive: ^3.6.1
+  image: ^3.3.0
   flutter_lints: ^5.0.0
   mockito: ^5.4.0
   build_runner: ^2.4.0
   mocktail: ^1.0.0
+  sqflite_common_ffi: ^2.3.4+4
+  sqlite3_flutter_libs: ^0.5.27
 
 flutter:
   generate: true
@@ -40,3 +46,6 @@ flutter:
   assets:
     - assets/images/nalori_mark.svg
     - assets/images/nalori_app_icon.png
+    - assets/catalog/gutenberg_starter_catalog.json
+    - test/fixtures/books/feature_rich_lazy_reader.epub
+    - Dialogues -- Plato.epub

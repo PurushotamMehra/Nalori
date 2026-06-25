@@ -82,11 +82,12 @@ class ReaderTableBlockWidget extends StatelessWidget {
                         i: const FlexColumnWidth(),
                     },
                     children: [
-                      _buildRow(
-                        _normalizedRow(table.headers, columnCount),
-                        headerStyle,
-                        headerFill,
-                      ),
+                      if (table.headers.isNotEmpty)
+                        _buildRow(
+                          _normalizedRow(table.headers, columnCount),
+                          headerStyle,
+                          headerFill,
+                        ),
                       for (final row in table.rows)
                         _buildRow(
                           _normalizedRow(row, columnCount),

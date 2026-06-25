@@ -1,0 +1,4255 @@
+{
+  "books": [
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1775,
+          "death_year": 1817,
+          "name": "Austen, Jane"
+        }
+      ],
+      "authors": [
+        "Austen, Jane"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Harvard Classics",
+        "Category: Romance",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1342/pg1342.cover.medium.jpg",
+      "downloadCount": 117126,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1342.epub3.images",
+      "id": 1342,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "England -- Fiction",
+        "Young women -- Fiction",
+        "Love stories",
+        "Sisters -- Fiction",
+        "Domestic fiction",
+        "Courtship -- Fiction",
+        "Social classes -- Fiction",
+        "PR"
+      ],
+      "title": "Pride and Prejudice"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1797,
+          "death_year": 1851,
+          "name": "Shelley, Mary Wollstonecraft"
+        }
+      ],
+      "authors": [
+        "Shelley, Mary Wollstonecraft"
+      ],
+      "bookshelves": [
+        "Precursors of Science Fiction",
+        "Gothic Fiction",
+        "Movie Books",
+        "Science Fiction by Women",
+        "Category: Science-Fiction & Fantasy",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/84/pg84.cover.medium.jpg",
+      "downloadCount": 115954,
+      "epubUrl": "https://www.gutenberg.org/ebooks/84.epub3.images",
+      "id": 84,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Science fiction",
+        "Horror tales",
+        "Gothic fiction",
+        "Scientists -- Fiction",
+        "Monsters -- Fiction",
+        "Frankenstein, Victor (Fictitious character) -- Fiction",
+        "Frankenstein's monster (Fictitious character) -- Fiction",
+        "PR"
+      ],
+      "title": "Frankenstein; or, the modern prometheus"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1819,
+          "death_year": 1891,
+          "name": "Melville, Herman"
+        }
+      ],
+      "authors": [
+        "Melville, Herman"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Category: Adventure",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/2701/pg2701.cover.medium.jpg",
+      "downloadCount": 135445,
+      "epubUrl": "https://www.gutenberg.org/ebooks/2701.epub3.images",
+      "id": 2701,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Whaling -- Fiction",
+        "Sea stories",
+        "Psychological fiction",
+        "Ship captains -- Fiction",
+        "Adventure stories",
+        "Mentally ill -- Fiction",
+        "Ahab, Captain (Fictitious character) -- Fiction",
+        "Whales -- Fiction",
+        "Whaling ships -- Fiction",
+        "PS"
+      ],
+      "title": "Moby Dick; Or, The Whale"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1832,
+          "death_year": 1898,
+          "name": "Carroll, Lewis"
+        }
+      ],
+      "authors": [
+        "Carroll, Lewis"
+      ],
+      "bookshelves": [
+        "Children's Literature",
+        "Category: Children & Young Adult Reading",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/11/pg11.cover.medium.jpg",
+      "downloadCount": 73700,
+      "epubUrl": "https://www.gutenberg.org/ebooks/11.epub3.images",
+      "id": 11,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Fantasy fiction",
+        "Children's stories",
+        "Imaginary places -- Juvenile fiction",
+        "Alice (Fictitious character from Carroll) -- Juvenile fiction",
+        "PR",
+        "PZ"
+      ],
+      "title": "Alice's Adventures in Wonderland"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1859,
+          "death_year": 1930,
+          "name": "Doyle, Arthur Conan"
+        }
+      ],
+      "authors": [
+        "Doyle, Arthur Conan"
+      ],
+      "bookshelves": [
+        "Detective Fiction",
+        "Contemporary Reviews",
+        "Banned Books from Anne Haight's list",
+        "Category: Short Stories",
+        "Category: Crime, Thrillers and Mystery",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1661/pg1661.cover.medium.jpg",
+      "downloadCount": 52111,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1661.epub3.images",
+      "id": 1661,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Holmes, Sherlock (Fictitious character) -- Fiction",
+        "Private investigators -- England -- Fiction",
+        "Detective and mystery stories, English",
+        "PR"
+      ],
+      "title": "The Adventures of Sherlock Holmes"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1812,
+          "death_year": 1870,
+          "name": "Dickens, Charles"
+        }
+      ],
+      "authors": [
+        "Dickens, Charles"
+      ],
+      "bookshelves": [
+        "Historical Fiction",
+        "Category: Historical Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/98/pg98.cover.medium.jpg",
+      "downloadCount": 39386,
+      "epubUrl": "https://www.gutenberg.org/ebooks/98.epub3.images",
+      "id": 98,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Historical fiction",
+        "France -- History -- Revolution, 1789-1799 -- Fiction",
+        "London (England) -- History -- 18th century -- Fiction",
+        "War stories",
+        "Executions and executioners -- Fiction",
+        "French -- England -- London -- Fiction",
+        "Lookalikes -- Fiction",
+        "British -- France -- Paris -- Fiction",
+        "Paris (France) -- History -- 1789-1799 -- Fiction",
+        "PR"
+      ],
+      "title": "A Tale of Two Cities"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1854,
+          "death_year": 1900,
+          "name": "Wilde, Oscar"
+        }
+      ],
+      "authors": [
+        "Wilde, Oscar"
+      ],
+      "bookshelves": [
+        "Gothic Fiction",
+        "Movie Books",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/174/pg174.cover.medium.jpg",
+      "downloadCount": 38228,
+      "epubUrl": "https://www.gutenberg.org/ebooks/174.epub3.images",
+      "id": 174,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Didactic fiction",
+        "Supernatural -- Fiction",
+        "Conduct of life -- Fiction",
+        "Portraits -- Fiction",
+        "Great Britain -- History -- Victoria, 1837-1901 -- Fiction",
+        "London (England) -- History -- 1800-1950 -- Fiction",
+        "Appearance (Philosophy) -- Fiction",
+        "Paranormal fiction",
+        "PR"
+      ],
+      "title": "The Picture of Dorian Gray"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1847,
+          "death_year": 1912,
+          "name": "Stoker, Bram"
+        }
+      ],
+      "authors": [
+        "Stoker, Bram"
+      ],
+      "bookshelves": [
+        "Horror",
+        "Gothic Fiction",
+        "Mystery Fiction",
+        "Movie Books",
+        "Category: Science-Fiction & Fantasy",
+        "Category: Crime, Thrillers and Mystery",
+        "Category: Novels",
+        "Category: Classics of Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/345/pg345.cover.medium.jpg",
+      "downloadCount": 52049,
+      "epubUrl": "https://www.gutenberg.org/ebooks/345.epub3.images",
+      "id": 345,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Horror tales",
+        "Epistolary fiction",
+        "Gothic fiction",
+        "Vampires -- Fiction",
+        "Dracula, Count (Fictitious character) -- Fiction",
+        "Transylvania (Romania) -- Fiction",
+        "Whitby (England) -- Fiction",
+        "PR"
+      ],
+      "title": "Dracula"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1821,
+          "death_year": 1881,
+          "name": "Dostoyevsky, Fyodor"
+        }
+      ],
+      "authors": [
+        "Dostoyevsky, Fyodor"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Crime Fiction",
+        "Harvard Classics",
+        "Category: Crime, Thrillers and Mystery",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: Russian Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/2554/pg2554.cover.medium.jpg",
+      "downloadCount": 81187,
+      "epubUrl": "https://www.gutenberg.org/ebooks/2554.epub3.images",
+      "id": 2554,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Detective and mystery stories",
+        "Psychological fiction",
+        "Saint Petersburg (Russia) -- Fiction",
+        "Murder -- Fiction",
+        "Crime -- Psychological aspects -- Fiction",
+        "PG"
+      ],
+      "title": "Crime and Punishment"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1883,
+          "death_year": 1924,
+          "name": "Kafka, Franz"
+        }
+      ],
+      "authors": [
+        "Kafka, Franz"
+      ],
+      "bookshelves": [
+        "Horror",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: German Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/5200/pg5200.cover.medium.jpg",
+      "downloadCount": 23697,
+      "epubUrl": "https://www.gutenberg.org/ebooks/5200.epub3.images",
+      "id": 5200,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Psychological fiction",
+        "Metamorphosis -- Fiction",
+        "PT"
+      ],
+      "title": "Metamorphosis"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1835,
+          "death_year": 1910,
+          "name": "Twain, Mark"
+        }
+      ],
+      "authors": [
+        "Twain, Mark"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Banned Books from Anne Haight's list",
+        "Banned Books List from the American Library Association",
+        "Category: Adventure",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/76/pg76.cover.medium.jpg",
+      "downloadCount": 45099,
+      "epubUrl": "https://www.gutenberg.org/ebooks/76.epub3.images",
+      "id": 76,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Humorous stories",
+        "Bildungsromans",
+        "Boys -- Fiction",
+        "Male friendship -- Fiction",
+        "Adventure stories",
+        "Missouri -- Fiction",
+        "Race relations -- Fiction",
+        "Runaway children -- Fiction",
+        "Finn, Huckleberry (Fictitious character) -- Fiction",
+        "Fugitive slaves -- Fiction",
+        "Mississippi River -- Fiction",
+        "PS"
+      ],
+      "title": "Adventures of Huckleberry Finn"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1850,
+          "death_year": 1894,
+          "name": "Stevenson, Robert Louis"
+        }
+      ],
+      "authors": [
+        "Stevenson, Robert Louis"
+      ],
+      "bookshelves": [
+        "Precursors of Science Fiction",
+        "Horror",
+        "Movie Books",
+        "Category: Crime, Thrillers and Mystery",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/43/pg43.cover.medium.jpg",
+      "downloadCount": 63757,
+      "epubUrl": "https://www.gutenberg.org/ebooks/43.epub3.images",
+      "id": 43,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Science fiction",
+        "Horror tales",
+        "London (England) -- Fiction",
+        "Physicians -- Fiction",
+        "Psychological fiction",
+        "Self-experimentation in medicine -- Fiction",
+        "Multiple personality -- Fiction",
+        "PR"
+      ],
+      "title": "The strange case of Dr. Jekyll and Mr. Hyde"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1860,
+          "death_year": 1935,
+          "name": "Gilman, Charlotte Perkins"
+        }
+      ],
+      "authors": [
+        "Gilman, Charlotte Perkins"
+      ],
+      "bookshelves": [
+        "Gothic Fiction",
+        "Category: Short Stories",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1952/pg1952.cover.medium.jpg",
+      "downloadCount": 23315,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1952.epub3.images",
+      "id": 1952,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Psychological fiction",
+        "Mentally ill women -- Fiction",
+        "Feminist fiction",
+        "Married women -- Psychology -- Fiction",
+        "Sex role -- Fiction",
+        "PS"
+      ],
+      "title": "The Yellow Wallpaper"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1667,
+          "death_year": 1745,
+          "name": "Swift, Jonathan"
+        }
+      ],
+      "authors": [
+        "Swift, Jonathan"
+      ],
+      "bookshelves": [
+        "Category: Essays, Letters & Speeches",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1080/pg1080.cover.medium.jpg",
+      "downloadCount": 25655,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1080.epub3.images",
+      "id": 1080,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Political satire, English",
+        "Religious satire, English",
+        "Ireland -- Politics and government -- 18th century -- Humor",
+        "PR"
+      ],
+      "title": "A Modest Proposal\r\nFor preventing the children of poor people in Ireland, from being a burden on their parents or country, and for making them beneficial to the publick"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1812,
+          "death_year": 1870,
+          "name": "Dickens, Charles"
+        }
+      ],
+      "authors": [
+        "Dickens, Charles"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1400/pg1400.cover.medium.jpg",
+      "downloadCount": 26548,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1400.epub3.images",
+      "id": 1400,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Orphans -- Fiction",
+        "England -- Fiction",
+        "Revenge -- Fiction",
+        "Bildungsromans",
+        "Young men -- Fiction",
+        "Man-woman relationships -- Fiction",
+        "Ex-convicts -- Fiction",
+        "Benefactors -- Fiction",
+        "PR"
+      ],
+      "title": "Great Expectations"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1816,
+          "death_year": 1855,
+          "name": "Bront\u00eb, Charlotte"
+        }
+      ],
+      "authors": [
+        "Bront\u00eb, Charlotte"
+      ],
+      "bookshelves": [
+        "Category: Romance",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1260/pg1260.cover.medium.jpg",
+      "downloadCount": 55255,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1260.epub3.images",
+      "id": 1260,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Orphans -- Fiction",
+        "England -- Fiction",
+        "Young women -- Fiction",
+        "Love stories",
+        "Governesses -- Fiction",
+        "Fathers and daughters -- Fiction",
+        "Mentally ill women -- Fiction",
+        "Charity-schools -- Fiction",
+        "Married people -- Fiction",
+        "Country homes -- Fiction",
+        "Bildungsromans",
+        "PR"
+      ],
+      "title": "Jane Eyre: An Autobiography"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1785,
+          "death_year": 1863,
+          "name": "Grimm, Jacob"
+        },
+        {
+          "birth_year": 1786,
+          "death_year": 1859,
+          "name": "Grimm, Wilhelm"
+        }
+      ],
+      "authors": [
+        "Grimm, Jacob",
+        "Grimm, Wilhelm"
+      ],
+      "bookshelves": [
+        "Category: Short Stories",
+        "Category: Children & Young Adult Reading",
+        "Category: Mythology, Legends & Folklore",
+        "Category: German Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/2591/pg2591.cover.medium.jpg",
+      "downloadCount": 29414,
+      "epubUrl": "https://www.gutenberg.org/ebooks/2591.epub3.images",
+      "id": 2591,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Fairy tales -- Germany",
+        "PT"
+      ],
+      "title": "Grimms' Fairy Tales"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": -750,
+          "death_year": -650,
+          "name": "Homer"
+        }
+      ],
+      "authors": [
+        "Homer"
+      ],
+      "bookshelves": [
+        "Classical Antiquity",
+        "Category: Poetry",
+        "Category: Mythology, Legends & Folklore",
+        "Category: Classics of Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/6130/pg6130.cover.medium.jpg",
+      "downloadCount": 21076,
+      "epubUrl": "https://www.gutenberg.org/ebooks/6130.epub3.images",
+      "id": 6130,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Classical literature",
+        "Epic poetry, Greek -- Translations into English",
+        "Achilles (Mythological character) -- Poetry",
+        "Trojan War -- Poetry",
+        "PA"
+      ],
+      "title": "The Iliad"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1828,
+          "death_year": 1906,
+          "name": "Ibsen, Henrik"
+        }
+      ],
+      "authors": [
+        "Ibsen, Henrik"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Category: Plays/Films/Dramas",
+        "Category: Classics of Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/2542/pg2542.cover.medium.jpg",
+      "downloadCount": 30318,
+      "epubUrl": "https://www.gutenberg.org/ebooks/2542.epub3.images",
+      "id": 2542,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Marriage -- Drama",
+        "Man-woman relationships -- Drama",
+        "Norwegian drama -- Translations into English",
+        "Wives -- Drama",
+        "PT"
+      ],
+      "title": "A Doll's House : a play"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1854,
+          "death_year": 1900,
+          "name": "Wilde, Oscar"
+        }
+      ],
+      "authors": [
+        "Wilde, Oscar"
+      ],
+      "bookshelves": [
+        "Plays",
+        "Category: Plays/Films/Dramas",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/844/pg844.cover.medium.jpg",
+      "downloadCount": 35513,
+      "epubUrl": "https://www.gutenberg.org/ebooks/844.epub3.images",
+      "id": 844,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Comedy plays",
+        "England -- Drama",
+        "Identity (Psychology) -- Drama",
+        "Foundlings -- Drama",
+        "PR"
+      ],
+      "title": "The Importance of Being Earnest: A Trivial Comedy for Serious People"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1882,
+          "death_year": 1941,
+          "name": "Joyce, James"
+        }
+      ],
+      "authors": [
+        "Joyce, James"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Erotic Fiction",
+        "Banned Books from Anne Haight's list",
+        "Banned Books List from the American Library Association",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/4300/pg4300.cover.medium.jpg",
+      "downloadCount": 24931,
+      "epubUrl": "https://www.gutenberg.org/ebooks/4300.epub3.images",
+      "id": 4300,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "City and town life -- Fiction",
+        "Psychological fiction",
+        "Domestic fiction",
+        "Married people -- Fiction",
+        "Male friendship -- Fiction",
+        "Dublin (Ireland) -- Fiction",
+        "Epic literature",
+        "Artists -- Fiction",
+        "Jewish men -- Fiction",
+        "Alienation (Social psychology) -- Fiction",
+        "PR"
+      ],
+      "title": "Ulysses"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1828,
+          "death_year": 1910,
+          "name": "Tolstoy, Leo, graf"
+        }
+      ],
+      "authors": [
+        "Tolstoy, Leo, graf"
+      ],
+      "bookshelves": [
+        "Napoleonic(Bookshelf)",
+        "Opera",
+        "Historical Fiction",
+        "Best Books Ever Listings",
+        "Movie Books",
+        "Category: Historical Novels",
+        "Category: Novels",
+        "Category: Classics of Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/2600/pg2600.cover.medium.jpg",
+      "downloadCount": 26645,
+      "epubUrl": "https://www.gutenberg.org/ebooks/2600.epub3.images",
+      "id": 2600,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Historical fiction",
+        "War stories",
+        "Napoleonic Wars, 1800-1815 -- Campaigns -- Russia -- Fiction",
+        "Russia -- History -- Alexander I, 1801-1825 -- Fiction",
+        "Aristocracy (Social class) -- Russia -- Fiction",
+        "PG"
+      ],
+      "title": "War and Peace"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1469,
+          "death_year": 1527,
+          "name": "Machiavelli, Niccol\u00f2"
+        }
+      ],
+      "authors": [
+        "Machiavelli, Niccol\u00f2"
+      ],
+      "bookshelves": [
+        "Politics",
+        "Harvard Classics",
+        "Philosophy",
+        "Banned Books from Anne Haight's list",
+        "Category: History - Early Modern (c. 1450-1750)",
+        "Category: Philosophy & Ethics",
+        "Category: Politics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1232/pg1232.cover.medium.jpg",
+      "downloadCount": 26989,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1232.epub3.images",
+      "id": 1232,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "State, The -- Early works to 1800",
+        "Political science -- Philosophy -- Early works to 1800",
+        "Political ethics -- Early works to 1800",
+        "JC"
+      ],
+      "title": "The Prince"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1835,
+          "death_year": 1910,
+          "name": "Twain, Mark"
+        }
+      ],
+      "authors": [
+        "Twain, Mark"
+      ],
+      "bookshelves": [
+        "Banned Books from Anne Haight's list",
+        "Banned Books List from the American Library Association",
+        "Category: Adventure",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/74/pg74.cover.medium.jpg",
+      "downloadCount": 36541,
+      "epubUrl": "https://www.gutenberg.org/ebooks/74.epub3.images",
+      "id": 74,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Humorous stories",
+        "Bildungsromans",
+        "Boys -- Fiction",
+        "Male friendship -- Fiction",
+        "Adventure stories",
+        "Missouri -- Fiction",
+        "Sawyer, Tom (Fictitious character) -- Fiction",
+        "Child witnesses -- Fiction",
+        "Runaway children -- Fiction",
+        "Mississippi River Valley -- Fiction",
+        "PS"
+      ],
+      "title": "The Adventures of Tom Sawyer, Complete"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": -428,
+          "death_year": -348,
+          "name": "Plato"
+        }
+      ],
+      "authors": [
+        "Plato"
+      ],
+      "bookshelves": [
+        "Philosophy",
+        "Category: Classics of Literature",
+        "Category: Philosophy & Ethics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1497/pg1497.cover.medium.jpg",
+      "downloadCount": 17178,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1497.epub3.images",
+      "id": 1497,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Classical literature",
+        "Political science -- Early works to 1800",
+        "Utopias -- Early works to 1800",
+        "Justice -- Early works to 1800",
+        "JC",
+        "PA"
+      ],
+      "title": "The Republic"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1821,
+          "death_year": 1881,
+          "name": "Dostoyevsky, Fyodor"
+        }
+      ],
+      "authors": [
+        "Dostoyevsky, Fyodor"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: Russian Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/28054/pg28054.cover.medium.jpg",
+      "downloadCount": 46293,
+      "epubUrl": "https://www.gutenberg.org/ebooks/28054.epub3.images",
+      "id": 28054,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Didactic fiction",
+        "Fathers and sons -- Fiction",
+        "Russia -- Social life and customs -- 1533-1917 -- Fiction",
+        "Brothers -- Fiction",
+        "PG"
+      ],
+      "title": "The Brothers Karamazov"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1868,
+          "death_year": 1963,
+          "name": "Du Bois, W. E. B. (William Edward Burghardt)"
+        }
+      ],
+      "authors": [
+        "Du Bois, W. E. B. (William Edward Burghardt)"
+      ],
+      "bookshelves": [
+        "African American Writers",
+        "Category: Essays, Letters & Speeches",
+        "Category: History - American",
+        "Category: Sociology",
+        "Category: Politics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/408/pg408.cover.medium.jpg",
+      "downloadCount": 14997,
+      "epubUrl": "https://www.gutenberg.org/ebooks/408.epub3.images",
+      "id": 408,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "African Americans",
+        "E151"
+      ],
+      "title": "The Souls of Black Folk"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1850,
+          "death_year": 1894,
+          "name": "Stevenson, Robert Louis"
+        }
+      ],
+      "authors": [
+        "Stevenson, Robert Louis"
+      ],
+      "bookshelves": [
+        "Children's Literature",
+        "Historical Fiction",
+        "Best Books Ever Listings",
+        "Pirates, Buccaneers, Corsairs, etc.",
+        "Category: Adventure",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/120/pg120.cover.medium.jpg",
+      "downloadCount": 29433,
+      "epubUrl": "https://www.gutenberg.org/ebooks/120.epub3.images",
+      "id": 120,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Sea stories",
+        "Pirates -- Fiction",
+        "Treasure troves -- Fiction",
+        "Treasure Island (Imaginary place) -- Fiction",
+        "PR",
+        "PZ"
+      ],
+      "title": "Treasure Island"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1832,
+          "death_year": 1888,
+          "name": "Alcott, Louisa May"
+        }
+      ],
+      "authors": [
+        "Alcott, Louisa May"
+      ],
+      "bookshelves": [
+        "Children's Literature",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/514/pg514.cover.medium.jpg",
+      "downloadCount": 14340,
+      "epubUrl": "https://www.gutenberg.org/ebooks/514.epub3.images",
+      "id": 514,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Autobiographical fiction",
+        "Young women -- Fiction",
+        "Sisters -- Fiction",
+        "Domestic fiction",
+        "Family life -- New England -- Fiction",
+        "New England -- Fiction",
+        "Bildungsromans",
+        "Mothers and daughters -- Fiction",
+        "March family (Fictitious characters) -- Fiction",
+        "PS"
+      ],
+      "title": "Little Women"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1818,
+          "death_year": 1848,
+          "name": "Bront\u00eb, Emily"
+        }
+      ],
+      "authors": [
+        "Bront\u00eb, Emily"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Gothic Fiction",
+        "Movie Books",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/768/pg768.cover.medium.jpg",
+      "downloadCount": 41534,
+      "epubUrl": "https://www.gutenberg.org/ebooks/768.epub3.images",
+      "id": 768,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Revenge -- Fiction",
+        "Psychological fiction",
+        "Rejection (Psychology) -- Fiction",
+        "Love stories",
+        "Domestic fiction",
+        "Yorkshire (England) -- Fiction",
+        "Foundlings -- Fiction",
+        "Rural families -- Fiction",
+        "Heathcliff (Fictitious character : Bront\u00eb) -- Fiction",
+        "Triangles (Interpersonal relations) -- Fiction",
+        "PR"
+      ],
+      "title": "Wuthering Heights"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1874,
+          "death_year": 1942,
+          "name": "Montgomery, L. M. (Lucy Maud)"
+        }
+      ],
+      "authors": [
+        "Montgomery, L. M. (Lucy Maud)"
+      ],
+      "bookshelves": [
+        "Canada",
+        "Children's Literature",
+        "Category: Children & Young Adult Reading",
+        "Category: Novels",
+        "Category: Classics of Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/45/pg45.cover.medium.jpg",
+      "downloadCount": 22185,
+      "epubUrl": "https://www.gutenberg.org/ebooks/45.epub3.images",
+      "id": 45,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Orphans -- Fiction",
+        "Islands -- Fiction",
+        "Friendship -- Fiction",
+        "Bildungsromans",
+        "Girls -- Fiction",
+        "Country life -- Prince Edward Island -- Fiction",
+        "Prince Edward Island -- History -- 20th century -- Fiction",
+        "Canada -- History -- 1867-1914 -- Fiction",
+        "Shirley, Anne (Fictitious character) -- Fiction",
+        "PZ"
+      ],
+      "title": "Anne of Green Gables"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1856,
+          "death_year": 1919,
+          "name": "Baum, L. Frank (Lyman Frank)"
+        }
+      ],
+      "authors": [
+        "Baum, L. Frank (Lyman Frank)"
+      ],
+      "bookshelves": [
+        "Children's Literature",
+        "Fantasy",
+        "Category: Children & Young Adult Reading",
+        "Category: Science-Fiction & Fantasy",
+        "Category: Adventure",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/55/pg55.cover.medium.jpg",
+      "downloadCount": 27741,
+      "epubUrl": "https://www.gutenberg.org/ebooks/55.epub3.images",
+      "id": 55,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Oz (Imaginary place) -- Juvenile fiction",
+        "Fantasy literature",
+        "Courage -- Juvenile fiction",
+        "Home -- Juvenile fiction",
+        "Good and evil -- Juvenile fiction",
+        "Dreams -- Juvenile fiction",
+        "Gale, Dorothy (Fictitious character) -- Juvenile fiction",
+        "Cowardly Lion (Fictitious character) -- Juvenile fiction",
+        "Cyclones -- Juvenile fiction",
+        "Scarecrow (Fictitious character from Baum) -- Juvenile fiction",
+        "Toto (Fictitious character) -- Juvenile fiction",
+        "Witches -- Juvenile fiction"
+      ],
+      "title": "The Wonderful Wizard of Oz"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1876,
+          "death_year": 1916,
+          "name": "London, Jack"
+        }
+      ],
+      "authors": [
+        "London, Jack"
+      ],
+      "bookshelves": [
+        "Animals-Domestic",
+        "Adventure",
+        "Best Books Ever Listings",
+        "Movie Books",
+        "Banned Books from Anne Haight's list",
+        "Banned Books List from the American Library Association",
+        "Category: Adventure",
+        "Category: Novels"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/215/pg215.cover.medium.jpg",
+      "downloadCount": 17084,
+      "epubUrl": "https://www.gutenberg.org/ebooks/215.epub3.images",
+      "id": 215,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Dogs -- Fiction",
+        "Adventure stories",
+        "Nature stories",
+        "Klondike River Valley (Yukon) -- Fiction",
+        "Sled dogs -- Fiction",
+        "Pet theft -- Fiction",
+        "Feral dogs -- Fiction",
+        "Animal welfare -- Fiction",
+        "PS"
+      ],
+      "title": "The call of the wild"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1859,
+          "death_year": 1930,
+          "name": "Doyle, Arthur Conan"
+        }
+      ],
+      "authors": [
+        "Doyle, Arthur Conan"
+      ],
+      "bookshelves": [
+        "Detective Fiction",
+        "Bestsellers, American, 1895-1923",
+        "Category: Crime, Thrillers and Mystery",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/2852/pg2852.cover.medium.jpg",
+      "downloadCount": 27692,
+      "epubUrl": "https://www.gutenberg.org/ebooks/2852.epub3.images",
+      "id": 2852,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Holmes, Sherlock (Fictitious character) -- Fiction",
+        "Private investigators -- England -- Fiction",
+        "Dogs -- Fiction",
+        "Detective and mystery stories",
+        "Blessing and cursing -- Fiction",
+        "Dartmoor (England) -- Fiction",
+        "PR"
+      ],
+      "title": "The Hound of the Baskervilles"
+    },
+    {
+      "authorDetails": [],
+      "authors": [],
+      "bookshelves": [
+        "Poetry",
+        "Category: Poetry",
+        "Category: Mythology, Legends & Folklore",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/16328/pg16328.cover.medium.jpg",
+      "downloadCount": 26936,
+      "epubUrl": "https://www.gutenberg.org/ebooks/16328.epub3.images",
+      "id": 16328,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Epic poetry, English (Old)",
+        "Monsters -- Poetry",
+        "Dragons -- Poetry",
+        "PR"
+      ],
+      "title": "Beowulf: An Anglo-Saxon Epic Poem"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1865,
+          "death_year": 1936,
+          "name": "Kipling, Rudyard"
+        }
+      ],
+      "authors": [
+        "Kipling, Rudyard"
+      ],
+      "bookshelves": [
+        "Scouts",
+        "Children's Literature",
+        "Movie Books",
+        "Contemporary Reviews",
+        "Category: Short Stories",
+        "Category: Children & Young Adult Reading",
+        "Category: Adventure",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/236/pg236.cover.medium.jpg",
+      "downloadCount": 17520,
+      "epubUrl": "https://www.gutenberg.org/ebooks/236.epub3.images",
+      "id": 236,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Short stories",
+        "Animals -- Fiction",
+        "Jungles -- Fiction",
+        "India -- Fiction",
+        "Jungle animals -- Fiction",
+        "Mowgli (Fictitious character) -- Fiction",
+        "Adventure stories, English",
+        "Feral children -- Fiction",
+        "India -- History -- 19th century -- Fiction",
+        "PR"
+      ],
+      "title": "The Jungle Book"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1882,
+          "death_year": 1941,
+          "name": "Joyce, James"
+        }
+      ],
+      "authors": [
+        "Joyce, James"
+      ],
+      "bookshelves": [
+        "Banned Books from Anne Haight's list",
+        "Category: Short Stories",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/2814/pg2814.cover.medium.jpg",
+      "downloadCount": 11247,
+      "epubUrl": "https://www.gutenberg.org/ebooks/2814.epub3.images",
+      "id": 2814,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Short stories",
+        "Dublin (Ireland) -- Fiction",
+        "PR"
+      ],
+      "title": "Dubliners"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1890,
+          "death_year": 1976,
+          "name": "Christie, Agatha"
+        }
+      ],
+      "authors": [
+        "Christie, Agatha"
+      ],
+      "bookshelves": [
+        "Detective Fiction",
+        "Category: Crime, Thrillers and Mystery",
+        "Category: Novels",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/863/pg863.cover.medium.jpg",
+      "downloadCount": 19895,
+      "epubUrl": "https://www.gutenberg.org/ebooks/863.epub3.images",
+      "id": 863,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Private investigators -- England -- Fiction",
+        "Detective and mystery stories",
+        "Belgians -- England -- Fiction",
+        "Poirot, Hercule (Fictitious character) -- Fiction",
+        "PR"
+      ],
+      "title": "The Mysterious Affair at Styles"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1812,
+          "death_year": 1870,
+          "name": "Dickens, Charles"
+        }
+      ],
+      "authors": [
+        "Dickens, Charles"
+      ],
+      "bookshelves": [
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/730/pg730.cover.medium.jpg",
+      "downloadCount": 13216,
+      "epubUrl": "https://www.gutenberg.org/ebooks/730.epub3.images",
+      "id": 730,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Orphans -- Fiction",
+        "London (England) -- Fiction",
+        "Bildungsromans",
+        "Boys -- Fiction",
+        "Criminals -- Fiction",
+        "Kidnapping victims -- Fiction",
+        "PR"
+      ],
+      "title": "Oliver Twist"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1857,
+          "death_year": 1924,
+          "name": "Conrad, Joseph"
+        }
+      ],
+      "authors": [
+        "Conrad, Joseph"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Movie Books",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/219/pg219.cover.medium.jpg",
+      "downloadCount": 15114,
+      "epubUrl": "https://www.gutenberg.org/ebooks/219.epub3.images",
+      "id": 219,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Africa -- Fiction",
+        "Europeans -- Africa -- Fiction",
+        "Trading posts -- Fiction",
+        "Degeneration -- Fiction",
+        "Imperialism -- Fiction",
+        "Psychological fiction",
+        "PR"
+      ],
+      "title": "Heart of Darkness"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1866,
+          "death_year": 1946,
+          "name": "Wells, H. G. (Herbert George)"
+        }
+      ],
+      "authors": [
+        "Wells, H. G. (Herbert George)"
+      ],
+      "bookshelves": [
+        "Science Fiction",
+        "Movie Books",
+        "Category: Science-Fiction & Fantasy",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/36/pg36.cover.medium.jpg",
+      "downloadCount": 12662,
+      "epubUrl": "https://www.gutenberg.org/ebooks/36.epub3.images",
+      "id": 36,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Science fiction",
+        "War stories",
+        "Martians -- Fiction",
+        "Mars (Planet) -- Fiction",
+        "Space warfare -- Fiction",
+        "Imaginary wars and battles -- Fiction",
+        "Life on other planets -- Fiction",
+        "PR"
+      ],
+      "title": "The war of the worlds"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1860,
+          "death_year": 1937,
+          "name": "Barrie, J. M. (James Matthew)"
+        }
+      ],
+      "authors": [
+        "Barrie, J. M. (James Matthew)"
+      ],
+      "bookshelves": [
+        "Children's Literature",
+        "Movie Books",
+        "Category: Children & Young Adult Reading",
+        "Category: Adventure",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/16/pg16.cover.medium.jpg",
+      "downloadCount": 23619,
+      "epubUrl": "https://www.gutenberg.org/ebooks/16.epub3.images",
+      "id": 16,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Fantasy literature",
+        "Peter Pan (Fictitious character) -- Fiction",
+        "Never-Never Land (Imaginary place) -- Fiction",
+        "Pirates -- Fiction",
+        "Fairies -- Fiction",
+        "PR",
+        "PZ"
+      ],
+      "title": "Peter Pan : $b [Peter and Wendy]"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1843,
+          "death_year": 1916,
+          "name": "James, Henry"
+        }
+      ],
+      "authors": [
+        "James, Henry"
+      ],
+      "bookshelves": [
+        "Opera",
+        "Best Books Ever Listings",
+        "Horror",
+        "Gothic Fiction",
+        "Category: Crime, Thrillers and Mystery",
+        "Category: Novels",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/209/pg209.cover.medium.jpg",
+      "downloadCount": 24218,
+      "epubUrl": "https://www.gutenberg.org/ebooks/209.epub3.images",
+      "id": 209,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "England -- Fiction",
+        "Psychological fiction",
+        "Governesses -- Fiction",
+        "Ghost stories",
+        "Children -- Fiction",
+        "PS"
+      ],
+      "title": "The Turn of the Screw"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1859,
+          "death_year": 1930,
+          "name": "Doyle, Arthur Conan"
+        }
+      ],
+      "authors": [
+        "Doyle, Arthur Conan"
+      ],
+      "bookshelves": [
+        "Detective Fiction",
+        "Category: Crime, Thrillers and Mystery",
+        "Category: Novels",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/244/pg244.cover.medium.jpg",
+      "downloadCount": 28540,
+      "epubUrl": "https://www.gutenberg.org/ebooks/244.epub3.images",
+      "id": 244,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Holmes, Sherlock (Fictitious character) -- Fiction",
+        "Private investigators -- England -- Fiction",
+        "Detective and mystery stories",
+        "England -- Fiction",
+        "PR"
+      ],
+      "title": "A Study in Scarlet"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1817,
+          "death_year": 1862,
+          "name": "Thoreau, Henry David"
+        }
+      ],
+      "authors": [
+        "Thoreau, Henry David"
+      ],
+      "bookshelves": [
+        "Category: Essays, Letters & Speeches",
+        "Category: American Literature",
+        "Category: Philosophy & Ethics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/205/pg205.cover.medium.jpg",
+      "downloadCount": 23604,
+      "epubUrl": "https://www.gutenberg.org/ebooks/205.epub3.images",
+      "id": 205,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Civil disobedience",
+        "Authors, American -- 19th century -- Biography",
+        "Thoreau, Henry David, 1817-1862 -- Homes and haunts -- Massachusetts -- Walden Woods",
+        "Wilderness areas -- Massachusetts -- Walden Woods",
+        "Natural history -- Massachusetts -- Walden Woods",
+        "Solitude",
+        "Government, Resistance to",
+        "Walden Woods (Mass.) -- Social life and customs",
+        "PS"
+      ],
+      "title": "Walden, and On The Duty Of Civil Disobedience"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1854,
+          "death_year": 1900,
+          "name": "Wilde, Oscar"
+        }
+      ],
+      "authors": [
+        "Wilde, Oscar"
+      ],
+      "bookshelves": [
+        "Children's Literature",
+        "Category: Short Stories",
+        "Category: Children & Young Adult Reading",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/902/pg902.cover.medium.jpg",
+      "downloadCount": 5100,
+      "epubUrl": "https://www.gutenberg.org/ebooks/902.epub3.images",
+      "id": 902,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Fairy tales",
+        "Children's stories, English",
+        "Short stories, English",
+        "PR",
+        "PZ"
+      ],
+      "title": "The Happy Prince, and Other Tales"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1828,
+          "death_year": 1910,
+          "name": "Tolstoy, Leo, graf"
+        }
+      ],
+      "authors": [
+        "Tolstoy, Leo, graf"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Harvard Classics",
+        "Movie Books",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: Russian Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1399/pg1399.cover.medium.jpg",
+      "downloadCount": 19545,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1399.epub3.images",
+      "id": 1399,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Adultery -- Fiction",
+        "Didactic fiction",
+        "Love stories",
+        "Married women -- Fiction",
+        "Russia -- Fiction",
+        "PG"
+      ],
+      "title": "Anna Karenina"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1856,
+          "death_year": 1950,
+          "name": "Shaw, Bernard"
+        }
+      ],
+      "authors": [
+        "Shaw, Bernard"
+      ],
+      "bookshelves": [
+        "Plays",
+        "Category: Plays/Films/Dramas",
+        "Category: British Literature",
+        "Nobel Prizes in Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/3825/pg3825.cover.medium.jpg",
+      "downloadCount": 8526,
+      "epubUrl": "https://www.gutenberg.org/ebooks/3825.epub3.images",
+      "id": 3825,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Comedy plays",
+        "Speech and social status -- Drama",
+        "London (England) -- Drama",
+        "Linguistics teachers -- Drama",
+        "Social classes -- Drama",
+        "Flower vending -- Drama",
+        "PR"
+      ],
+      "title": "Pygmalion"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1804,
+          "death_year": 1864,
+          "name": "Hawthorne, Nathaniel"
+        }
+      ],
+      "authors": [
+        "Hawthorne, Nathaniel"
+      ],
+      "bookshelves": [
+        "Banned Books from Anne Haight's list",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/25344/pg25344.cover.medium.jpg",
+      "downloadCount": 18308,
+      "epubUrl": "https://www.gutenberg.org/ebooks/25344.epub3.images",
+      "id": 25344,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Adultery -- Fiction",
+        "Historical fiction",
+        "Revenge -- Fiction",
+        "Psychological fiction",
+        "Married women -- Fiction",
+        "Clergy -- Fiction",
+        "Triangles (Interpersonal relations) -- Fiction",
+        "Illegitimate children -- Fiction",
+        "Women immigrants -- Fiction",
+        "Puritans -- Fiction",
+        "Boston (Mass.) -- History -- Colonial period, ca. 1600-1775 -- Fiction",
+        "PS"
+      ],
+      "title": "The Scarlet Letter"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1802,
+          "death_year": 1870,
+          "name": "Dumas, Alexandre"
+        },
+        {
+          "birth_year": 1813,
+          "death_year": 1888,
+          "name": "Maquet, Auguste"
+        }
+      ],
+      "authors": [
+        "Dumas, Alexandre",
+        "Maquet, Auguste"
+      ],
+      "bookshelves": [
+        "Adventure",
+        "Movie Books",
+        "Category: Adventure",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: French Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1184/pg1184.cover.medium.jpg",
+      "downloadCount": 80976,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1184.epub3.images",
+      "id": 1184,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Historical fiction",
+        "Revenge -- Fiction",
+        "Adventure stories",
+        "Prisoners -- Fiction",
+        "France -- History -- 19th century -- Fiction",
+        "Pirates -- Fiction",
+        "Dant\u00e8s, Edmond (Fictitious character) -- Fiction",
+        "PQ"
+      ],
+      "title": "The Count of Monte Cristo"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1265,
+          "death_year": 1321,
+          "name": "Dante Alighieri"
+        }
+      ],
+      "authors": [
+        "Dante Alighieri"
+      ],
+      "bookshelves": [
+        "Italy",
+        "Best Books Ever Listings",
+        "Category: Poetry",
+        "Category: Classics of Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/8800/pg8800.cover.medium.jpg",
+      "downloadCount": 24020,
+      "epubUrl": "https://www.gutenberg.org/ebooks/8800.epub3.images",
+      "id": 8800,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Epic poetry, Italian -- Translations into English",
+        "Italian poetry -- To 1400 -- Translations into English",
+        "PQ"
+      ],
+      "title": "The divine comedy"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1905,
+          "death_year": 1982,
+          "name": "Rand, Ayn"
+        }
+      ],
+      "authors": [
+        "Rand, Ayn"
+      ],
+      "bookshelves": [
+        "Science Fiction",
+        "Science Fiction by Women",
+        "Category: Science-Fiction & Fantasy",
+        "Category: Novels",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1250/pg1250.cover.medium.jpg",
+      "downloadCount": 6608,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1250.epub3.images",
+      "id": 1250,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Science fiction",
+        "Psychological fiction",
+        "Love stories",
+        "Time travel -- Fiction",
+        "Men -- Psychology -- Fiction",
+        "Individuality -- Fiction",
+        "PS"
+      ],
+      "title": "Anthem"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1806,
+          "death_year": 1873,
+          "name": "Mill, John Stuart"
+        }
+      ],
+      "authors": [
+        "Mill, John Stuart"
+      ],
+      "bookshelves": [
+        "Philosophy",
+        "Category: Philosophy & Ethics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/34901/pg34901.cover.medium.jpg",
+      "downloadCount": 18075,
+      "epubUrl": "https://www.gutenberg.org/ebooks/34901.epub3.images",
+      "id": 34901,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Liberty",
+        "JC"
+      ],
+      "title": "On Liberty"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1694,
+          "death_year": 1778,
+          "name": "Voltaire"
+        }
+      ],
+      "authors": [
+        "Voltaire"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Banned Books from Anne Haight's list",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: French Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/19942/pg19942.cover.medium.jpg",
+      "downloadCount": 10031,
+      "epubUrl": "https://www.gutenberg.org/ebooks/19942.epub3.images",
+      "id": 19942,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Satire",
+        "Optimism -- Fiction",
+        "PQ"
+      ],
+      "title": "Candide"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1850,
+          "death_year": 1904,
+          "name": "Chopin, Kate"
+        }
+      ],
+      "authors": [
+        "Chopin, Kate"
+      ],
+      "bookshelves": [
+        "Banned Books from Anne Haight's list",
+        "Banned Books List from the American Library Association",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/160/pg160.cover.medium.jpg",
+      "downloadCount": 12485,
+      "epubUrl": "https://www.gutenberg.org/ebooks/160.epub3.images",
+      "id": 160,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Adultery -- Fiction",
+        "Women -- Louisiana -- New Orleans -- Social conditions -- Fiction",
+        "Self-actualization (Psychology) -- Fiction",
+        "New Orleans (La.) -- Fiction",
+        "Louisiana -- Social life and customs -- Fiction",
+        "PS"
+      ],
+      "title": "The Awakening, and Selected Short Stories"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1667,
+          "death_year": 1745,
+          "name": "Swift, Jonathan"
+        }
+      ],
+      "authors": [
+        "Swift, Jonathan"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Banned Books from Anne Haight's list",
+        "Category: Science-Fiction & Fantasy",
+        "Category: Adventure",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/829/pg829.cover.medium.jpg",
+      "downloadCount": 24177,
+      "epubUrl": "https://www.gutenberg.org/ebooks/829.epub3.images",
+      "id": 829,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Fantasy fiction",
+        "Satire",
+        "Travelers -- Fiction",
+        "Gulliver, Lemuel (Fictitious character) -- Fiction",
+        "Voyages, Imaginary -- Early works to 1800",
+        "PR"
+      ],
+      "title": "Gulliver's Travels into Several Remote Nations of the World"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1564,
+          "death_year": 1616,
+          "name": "Shakespeare, William"
+        }
+      ],
+      "authors": [
+        "Shakespeare, William"
+      ],
+      "bookshelves": [
+        "Plays",
+        "Category: Poetry",
+        "Category: Plays/Films/Dramas",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/100/pg100.cover.medium.jpg",
+      "downloadCount": 66390,
+      "epubUrl": "https://www.gutenberg.org/ebooks/100.epub3.images",
+      "id": 100,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "English drama -- Early modern and Elizabethan, 1500-1600",
+        "PR"
+      ],
+      "title": "The Complete Works of William Shakespeare"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1775,
+          "death_year": 1817,
+          "name": "Austen, Jane"
+        }
+      ],
+      "authors": [
+        "Austen, Jane"
+      ],
+      "bookshelves": [
+        "Category: Novels",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/158/pg158.cover.medium.jpg",
+      "downloadCount": 13645,
+      "epubUrl": "https://www.gutenberg.org/ebooks/158.epub3.images",
+      "id": 158,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Humorous stories",
+        "England -- Fiction",
+        "Young women -- Fiction",
+        "Love stories",
+        "Fathers and daughters -- Fiction",
+        "Bildungsromans",
+        "Mate selection -- Fiction",
+        "Female friendship -- Fiction",
+        "PR"
+      ],
+      "title": "Emma"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1775,
+          "death_year": 1817,
+          "name": "Austen, Jane"
+        }
+      ],
+      "authors": [
+        "Austen, Jane"
+      ],
+      "bookshelves": [
+        "Category: Romance",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/161/pg161.cover.medium.jpg",
+      "downloadCount": 28192,
+      "epubUrl": "https://www.gutenberg.org/ebooks/161.epub3.images",
+      "id": 161,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "England -- Social life and customs -- 19th century -- Fiction",
+        "Inheritance and succession -- Fiction",
+        "England -- Fiction",
+        "Young women -- Fiction",
+        "Love stories",
+        "Sisters -- Fiction",
+        "Domestic fiction",
+        "Mate selection -- Fiction",
+        "Social classes -- Fiction",
+        "Gentry -- England -- Fiction",
+        "Regency fiction",
+        "PR"
+      ],
+      "title": "Sense and Sensibility"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1775,
+          "death_year": 1817,
+          "name": "Austen, Jane"
+        }
+      ],
+      "authors": [
+        "Austen, Jane"
+      ],
+      "bookshelves": [
+        "Category: Novels",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/105/pg105.cover.medium.jpg",
+      "downloadCount": 11221,
+      "epubUrl": "https://www.gutenberg.org/ebooks/105.epub3.images",
+      "id": 105,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "England -- Social life and customs -- 19th century -- Fiction",
+        "Psychological fiction",
+        "Young women -- Fiction",
+        "Motherless families -- Fiction",
+        "Rejection (Psychology) -- Fiction",
+        "First loves -- Fiction",
+        "Dysfunctional families -- Fiction",
+        "Ship captains -- Fiction",
+        "Love stories",
+        "Regency fiction",
+        "PR"
+      ],
+      "title": "Persuasion"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1775,
+          "death_year": 1817,
+          "name": "Austen, Jane"
+        }
+      ],
+      "authors": [
+        "Austen, Jane"
+      ],
+      "bookshelves": [
+        "Gothic Fiction",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/121/pg121.cover.medium.jpg",
+      "downloadCount": 14718,
+      "epubUrl": "https://www.gutenberg.org/ebooks/121.epub3.images",
+      "id": 121,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "England -- Social life and customs -- 19th century -- Fiction",
+        "Satire",
+        "England -- Fiction",
+        "Young women -- Fiction",
+        "Love stories",
+        "Gothic fiction",
+        "Horror tales -- Appreciation -- Fiction",
+        "Books and reading -- Fiction",
+        "Gentry -- England -- Fiction",
+        "Marriage -- Economic aspects -- Fiction",
+        "PR"
+      ],
+      "title": "Northanger Abbey"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": -750,
+          "death_year": -650,
+          "name": "Homer"
+        }
+      ],
+      "authors": [
+        "Homer"
+      ],
+      "bookshelves": [
+        "Classical Antiquity",
+        "Harvard Classics",
+        "Category: Poetry",
+        "Category: Mythology, Legends & Folklore",
+        "Category: Classics of Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1727/pg1727.cover.medium.jpg",
+      "downloadCount": 34322,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1727.epub3.images",
+      "id": 1727,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Homer -- Translations into English",
+        "Epic poetry, Greek -- Translations into English",
+        "Odysseus, King of Ithaca (Mythological character)",
+        "PA"
+      ],
+      "title": "The Odyssey\r\nRendered into English prose for the use of those who cannot read the original"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": null,
+          "death_year": 1731,
+          "name": "Defoe, Daniel"
+        }
+      ],
+      "authors": [
+        "Defoe, Daniel"
+      ],
+      "bookshelves": [
+        "Category: Adventure",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/521/pg521.cover.medium.jpg",
+      "downloadCount": 16819,
+      "epubUrl": "https://www.gutenberg.org/ebooks/521.epub3.images",
+      "id": 521,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Shipwreck survival -- Fiction",
+        "Islands -- Fiction",
+        "Crusoe, Robinson (Fictitious character) -- Fiction",
+        "Atlantic Ocean -- Fiction",
+        "Adventure stories",
+        "Castaways -- Fiction",
+        "PR"
+      ],
+      "title": "The Life and Adventures of Robinson Crusoe"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1809,
+          "death_year": 1849,
+          "name": "Poe, Edgar Allan"
+        }
+      ],
+      "authors": [
+        "Poe, Edgar Allan"
+      ],
+      "bookshelves": [
+        "Category: Short Stories",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1064/pg1064.cover.medium.jpg",
+      "downloadCount": 2943,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1064.epub3.images",
+      "id": 1064,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Horror tales, American",
+        "PS"
+      ],
+      "title": "The Masque of the Red Death"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1588,
+          "death_year": 1679,
+          "name": "Hobbes, Thomas"
+        }
+      ],
+      "authors": [
+        "Hobbes, Thomas"
+      ],
+      "bookshelves": [
+        "Politics",
+        "Harvard Classics",
+        "Category: History - Early Modern (c. 1450-1750)",
+        "Category: Philosophy & Ethics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/3207/pg3207.cover.medium.jpg",
+      "downloadCount": 24527,
+      "epubUrl": "https://www.gutenberg.org/ebooks/3207.epub3.images",
+      "id": 3207,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Political science -- Early works to 1800",
+        "State, The -- Early works to 1800",
+        "JC"
+      ],
+      "title": "Leviathan"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1706,
+          "death_year": 1790,
+          "name": "Franklin, Benjamin"
+        }
+      ],
+      "authors": [
+        "Franklin, Benjamin"
+      ],
+      "bookshelves": [
+        "Harvard Classics",
+        "Category: Biographies",
+        "Category: American Literature",
+        "Category: History - American"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/20203/pg20203.cover.medium.jpg",
+      "downloadCount": 27494,
+      "epubUrl": "https://www.gutenberg.org/ebooks/20203.epub3.images",
+      "id": 20203,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Franklin, Benjamin, 1706-1790",
+        "Statesmen -- United States -- Biography",
+        "E300"
+      ],
+      "title": "Autobiography of Benjamin Franklin"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1832,
+          "death_year": 1888,
+          "name": "Alcott, Louisa May"
+        }
+      ],
+      "authors": [
+        "Alcott, Louisa May"
+      ],
+      "bookshelves": [
+        "Category: Children & Young Adult Reading",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/37106/pg37106.cover.medium.jpg",
+      "downloadCount": 56653,
+      "epubUrl": "https://www.gutenberg.org/ebooks/37106.epub3.images",
+      "id": 37106,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Autobiographical fiction",
+        "Young women -- Fiction",
+        "Sisters -- Fiction",
+        "Domestic fiction",
+        "Family life -- New England -- Fiction",
+        "New England -- Fiction",
+        "Bildungsromans",
+        "Mothers and daughters -- Fiction",
+        "March family (Fictitious characters) -- Fiction",
+        "PZ",
+        "PS"
+      ],
+      "title": "Little Women; Or, Meg, Jo, Beth, and Amy"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1882,
+          "death_year": 1941,
+          "name": "Joyce, James"
+        }
+      ],
+      "authors": [
+        "Joyce, James"
+      ],
+      "bookshelves": [
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/4217/pg4217.cover.medium.jpg",
+      "downloadCount": 14724,
+      "epubUrl": "https://www.gutenberg.org/ebooks/4217.epub3.images",
+      "id": 4217,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Autobiographical fiction",
+        "Bildungsromans",
+        "Young men -- Fiction",
+        "Dublin (Ireland) -- Fiction",
+        "Artists -- Fiction",
+        "PR"
+      ],
+      "title": "A Portrait of the Artist as a Young Man"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1821,
+          "death_year": 1881,
+          "name": "Dostoyevsky, Fyodor"
+        }
+      ],
+      "authors": [
+        "Dostoyevsky, Fyodor"
+      ],
+      "bookshelves": [
+        "Category: Novels",
+        "Category: Russian Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/600/pg600.cover.medium.jpg",
+      "downloadCount": 11577,
+      "epubUrl": "https://www.gutenberg.org/ebooks/600.epub3.images",
+      "id": 600,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Political fiction",
+        "Russia -- History -- 1801-1917 -- Fiction",
+        "Russia -- Officials and employees -- Fiction",
+        "PG"
+      ],
+      "title": "Notes from the Underground"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1564,
+          "death_year": 1616,
+          "name": "Shakespeare, William"
+        }
+      ],
+      "authors": [
+        "Shakespeare, William"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Category: Plays/Films/Dramas",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/27761/pg27761.cover.medium.jpg",
+      "downloadCount": 14270,
+      "epubUrl": "https://www.gutenberg.org/ebooks/27761.epub3.images",
+      "id": 27761,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Tragedies (Drama)",
+        "Hamlet (Legendary character) -- Drama",
+        "Kings and rulers -- Succession -- Drama",
+        "Murder victims' families -- Drama",
+        "Fathers -- Death -- Drama",
+        "Revenge -- Drama",
+        "Princes -- Drama",
+        "Denmark -- Drama",
+        "PR"
+      ],
+      "title": "Hamlet"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1844,
+          "death_year": 1900,
+          "name": "Nietzsche, Friedrich Wilhelm"
+        }
+      ],
+      "authors": [
+        "Nietzsche, Friedrich Wilhelm"
+      ],
+      "bookshelves": [
+        "Philosophy",
+        "Category: Classics of Literature",
+        "Category: German Literature",
+        "Category: Philosophy & Ethics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1998/pg1998.cover.medium.jpg",
+      "downloadCount": 28980,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1998.epub3.images",
+      "id": 1998,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Superman (Philosophical concept)",
+        "Philosophy, German",
+        "B"
+      ],
+      "title": "Thus Spake Zarathustra: A Book for All and None"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1844,
+          "death_year": 1900,
+          "name": "Nietzsche, Friedrich Wilhelm"
+        }
+      ],
+      "authors": [
+        "Nietzsche, Friedrich Wilhelm"
+      ],
+      "bookshelves": [
+        "Philosophy",
+        "Atheism",
+        "Category: Philosophy & Ethics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/4363/pg4363.cover.medium.jpg",
+      "downloadCount": 24587,
+      "epubUrl": "https://www.gutenberg.org/ebooks/4363.epub3.images",
+      "id": 4363,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Ethics",
+        "Philosophy, German",
+        "B"
+      ],
+      "title": "Beyond Good and Evil"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1818,
+          "death_year": 1883,
+          "name": "Marx, Karl"
+        },
+        {
+          "birth_year": 1820,
+          "death_year": 1895,
+          "name": "Engels, Friedrich"
+        }
+      ],
+      "authors": [
+        "Marx, Karl",
+        "Engels, Friedrich"
+      ],
+      "bookshelves": [
+        "Politics",
+        "Philosophy",
+        "Banned Books from Anne Haight's list",
+        "Category: Essays, Letters & Speeches",
+        "Category: History - Modern (1750+)",
+        "Category: Philosophy & Ethics",
+        "Category: Politics",
+        "Category: Economics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/61/pg61.cover.medium.jpg",
+      "downloadCount": 7868,
+      "epubUrl": "https://www.gutenberg.org/ebooks/61.epub3.images",
+      "id": 61,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Socialism",
+        "Communism",
+        "HX"
+      ],
+      "title": "The Communist Manifesto"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 121,
+          "death_year": 180,
+          "name": "Marcus Aurelius, Emperor of Rome"
+        }
+      ],
+      "authors": [
+        "Marcus Aurelius, Emperor of Rome"
+      ],
+      "bookshelves": [
+        "Harvard Classics",
+        "Category: Biographies",
+        "Category: Classics of Literature",
+        "Category: Philosophy & Ethics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/2680/pg2680.cover.medium.jpg",
+      "downloadCount": 38017,
+      "epubUrl": "https://www.gutenberg.org/ebooks/2680.epub3.images",
+      "id": 2680,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Stoics",
+        "Ethics",
+        "Life",
+        "B"
+      ],
+      "title": "Meditations"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1809,
+          "death_year": 1849,
+          "name": "Poe, Edgar Allan"
+        }
+      ],
+      "authors": [
+        "Poe, Edgar Allan"
+      ],
+      "bookshelves": [
+        "Detective Fiction",
+        "Horror",
+        "Gothic Fiction",
+        "Mystery Fiction",
+        "Category: Short Stories",
+        "Category: Crime, Thrillers and Mystery",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/2148/pg2148.cover.medium.jpg",
+      "downloadCount": 24865,
+      "epubUrl": "https://www.gutenberg.org/ebooks/2148.epub3.images",
+      "id": 2148,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Short stories",
+        "Fantasy fiction",
+        "Horror tales, American",
+        "American fiction -- 19th century",
+        "PS"
+      ],
+      "title": "The Works of Edgar Allan Poe \u2014 Volume 2"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1757,
+          "death_year": 1804,
+          "name": "Hamilton, Alexander"
+        },
+        {
+          "birth_year": 1745,
+          "death_year": 1829,
+          "name": "Jay, John"
+        },
+        {
+          "birth_year": 1751,
+          "death_year": 1836,
+          "name": "Madison, James"
+        }
+      ],
+      "authors": [
+        "Hamilton, Alexander",
+        "Jay, John",
+        "Madison, James"
+      ],
+      "bookshelves": [
+        "United States",
+        "United States Law",
+        "Category: Essays, Letters & Speeches",
+        "Category: History - American",
+        "Category: Politics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1404/pg1404.cover.medium.jpg",
+      "downloadCount": 5252,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1404.epub3.images",
+      "id": 1404,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Constitutional history -- United States -- Sources",
+        "Constitutional law -- United States",
+        "JK",
+        "KF"
+      ],
+      "title": "The Federalist Papers"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": null,
+          "death_year": null,
+          "name": "Various"
+        }
+      ],
+      "authors": [
+        "Various"
+      ],
+      "bookshelves": [
+        "Scientific American",
+        "Category: Science - Physics",
+        "Category: Science - Chemistry/Biochemistry",
+        "Category: Science - Biology",
+        "Category: Engineering & Technology",
+        "Category: Health & Medicine",
+        "Category: Reports & Conference Proceedings"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/8297/pg8297.cover.medium.jpg",
+      "downloadCount": 477,
+      "epubUrl": "https://www.gutenberg.org/ebooks/8297.epub3.images",
+      "id": 8297,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Science -- Periodicals",
+        "T"
+      ],
+      "title": "Scientific American Supplement, No. 286, June 25, 1881"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1802,
+          "death_year": 1885,
+          "name": "Hugo, Victor"
+        }
+      ],
+      "authors": [
+        "Hugo, Victor"
+      ],
+      "bookshelves": [
+        "Historical Fiction",
+        "Banned Books from Anne Haight's list",
+        "Category: Historical Novels",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: French Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/135/pg135.cover.medium.jpg",
+      "downloadCount": 22055,
+      "epubUrl": "https://www.gutenberg.org/ebooks/135.epub3.images",
+      "id": 135,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Historical fiction",
+        "Orphans -- Fiction",
+        "Paris (France) -- Fiction",
+        "Epic literature",
+        "Ex-convicts -- Fiction",
+        "PQ"
+      ],
+      "title": "Les Mis\u00e9rables"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1814,
+          "death_year": 1889,
+          "name": "Mackay, Charles"
+        }
+      ],
+      "authors": [
+        "Mackay, Charles"
+      ],
+      "bookshelves": [
+        "Witchcraft",
+        "Psychology",
+        "Category: History - Other",
+        "Category: History - Modern (1750+)",
+        "Category: Economics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/24518/pg24518.cover.medium.jpg",
+      "downloadCount": 3674,
+      "epubUrl": "https://www.gutenberg.org/ebooks/24518.epub3.images",
+      "id": 24518,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Social psychology",
+        "Swindlers and swindling",
+        "Impostors and imposture",
+        "Alchemy",
+        "Delusions",
+        "Occultism -- Early works to 1900",
+        "Investments -- Psychological aspects",
+        "Stock exchanges -- Psychological aspects",
+        "Hallucinations and illusions",
+        "Common fallacies",
+        "AZ"
+      ],
+      "title": "Memoirs of Extraordinary Popular Delusions and the Madness of Crowds"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1895,
+          "death_year": 1963,
+          "name": "Liveing, Edward G. D. (Edward George Downing)"
+        }
+      ],
+      "authors": [
+        "Liveing, Edward G. D. (Edward George Downing)"
+      ],
+      "bookshelves": [
+        "World War I",
+        "Category: Biographies",
+        "Category: History - Modern (1750+)",
+        "Category: History - Warfare"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/28145/pg28145.cover.medium.jpg",
+      "downloadCount": 420,
+      "epubUrl": "https://www.gutenberg.org/ebooks/28145.epub3.images",
+      "id": 28145,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "World War, 1914-1918 -- Personal narratives, British",
+        "Somme, 1st Battle of the, France, 1916",
+        "D501"
+      ],
+      "title": "Attack: An Infantry Subaltern's Impression of July 1st, 1916"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1795,
+          "death_year": 1821,
+          "name": "Keats, John"
+        }
+      ],
+      "authors": [
+        "Keats, John"
+      ],
+      "bookshelves": [
+        "Poetry",
+        "Category: Poetry",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/23684/pg23684.cover.medium.jpg",
+      "downloadCount": 2792,
+      "epubUrl": "https://www.gutenberg.org/ebooks/23684.epub3.images",
+      "id": 23684,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "English poetry -- 19th century",
+        "PR"
+      ],
+      "title": "Keats: Poems Published in 1820"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": null,
+          "death_year": null,
+          "name": "Vatsyayana"
+        }
+      ],
+      "authors": [
+        "Vatsyayana"
+      ],
+      "bookshelves": [
+        "Sociology",
+        "Erotic Fiction",
+        "Banned Books from Anne Haight's list",
+        "Category: Mythology, Legends & Folklore",
+        "Category: Philosophy & Ethics",
+        "Category: Sexuality & Erotica"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/27827/pg27827.cover.medium.jpg",
+      "downloadCount": 28422,
+      "epubUrl": "https://www.gutenberg.org/ebooks/27827.epub3.images",
+      "id": 27827,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Love",
+        "Sex",
+        "HQ"
+      ],
+      "title": "The Kama Sutra of Vatsyayana\r\nTranslated From the Sanscrit in Seven Parts With Preface, Introduction and Concluding Remarks"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1804,
+          "death_year": 1864,
+          "name": "Hawthorne, Nathaniel"
+        }
+      ],
+      "authors": [
+        "Hawthorne, Nathaniel"
+      ],
+      "bookshelves": [
+        "Category: Children & Young Adult Reading",
+        "Category: Mythology, Legends & Folklore"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/32242/pg32242.cover.medium.jpg",
+      "downloadCount": 917,
+      "epubUrl": "https://www.gutenberg.org/ebooks/32242.epub3.images",
+      "id": 32242,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Mythology, Greek",
+        "Mythology, Greek -- Juvenile literature",
+        "BL",
+        "PZ"
+      ],
+      "title": "A Wonder Book for Girls & Boys"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1818,
+          "death_year": 1895,
+          "name": "Douglass, Frederick"
+        }
+      ],
+      "authors": [
+        "Douglass, Frederick"
+      ],
+      "bookshelves": [
+        "Slavery",
+        "African American Writers",
+        "Category: Biographies",
+        "Category: History - American"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/23/pg23.cover.medium.jpg",
+      "downloadCount": 25545,
+      "epubUrl": "https://www.gutenberg.org/ebooks/23.epub3.images",
+      "id": 23,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Douglass, Frederick, 1818-1895",
+        "African American abolitionists -- Biography",
+        "Abolitionists -- United States -- Biography",
+        "Enslaved persons -- United States -- Biography",
+        "E300"
+      ],
+      "title": "Narrative of the Life of Frederick Douglass, an American Slave"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1811,
+          "death_year": 1896,
+          "name": "Stowe, Harriet Beecher"
+        }
+      ],
+      "authors": [
+        "Stowe, Harriet Beecher"
+      ],
+      "bookshelves": [
+        "US Civil War",
+        "Slavery",
+        "Banned Books from Anne Haight's list",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/203/pg203.cover.medium.jpg",
+      "downloadCount": 13633,
+      "epubUrl": "https://www.gutenberg.org/ebooks/203.epub3.images",
+      "id": 203,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Slavery -- Fiction",
+        "Didactic fiction",
+        "Political fiction",
+        "Master and servant -- Fiction",
+        "African Americans -- Fiction",
+        "Southern States -- Fiction",
+        "Fugitive slaves -- Fiction",
+        "Plantation life -- Fiction",
+        "Uncle Tom (Fictitious character) -- Fiction",
+        "Enslaved persons -- Fiction",
+        "PS"
+      ],
+      "title": "Uncle Tom's Cabin"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1564,
+          "death_year": 1616,
+          "name": "Shakespeare, William"
+        }
+      ],
+      "authors": [
+        "Shakespeare, William"
+      ],
+      "bookshelves": [
+        "Category: Romance",
+        "Category: Plays/Films/Dramas",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1513/pg1513.cover.medium.jpg",
+      "downloadCount": 88359,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1513.epub3.images",
+      "id": 1513,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Vendetta -- Drama",
+        "Youth -- Drama",
+        "Verona (Italy) -- Drama",
+        "Juliet (Fictitious character) -- Drama",
+        "Romeo (Fictitious character) -- Drama",
+        "Conflict of generations -- Drama",
+        "Tragedies (Drama)",
+        "PR"
+      ],
+      "title": "Romeo and Juliet"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1877,
+          "death_year": 1962,
+          "name": "Hesse, Hermann"
+        }
+      ],
+      "authors": [
+        "Hesse, Hermann"
+      ],
+      "bookshelves": [
+        "Category: Novels",
+        "Category: German Literature",
+        "Category: Philosophy & Ethics",
+        "Nobel Prizes in Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/2500/pg2500.cover.medium.jpg",
+      "downloadCount": 6741,
+      "epubUrl": "https://www.gutenberg.org/ebooks/2500.epub3.images",
+      "id": 2500,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Gautama Buddha -- Fiction",
+        "India -- Social life and customs -- Fiction",
+        "Spiritual life -- Fiction",
+        "Self-realization -- Fiction",
+        "Buddhism -- Fiction",
+        "Buddhist philosophy -- Fiction",
+        "Brahmans -- Fiction",
+        "India -- Religion -- Fiction",
+        "PT"
+      ],
+      "title": "Siddhartha"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1547,
+          "death_year": 1616,
+          "name": "Cervantes Saavedra, Miguel de"
+        }
+      ],
+      "authors": [
+        "Cervantes Saavedra, Miguel de"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Harvard Classics",
+        "Category: Novels",
+        "Category: Classics of Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/996/pg996.cover.medium.jpg",
+      "downloadCount": 13142,
+      "epubUrl": "https://www.gutenberg.org/ebooks/996.epub3.images",
+      "id": 996,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Spain -- Social life and customs -- 16th century -- Fiction",
+        "Knights and knighthood -- Spain -- Fiction",
+        "Picaresque literature",
+        "Romances",
+        "PQ"
+      ],
+      "title": "Don Quixote"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1865,
+          "death_year": 1937,
+          "name": "Perkins, Lucy Fitch"
+        }
+      ],
+      "authors": [
+        "Perkins, Lucy Fitch"
+      ],
+      "bookshelves": [
+        "Children's Book Series",
+        "Category: Historical Novels",
+        "Category: Children & Young Adult Reading"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/9966/pg9966.cover.medium.jpg",
+      "downloadCount": 329,
+      "epubUrl": "https://www.gutenberg.org/ebooks/9966.epub3.images",
+      "id": 9966,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Twins -- Juvenile fiction",
+        "Greece -- History -- Juvenile fiction",
+        "PZ"
+      ],
+      "title": "The Spartan Twins"
+    },
+    {
+      "authorDetails": [],
+      "authors": [],
+      "bookshelves": [
+        "Category: Mythology, Legends & Folklore",
+        "Category: Classics of Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/34206/pg34206.cover.medium.jpg",
+      "downloadCount": 10481,
+      "epubUrl": "https://www.gutenberg.org/ebooks/34206.epub3.images",
+      "id": 34206,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Fairy tales",
+        "Tales -- Arab countries",
+        "PJ"
+      ],
+      "title": "The Thousand and One Nights, Vol. I.\nCommonly Called the Arabian Nights' Entertainments"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1872,
+          "death_year": 1970,
+          "name": "Russell, Bertrand"
+        }
+      ],
+      "authors": [
+        "Russell, Bertrand"
+      ],
+      "bookshelves": [
+        "Philosophy",
+        "Category: Philosophy & Ethics",
+        "Nobel Prizes in Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/5827/pg5827.cover.medium.jpg",
+      "downloadCount": 9470,
+      "epubUrl": "https://www.gutenberg.org/ebooks/5827.epub3.images",
+      "id": 5827,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Knowledge, Theory of",
+        "Metaphysics",
+        "Philosophy -- Introductions",
+        "B"
+      ],
+      "title": "The Problems of Philosophy"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1783,
+          "death_year": 1859,
+          "name": "Irving, Washington"
+        }
+      ],
+      "authors": [
+        "Irving, Washington"
+      ],
+      "bookshelves": [
+        "Children's Literature",
+        "Harvard Classics",
+        "Category: Short Stories",
+        "Category: Mythology, Legends & Folklore",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/41/pg41.cover.medium.jpg",
+      "downloadCount": 17011,
+      "epubUrl": "https://www.gutenberg.org/ebooks/41.epub3.images",
+      "id": 41,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Ghosts -- Fiction",
+        "New York (State) -- History -- 1775-1865 -- Fiction",
+        "PS"
+      ],
+      "title": "The Legend of Sleepy Hollow"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1850,
+          "death_year": 1894,
+          "name": "Stevenson, Robert Louis"
+        }
+      ],
+      "authors": [
+        "Stevenson, Robert Louis"
+      ],
+      "bookshelves": [
+        "Precursors of Science Fiction",
+        "Horror",
+        "Gothic Fiction",
+        "Movie Books",
+        "Category: Crime, Thrillers and Mystery",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/42/pg42.cover.medium.jpg",
+      "downloadCount": 22220,
+      "epubUrl": "https://www.gutenberg.org/ebooks/42.epub3.images",
+      "id": 42,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Science fiction",
+        "Horror tales",
+        "London (England) -- Fiction",
+        "Physicians -- Fiction",
+        "Psychological fiction",
+        "Self-experimentation in medicine -- Fiction",
+        "Multiple personality -- Fiction",
+        "PR"
+      ],
+      "title": "The strange case of Dr. Jekyll and Mr. Hyde"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1812,
+          "death_year": 1870,
+          "name": "Dickens, Charles"
+        }
+      ],
+      "authors": [
+        "Dickens, Charles"
+      ],
+      "bookshelves": [
+        "Children's Literature",
+        "Christmas",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/46/pg46.cover.medium.jpg",
+      "downloadCount": 17959,
+      "epubUrl": "https://www.gutenberg.org/ebooks/46.epub3.images",
+      "id": 46,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Christmas stories",
+        "London (England) -- Fiction",
+        "Poor families -- Fiction",
+        "Ghost stories",
+        "Misers -- Fiction",
+        "Sick children -- Fiction",
+        "Scrooge, Ebenezer (Fictitious character) -- Fiction",
+        "PR"
+      ],
+      "title": "A Christmas Carol in Prose; Being a Ghost Story of Christmas"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1874,
+          "death_year": 1942,
+          "name": "Montgomery, L. M. (Lucy Maud)"
+        }
+      ],
+      "authors": [
+        "Montgomery, L. M. (Lucy Maud)"
+      ],
+      "bookshelves": [
+        "Canada",
+        "Children's Literature",
+        "Category: Children & Young Adult Reading",
+        "Category: Novels",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/47/pg47.cover.medium.jpg",
+      "downloadCount": 4347,
+      "epubUrl": "https://www.gutenberg.org/ebooks/47.epub3.images",
+      "id": 47,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Orphans -- Fiction",
+        "Islands -- Fiction",
+        "Teachers -- Fiction",
+        "Prince Edward Island -- History -- 20th century -- Fiction",
+        "Canada -- History -- 1914-1945 -- Fiction",
+        "Shirley, Anne (Fictitious character) -- Fiction",
+        "PZ"
+      ],
+      "title": "Anne of Avonlea"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": null,
+          "death_year": null,
+          "name": "Hemphill, Scott"
+        }
+      ],
+      "authors": [
+        "Hemphill, Scott"
+      ],
+      "bookshelves": [
+        "Mathematics",
+        "Category: Mathematics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/50/pg50.cover.medium.jpg",
+      "downloadCount": 559,
+      "epubUrl": "https://www.gutenberg.org/ebooks/50.epub.noimages",
+      "id": 50,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Mathematics",
+        "Pi",
+        "QA"
+      ],
+      "title": "Pi"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1835,
+          "death_year": 1910,
+          "name": "Twain, Mark"
+        }
+      ],
+      "authors": [
+        "Twain, Mark"
+      ],
+      "bookshelves": [
+        "Category: Essays, Letters & Speeches",
+        "Category: American Literature",
+        "Category: Philosophy & Ethics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/70/pg70.cover.medium.jpg",
+      "downloadCount": 2264,
+      "epubUrl": "https://www.gutenberg.org/ebooks/70.epub3.images",
+      "id": 70,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "American essays",
+        "PS"
+      ],
+      "title": "What Is Man? and Other Essays"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": null,
+          "death_year": null,
+          "name": "Goodwin, John E."
+        }
+      ],
+      "authors": [
+        "Goodwin, John E."
+      ],
+      "bookshelves": [
+        "Category: How To ..."
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/75/pg75.cover.medium.jpg",
+      "downloadCount": 544,
+      "epubUrl": "https://www.gutenberg.org/ebooks/75.epub3.images",
+      "id": 75,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Electronic mail systems",
+        "TK"
+      ],
+      "title": "E-mail 101"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1835,
+          "death_year": 1910,
+          "name": "Twain, Mark"
+        }
+      ],
+      "authors": [
+        "Twain, Mark"
+      ],
+      "bookshelves": [
+        "Precursors of Science Fiction",
+        "Arthurian Legends",
+        "Category: Science-Fiction & Fantasy",
+        "Category: Humour",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/86/pg86.cover.medium.jpg",
+      "downloadCount": 25518,
+      "epubUrl": "https://www.gutenberg.org/ebooks/86.epub3.images",
+      "id": 86,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Fantasy fiction",
+        "Satire",
+        "Knights and knighthood -- Fiction",
+        "Arthurian romances -- Adaptations",
+        "Time travel -- Fiction",
+        "Americans -- Great Britain -- Fiction",
+        "Kings and rulers -- Fiction",
+        "Britons -- Fiction",
+        "PS"
+      ],
+      "title": "A Connecticut Yankee in King Arthur's Court"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1875,
+          "death_year": 1950,
+          "name": "Burroughs, Edgar Rice"
+        }
+      ],
+      "authors": [
+        "Burroughs, Edgar Rice"
+      ],
+      "bookshelves": [
+        "Adventure",
+        "Movie Books",
+        "Contemporary Reviews",
+        "Category: Adventure",
+        "Category: Novels"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/90/pg90.cover.medium.jpg",
+      "downloadCount": 2406,
+      "epubUrl": "https://www.gutenberg.org/ebooks/90.epub3.images",
+      "id": 90,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Tarzan (Fictitious character) -- Fiction",
+        "Fantasy fiction",
+        "Adventure stories",
+        "PZ",
+        "PS"
+      ],
+      "title": "The Son of Tarzan"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1840,
+          "death_year": 1928,
+          "name": "Hardy, Thomas"
+        }
+      ],
+      "authors": [
+        "Hardy, Thomas"
+      ],
+      "bookshelves": [
+        "Banned Books from Anne Haight's list",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/110/pg110.cover.medium.jpg",
+      "downloadCount": 10523,
+      "epubUrl": "https://www.gutenberg.org/ebooks/110.epub3.images",
+      "id": 110,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Didactic fiction",
+        "Poor families -- Fiction",
+        "Children of the rich -- Fiction",
+        "Triangles (Interpersonal relations) -- Fiction",
+        "Pastoral fiction",
+        "Children of clergy -- Fiction",
+        "Wessex (England) -- Fiction",
+        "Man-woman relationships -- Fiction",
+        "Women murderers -- Fiction",
+        "Rape victims -- Fiction",
+        "Women household employees -- Fiction",
+        "PR"
+      ],
+      "title": "Tess of the d'Urbervilles: A Pure Woman"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1859,
+          "death_year": 1930,
+          "name": "Doyle, Arthur Conan"
+        }
+      ],
+      "authors": [
+        "Doyle, Arthur Conan"
+      ],
+      "bookshelves": [
+        "Science Fiction",
+        "Category: Science-Fiction & Fantasy",
+        "Category: Adventure",
+        "Category: Novels",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/139/pg139.cover.medium.jpg",
+      "downloadCount": 11799,
+      "epubUrl": "https://www.gutenberg.org/ebooks/139.epub3.images",
+      "id": 139,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Challenger, Professor (Fictitious character) -- Fiction",
+        "Fantasy fiction",
+        "South America -- Fiction",
+        "Prehistoric peoples -- Fiction",
+        "Dinosaurs -- Fiction",
+        "PR"
+      ],
+      "title": "The Lost World"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1840,
+          "death_year": 1928,
+          "name": "Hardy, Thomas"
+        }
+      ],
+      "authors": [
+        "Hardy, Thomas"
+      ],
+      "bookshelves": [
+        "Banned Books from Anne Haight's list",
+        "Category: Novels",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/153/pg153.cover.medium.jpg",
+      "downloadCount": 2900,
+      "epubUrl": "https://www.gutenberg.org/ebooks/153.epub3.images",
+      "id": 153,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Adultery -- Fiction",
+        "Didactic fiction",
+        "Love stories",
+        "Illegitimate children -- Fiction",
+        "Wessex (England) -- Fiction",
+        "Stonemasons -- Fiction",
+        "Children -- Death -- Fiction",
+        "Unmarried couples -- Fiction",
+        "PR"
+      ],
+      "title": "Jude the Obscure"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1762,
+          "death_year": 1824,
+          "name": "Rowson, Mrs."
+        }
+      ],
+      "authors": [
+        "Rowson, Mrs."
+      ],
+      "bookshelves": [
+        "Category: Novels",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/171/pg171.cover.medium.jpg",
+      "downloadCount": 1456,
+      "epubUrl": "https://www.gutenberg.org/ebooks/171.epub3.images",
+      "id": 171,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "British -- New York (State) -- New York -- Fiction",
+        "Runaway teenagers -- Fiction",
+        "New York (N.Y.) -- Fiction",
+        "Didactic fiction",
+        "Psychological fiction",
+        "Illegitimate children -- Fiction",
+        "Soldiers -- Fiction",
+        "Elopement -- Fiction",
+        "Teenage girls -- Fiction",
+        "Betrayal -- Fiction",
+        "Seduction -- Fiction",
+        "Teenage pregnancy -- Fiction"
+      ],
+      "title": "Charlotte Temple"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1890,
+          "death_year": 1957,
+          "name": "Morley, Christopher"
+        }
+      ],
+      "authors": [
+        "Morley, Christopher"
+      ],
+      "bookshelves": [
+        "Bibliomania",
+        "Category: Novels",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/172/pg172.cover.medium.jpg",
+      "downloadCount": 1312,
+      "epubUrl": "https://www.gutenberg.org/ebooks/172.epub3.images",
+      "id": 172,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Booksellers and bookselling -- Fiction",
+        "Brooklyn (New York, N.Y.) -- Fiction",
+        "Mystery and detective stories",
+        "PS"
+      ],
+      "title": "The Haunted Bookshop"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1843,
+          "death_year": 1916,
+          "name": "James, Henry"
+        }
+      ],
+      "authors": [
+        "James, Henry"
+      ],
+      "bookshelves": [
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/208/pg208.cover.medium.jpg",
+      "downloadCount": 2444,
+      "epubUrl": "https://www.gutenberg.org/ebooks/208.epub3.images",
+      "id": 208,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Psychological fiction",
+        "Young women -- Fiction",
+        "Europe -- Fiction",
+        "Americans -- Europe -- Fiction",
+        "PS"
+      ],
+      "title": "Daisy Miller: A Study"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": null,
+          "death_year": null,
+          "name": "Berens, E. M."
+        }
+      ],
+      "authors": [
+        "Berens, E. M."
+      ],
+      "bookshelves": [
+        "Greece",
+        "Mythology",
+        "Category: Mythology, Legends & Folklore"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/22381/pg22381.cover.medium.jpg",
+      "downloadCount": 11266,
+      "epubUrl": "https://www.gutenberg.org/ebooks/22381.epub3.images",
+      "id": 22381,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Mythology, Classical",
+        "BL"
+      ],
+      "title": "Myths and Legends of Ancient Greece and Rome"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1819,
+          "death_year": 1891,
+          "name": "Melville, Herman"
+        }
+      ],
+      "authors": [
+        "Melville, Herman"
+      ],
+      "bookshelves": [
+        "Category: Novels",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/34970/pg34970.cover.medium.jpg",
+      "downloadCount": 1606,
+      "epubUrl": "https://www.gutenberg.org/ebooks/34970.epub3.images",
+      "id": 34970,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Autobiographical fiction",
+        "Psychological fiction",
+        "Domestic fiction",
+        "Male authors -- Fiction",
+        "Men -- Fiction",
+        "PS"
+      ],
+      "title": "Pierre; or The Ambiguities"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": null,
+          "death_year": null,
+          "name": "Rabelais, Fran\u00e7ois"
+        }
+      ],
+      "authors": [
+        "Rabelais, Fran\u00e7ois"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Banned Books from Anne Haight's list",
+        "Category: Humour",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: French Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/1200/pg1200.cover.medium.jpg",
+      "downloadCount": 11962,
+      "epubUrl": "https://www.gutenberg.org/ebooks/1200.epub3.images",
+      "id": 1200,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Giants -- Fiction",
+        "Fantasy fiction, French -- Translations into English",
+        "Gargantua (Legendary character) -- Fiction",
+        "PQ"
+      ],
+      "title": "Gargantua and Pantagruel"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1837,
+          "death_year": 1920,
+          "name": "Howells, William Dean"
+        }
+      ],
+      "authors": [
+        "Howells, William Dean"
+      ],
+      "bookshelves": [
+        "Category: Novels",
+        "Category: American Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/8295/pg8295.cover.medium.jpg",
+      "downloadCount": 508,
+      "epubUrl": "https://www.gutenberg.org/ebooks/8295.epub3.images",
+      "id": 8295,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "New York (N.Y.) -- Fiction",
+        "Utopias -- Fiction",
+        "Love stories",
+        "Epistolary fiction",
+        "Utopian fiction",
+        "United States -- Social conditions -- 1865-1918 -- Fiction",
+        "PS"
+      ],
+      "title": "Through the Eye of the Needle: A Romance"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1832,
+          "death_year": 1898,
+          "name": "Carroll, Lewis"
+        }
+      ],
+      "authors": [
+        "Carroll, Lewis"
+      ],
+      "bookshelves": [
+        "Banned Books from Anne Haight's list",
+        "Category: Children & Young Adult Reading",
+        "Category: Science-Fiction & Fantasy",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/28885/pg28885.cover.medium.jpg",
+      "downloadCount": 2059,
+      "epubUrl": "https://www.gutenberg.org/ebooks/28885.epub3.images",
+      "id": 28885,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Fantasy fiction",
+        "Children's stories",
+        "Imaginary places -- Juvenile fiction",
+        "Alice (Fictitious character from Carroll) -- Juvenile fiction",
+        "PR",
+        "PZ"
+      ],
+      "title": "Alice's Adventures in Wonderland\nIllustrated by Arthur Rackham. With a Proem by Austin Dobson"
+    },
+    {
+      "authorDetails": [],
+      "authors": [],
+      "bookshelves": [
+        "Category: Mythology, Legends & Folklore",
+        "Category: Classics of Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/15474/pg15474.cover.medium.jpg",
+      "downloadCount": 14776,
+      "epubUrl": "https://www.gutenberg.org/ebooks/15474.epub3.images",
+      "id": 15474,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Epic literature, Sanskrit",
+        "PK"
+      ],
+      "title": "The Mahabharata of Krishna-Dwaipayana Vyasa, Volume 1\nBooks 1, 2 and 3"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1737,
+          "death_year": 1809,
+          "name": "Paine, Thomas"
+        }
+      ],
+      "authors": [
+        "Paine, Thomas"
+      ],
+      "bookshelves": [
+        "Category: Essays, Letters & Speeches",
+        "Category: History - American",
+        "Category: History - British",
+        "Category: History - Modern (1750+)",
+        "Category: Politics"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/147/pg147.cover.medium.jpg",
+      "downloadCount": 7006,
+      "epubUrl": "https://www.gutenberg.org/ebooks/147.epub3.images",
+      "id": 147,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "United States -- Politics and government -- 1775-1783",
+        "Political science -- Early works to 1800",
+        "Monarchy -- Early works to 1800",
+        "E201"
+      ],
+      "title": "Common Sense"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1819,
+          "death_year": 1880,
+          "name": "Eliot, George"
+        }
+      ],
+      "authors": [
+        "Eliot, George"
+      ],
+      "bookshelves": [
+        "Historical Fiction",
+        "Best Books Ever Listings",
+        "Category: Novels",
+        "Category: Classics of Literature",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/145/pg145.cover.medium.jpg",
+      "downloadCount": 67843,
+      "epubUrl": "https://www.gutenberg.org/ebooks/145.epub3.images",
+      "id": 145,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Didactic fiction",
+        "City and town life -- Fiction",
+        "England -- Fiction",
+        "Young women -- Fiction",
+        "Love stories",
+        "Domestic fiction",
+        "Married people -- Fiction",
+        "Bildungsromans",
+        "PR"
+      ],
+      "title": "Middlemarch"
+    },
+    {
+      "authorDetails": [
+        {
+          "birth_year": 1885,
+          "death_year": 1930,
+          "name": "Lawrence, D. H. (David Herbert)"
+        }
+      ],
+      "authors": [
+        "Lawrence, D. H. (David Herbert)"
+      ],
+      "bookshelves": [
+        "Best Books Ever Listings",
+        "Banned Books from Anne Haight's list",
+        "Banned Books List from the American Library Association",
+        "Category: Novels",
+        "Category: British Literature"
+      ],
+      "copyright": false,
+      "coverUrl": "https://www.gutenberg.org/cache/epub/217/pg217.cover.medium.jpg",
+      "downloadCount": 2119,
+      "epubUrl": "https://www.gutenberg.org/ebooks/217.epub3.images",
+      "id": 217,
+      "languages": [
+        "en"
+      ],
+      "mediaType": "Text",
+      "subjects": [
+        "Autobiographical fiction",
+        "England -- Fiction",
+        "Domestic fiction",
+        "Bildungsromans",
+        "Young men -- Fiction",
+        "Working class families -- Fiction",
+        "PR"
+      ],
+      "title": "Sons and Lovers"
+    }
+  ],
+  "generatedBy": "tool/generate_gutenberg_starter_catalog.py",
+  "source": "Project Gutenberg RDF per-book metadata"
+}

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'book_chunk.dart';
 import 'bookmark.dart';
 import 'reading_settings.dart';
+import 'stable_book_location.dart';
 
 @immutable
 class BookReadingSummary {
@@ -151,6 +152,7 @@ class BookReadingSummary {
 @immutable
 class BookMetadata {
   final String id; // filename, e.g., 'book.epub'
+  final String? managedFilePath; // exact app-managed EPUB path
   final String title;
   final String author;
   final String embeddedTitle;
@@ -171,6 +173,7 @@ class BookMetadata {
   final String? originalSourceAuthor;
   final double? metadataConfidence;
   final int lastReadIndex;
+  final StableBookLocation? lastReadLocation;
   final int totalChunks;
   final int lastReadTime; // Epoch milliseconds
   final AppTheme? theme; // book-specific theme
@@ -178,6 +181,7 @@ class BookMetadata {
 
   BookMetadata({
     required this.id,
+    this.managedFilePath,
     required this.title,
     required this.author,
     String? embeddedTitle,
@@ -198,6 +202,7 @@ class BookMetadata {
     this.originalSourceAuthor,
     this.metadataConfidence,
     this.lastReadIndex = 0,
+    this.lastReadLocation,
     this.totalChunks = 0,
     int? lastReadTime,
     this.theme,
@@ -215,6 +220,7 @@ class BookMetadata {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
+      'managedFilePath': managedFilePath,
       'title': title,
       'author': author,
       'embeddedTitle': embeddedTitle,
@@ -235,6 +241,8 @@ class BookMetadata {
       'originalSourceAuthor': originalSourceAuthor,
       'metadataConfidence': metadataConfidence,
       'lastReadIndex': lastReadIndex,
+      if (lastReadLocation != null)
+        'lastReadLocation': lastReadLocation!.toJson(),
       'totalChunks': totalChunks,
       'lastReadTime': lastReadTime,
       'theme': theme?.name,
@@ -246,6 +254,7 @@ class BookMetadata {
     final rawReadingSummary = map['readingSummary'];
     return BookMetadata(
       id: map['id'] ?? '',
+      managedFilePath: map['managedFilePath'],
       title: map['title'] ?? '',
       author: map['author'] ?? '',
       embeddedTitle: map['embeddedTitle'] ?? map['title'] ?? '',
@@ -266,6 +275,9 @@ class BookMetadata {
       originalSourceAuthor: map['originalSourceAuthor'],
       metadataConfidence: (map['metadataConfidence'] as num?)?.toDouble(),
       lastReadIndex: (map['lastReadIndex'] as num?)?.toInt() ?? 0,
+      lastReadLocation: StableBookLocation.maybeFromJson(
+        map['lastReadLocation'],
+      ),
       totalChunks: (map['totalChunks'] as num?)?.toInt() ?? 0,
       lastReadTime: (map['lastReadTime'] as num?)?.toInt(),
       theme: map['theme'] != null
@@ -289,6 +301,7 @@ class BookMetadata {
 
   BookMetadata copyWith({
     String? id,
+    String? managedFilePath,
     String? title,
     String? author,
     String? embeddedTitle,
@@ -309,15 +322,20 @@ class BookMetadata {
     String? originalSourceAuthor,
     double? metadataConfidence,
     int? lastReadIndex,
+    StableBookLocation? lastReadLocation,
     int? totalChunks,
     int? lastReadTime,
     AppTheme? theme,
     BookReadingSummary? readingSummary,
     bool clearTheme = false,
     bool clearReadingSummary = false,
+    bool clearManagedFilePath = false,
   }) {
     return BookMetadata(
       id: id ?? this.id,
+      managedFilePath: clearManagedFilePath
+          ? null
+          : (managedFilePath ?? this.managedFilePath),
       title: title ?? this.title,
       author: author ?? this.author,
       embeddedTitle: embeddedTitle ?? this.embeddedTitle,
@@ -338,6 +356,7 @@ class BookMetadata {
       originalSourceAuthor: originalSourceAuthor ?? this.originalSourceAuthor,
       metadataConfidence: metadataConfidence ?? this.metadataConfidence,
       lastReadIndex: lastReadIndex ?? this.lastReadIndex,
+      lastReadLocation: lastReadLocation ?? this.lastReadLocation,
       totalChunks: totalChunks ?? this.totalChunks,
       lastReadTime: lastReadTime ?? this.lastReadTime,
       theme: clearTheme ? null : (theme ?? this.theme),

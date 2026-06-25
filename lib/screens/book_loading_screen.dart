@@ -10,7 +10,34 @@ import '../models/book_metadata.dart';
 import '../models/reading_settings.dart';
 import '../services/book_metadata_service.dart';
 import '../services/book_preparse_service.dart';
+import '../services/lazy_reader_route_service.dart';
+import '../services/reader_open_service.dart';
 import 'reader_screen.dart';
+
+const bool _lazyReaderOpenDiagEnabled = bool.fromEnvironment(
+  'NALORI_EPUB_DIAG',
+);
+const String _lazyReaderOpenDiagPrefix = 'NALORI_EPUB_DIAG';
+const bool _lazyReaderEnabled = bool.fromEnvironment(
+  'NALORI_ENABLE_LAZY_READER',
+  defaultValue: true,
+);
+const String _lazyReaderOnlyBook = String.fromEnvironment(
+  'NALORI_LAZY_READER_ONLY_BOOK',
+);
+
+void _lazyReaderOpenDiagLog(String phase, Map<String, Object?> fields) {
+  if (!_lazyReaderOpenDiagEnabled) return;
+  final parts = <String>[
+    _lazyReaderOpenDiagPrefix,
+    'phase=$phase',
+    'ts=${DateTime.now().toIso8601String()}',
+    for (final entry in fields.entries)
+      if (entry.value != null) '${entry.key}=${entry.value}',
+  ];
+  // ignore: avoid_print
+  print(parts.join(' '));
+}
 
 /// Transitional loading screen — displayed while parsing an EPUB.
 class BookLoadingScreen extends StatefulWidget {
@@ -43,6 +70,17 @@ class _BookLoadingScreenState extends State<BookLoadingScreen>
   String? _errorMessage;
   BookMetadata? _metadata;
   bool _hasCover = false;
+  final LazyReaderRouteService _lazyRouteService = LazyReaderRouteService();
+  final ReaderOpenService _readerOpenService = ReaderOpenService();
+
+  Future<bool> _shouldUseLazyReader(String bookId) async {
+    if (await _lazyRouteService.isDisabledForBook(bookId)) return false;
+    if (!_lazyReaderEnabled) return false;
+    if (_lazyReaderOnlyBook.isNotEmpty && _lazyReaderOnlyBook != bookId) {
+      return false;
+    }
+    return true;
+  }
 
   @override
   void initState() {
@@ -79,32 +117,56 @@ class _BookLoadingScreenState extends State<BookLoadingScreen>
       });
     }
 
+    final lazyDisabledForBook = await _lazyRouteService.isDisabledForBook(
+      bookId,
+    );
+    final useLazyReader = await _shouldUseLazyReader(bookId);
+    final requiresLegacyPositionRestore =
+        useLazyReader &&
+        meta != null &&
+        meta.lastReadLocation == null &&
+        meta.lastReadIndex > 0;
+    _lazyReaderOpenDiagLog('reader_open_route', {
+      'book': bookId,
+      'route': useLazyReader && !requiresLegacyPositionRestore
+          ? 'lazy'
+          : 'legacy',
+      'reason': requiresLegacyPositionRestore
+          ? 'legacy_saved_position_requires_migration'
+          : useLazyReader
+          ? 'lazy_reader_enabled'
+          : 'lazy_reader_disabled_or_not_allowed',
+      'lazyDisabledForBook': lazyDisabledForBook,
+      'lastReadIndex': meta?.lastReadIndex,
+      'hasStableLastReadLocation': meta?.lastReadLocation != null,
+    });
+    _lazyReaderOpenDiagLog('continue_tapped', {
+      'book': bookId,
+      'lastReadIndex': meta?.lastReadIndex,
+      'hasStableLastReadLocation': meta?.lastReadLocation != null,
+    });
+    if (!useLazyReader || requiresLegacyPositionRestore) {
+      await _loadLegacy(bookId, metadataService);
+      return;
+    }
+
     try {
       if (mounted) {
         setState(() => _statusText = 'Loading book…');
       }
-      final parsed = await BookPreparseService.instance.ensureParsed(
-        widget.bookFile,
+      final result = await _readerOpenService.openLazy(
+        bookFile: widget.bookFile,
+        metadata: meta,
+        requestedLocation: meta?.lastReadLocation,
+        caller: 'book_loading_screen',
       );
 
-      if (!mounted) return;
-
-      final readingSummary = BookReadingSummary.fromParsedBook(
-        chunks: parsed.chunks,
-        chapters: parsed.chapters,
-      );
-      unawaited(
-        metadataService.updateReadingSummary(
-          bookId: bookId,
-          summary: readingSummary,
-          totalChunks: parsed.chunks.length,
-        ),
-      );
+      if (!mounted) {
+        await result.session.close();
+        return;
+      }
 
       setState(() => _statusText = 'Almost ready…');
-
-      // Small delay so the transition feels intentional
-      await Future.delayed(const Duration(milliseconds: 150));
 
       if (!mounted) return;
 
@@ -112,12 +174,91 @@ class _BookLoadingScreenState extends State<BookLoadingScreen>
         context,
         PageRouteBuilder(
           pageBuilder: (_, __, ___) => ReaderScreen(
-            title: parsed.title,
+            title: result.title,
             bookId: bookId,
-            chunks: parsed.chunks,
-            anchorMap: parsed.anchorMap,
-            chapters: parsed.chapters,
-            searchIndex: parsed.searchIndex,
+            chunks: result.window.chunks,
+            anchorMap: result.window.anchorMap,
+            chapters: result.window.chapters,
+            searchIndex: result.window.searchIndex,
+            initialOriginalChunkIndex: widget.initialOriginalChunkIndex,
+            initialOriginalStartOffset: widget.initialOriginalStartOffset,
+            initialSourceText: widget.initialSourceText,
+            lazySession: result.session,
+            initialStableLocation: result.targetLocation,
+            initialStableLocationsByChunkIndex:
+                result.window.locationsByChunkIndex,
+            initialHasContentBefore: result.window.hasContentBefore,
+            initialHasContentAfter: result.window.hasContentAfter,
+          ),
+          transitionsBuilder: (_, animation, __, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+        ),
+      );
+      _lazyReaderOpenDiagLog('lazy_reader_open_end', {
+        'book': bookId,
+        'elapsedMs': result.elapsedMs,
+      });
+
+      // Reader closed — pop the loading screen too so we return to book list
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _failed = true;
+        _errorMessage = e.toString();
+        _statusText = 'Failed to open book';
+      });
+    }
+  }
+
+  Future<void> _loadLegacy(
+    String bookId,
+    BookMetadataService metadataService,
+  ) async {
+    try {
+      if (mounted) setState(() => _statusText = 'Parsing book…');
+      final stopwatch = Stopwatch()..start();
+      final cached = await BookPreparseService.instance.ensureParsed(
+        widget.bookFile,
+      );
+      _lazyReaderOpenDiagLog('legacy_reader_ready', {
+        'book': bookId,
+        'sourceChunks': cached.chunks.length,
+        'chapters': cached.chapters.length,
+        'elapsedMs': stopwatch.elapsedMilliseconds,
+      });
+
+      if (!mounted) return;
+      final meta = metadataService.getMetadata(bookId);
+      if (meta != null && meta.totalChunks == 0) {
+        final readingSummary = BookReadingSummary.fromParsedBook(
+          chunks: cached.chunks,
+          chapters: cached.chapters,
+        );
+        unawaited(
+          metadataService.updateReadingSummary(
+            bookId: bookId,
+            summary: readingSummary,
+            totalChunks: cached.chunks.length,
+          ),
+        );
+      }
+
+      setState(() => _statusText = 'Almost ready…');
+      await Future.delayed(const Duration(milliseconds: 150));
+      if (!mounted) return;
+
+      await Navigator.push(
+        context,
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) => ReaderScreen(
+            title: cached.title,
+            bookId: bookId,
+            chunks: cached.chunks,
+            anchorMap: cached.anchorMap,
+            chapters: cached.chapters,
+            searchIndex: cached.searchIndex,
             initialOriginalChunkIndex: widget.initialOriginalChunkIndex,
             initialOriginalStartOffset: widget.initialOriginalStartOffset,
             initialSourceText: widget.initialSourceText,
@@ -128,7 +269,6 @@ class _BookLoadingScreenState extends State<BookLoadingScreen>
         ),
       );
 
-      // Reader closed — pop the loading screen too so we return to book list
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;

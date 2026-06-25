@@ -1,4 +1,38 @@
+import 'dart:convert';
+
 enum ReaderContentBlockType { paragraph, table, preformatted }
+
+const String _encodedTablePrefix = 'NALORI_TABLE_V1:';
+
+class ReaderTableCell {
+  final String text;
+  final bool isHeader;
+  final int columnSpan;
+  final int rowSpan;
+
+  const ReaderTableCell({
+    required this.text,
+    this.isHeader = false,
+    this.columnSpan = 1,
+    this.rowSpan = 1,
+  });
+
+  Map<String, Object?> toJson() => {
+    't': text,
+    if (isHeader) 'h': true,
+    if (columnSpan > 1) 'cs': columnSpan,
+    if (rowSpan > 1) 'rs': rowSpan,
+  };
+
+  factory ReaderTableCell.fromJson(Map<String, Object?> json) {
+    return ReaderTableCell(
+      text: json['t'] as String? ?? '',
+      isHeader: json['h'] == true,
+      columnSpan: (json['cs'] as num?)?.toInt().clamp(1, 24) ?? 1,
+      rowSpan: (json['rs'] as num?)?.toInt().clamp(1, 200) ?? 1,
+    );
+  }
+}
 
 class ReaderContentBlock {
   final ReaderContentBlockType type;
@@ -46,8 +80,35 @@ class ReaderContentBlock {
 class ReaderTableBlock {
   final List<String> headers;
   final List<List<String>> rows;
+  final List<List<ReaderTableCell>> cellRows;
 
-  const ReaderTableBlock({required this.headers, required this.rows});
+  const ReaderTableBlock({
+    required this.headers,
+    required this.rows,
+    this.cellRows = const [],
+  });
+
+  factory ReaderTableBlock.fromCellRows(List<List<ReaderTableCell>> cellRows) {
+    final expandedRows = _expandTableCellRows(cellRows);
+    if (expandedRows.isEmpty) {
+      return const ReaderTableBlock(headers: [], rows: []);
+    }
+
+    final firstRowHasHeaders =
+        cellRows.isNotEmpty &&
+        cellRows.first.isNotEmpty &&
+        cellRows.first.any((cell) => cell.isHeader);
+    final headers = firstRowHasHeaders ? expandedRows.first : <String>[];
+    final bodyRows = firstRowHasHeaders
+        ? expandedRows.skip(1).toList(growable: false)
+        : expandedRows;
+
+    return ReaderTableBlock(
+      headers: headers,
+      rows: bodyRows,
+      cellRows: cellRows,
+    );
+  }
 
   int get columnCount {
     final rowCounts = rows.map((row) => row.length);
@@ -59,6 +120,58 @@ class ReaderTableBlock {
       if (headers.isNotEmpty) headers.join(' '),
       for (final row in rows) row.join(' '),
     ].join('\n');
+  }
+}
+
+String encodeReaderTableBlock(ReaderTableBlock table) {
+  final cellRows = table.cellRows.isNotEmpty
+      ? table.cellRows
+      : <List<ReaderTableCell>>[
+          if (table.headers.isNotEmpty)
+            [
+              for (final cell in table.headers)
+                ReaderTableCell(text: cell, isHeader: true),
+            ],
+          for (final row in table.rows)
+            [for (final cell in row) ReaderTableCell(text: cell)],
+        ];
+  final jsonText = jsonEncode({
+    'rows': [
+      for (final row in cellRows) [for (final cell in row) cell.toJson()],
+    ],
+  });
+  return '$_encodedTablePrefix${base64Url.encode(utf8.encode(jsonText))}';
+}
+
+ReaderTableBlock? _decodeReaderTableBlock(String text) {
+  final trimmed = text.trim();
+  if (!trimmed.startsWith(_encodedTablePrefix)) return null;
+
+  try {
+    final encoded = trimmed.substring(_encodedTablePrefix.length);
+    final decoded = utf8.decode(base64Url.decode(encoded));
+    final json = jsonDecode(decoded) as Map<String, Object?>;
+    final rowsJson = json['rows'] as List?;
+    if (rowsJson == null) return null;
+
+    final cellRows = rowsJson
+        .map(
+          (row) => (row as List)
+              .map(
+                (cell) =>
+                    ReaderTableCell.fromJson(Map<String, Object?>.from(cell)),
+              )
+              .toList(growable: false),
+        )
+        .where((row) => row.isNotEmpty)
+        .toList(growable: false);
+    if (cellRows.isEmpty) return null;
+
+    final table = ReaderTableBlock.fromCellRows(cellRows);
+    if (table.columnCount < 2 || table.rows.isEmpty) return null;
+    return table;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -83,6 +196,15 @@ List<ReaderContentBlock> parseReaderContentBlocks(String text) {
   }
 
   while (i < lines.length) {
+    final encodedTable = _parseEncodedTableAt(lines, i, text);
+    if (encodedTable != null) {
+      flushParagraphBefore(i);
+      blocks.add(encodedTable.block);
+      i = encodedTable.nextLineIndex;
+      paragraphStartLine = i;
+      continue;
+    }
+
     final parsed = _parseTableAt(lines, i, text);
     if (parsed != null) {
       final forwardAttached = _attachFollowingTableBody(parsed, lines, i, text);
@@ -118,6 +240,79 @@ List<ReaderContentBlock> parseReaderContentBlocks(String text) {
     return [ReaderContentBlock.paragraph(rawText: text, startOffset: 0)];
   }
   return cleanedBlocks;
+}
+
+List<List<String>> _expandTableCellRows(List<List<ReaderTableCell>> cellRows) {
+  final expanded = <List<String>>[];
+  final rowSpans = <int, ({String text, int remaining})>{};
+
+  for (final sourceRow in cellRows) {
+    final row = <String>[];
+    var column = 0;
+
+    void fillActiveSpans() {
+      while (rowSpans.containsKey(column)) {
+        final span = rowSpans[column]!;
+        row.add(span.text);
+        if (span.remaining <= 1) {
+          rowSpans.remove(column);
+        } else {
+          rowSpans[column] = (text: span.text, remaining: span.remaining - 1);
+        }
+        column++;
+      }
+    }
+
+    fillActiveSpans();
+    for (final cell in sourceRow) {
+      fillActiveSpans();
+      final columnSpan = cell.columnSpan.clamp(1, 24);
+      final rowSpan = cell.rowSpan.clamp(1, 200);
+      for (var i = 0; i < columnSpan; i++) {
+        row.add(i == 0 ? cell.text : '');
+        if (rowSpan > 1) {
+          rowSpans[column + i] = (
+            text: i == 0 ? cell.text : '',
+            remaining: rowSpan - 1,
+          );
+        }
+      }
+      column += columnSpan;
+    }
+    fillActiveSpans();
+    if (row.any((cell) => cell.trim().isNotEmpty)) {
+      expanded.add(row);
+    }
+  }
+
+  while (rowSpans.isNotEmpty) {
+    final row = <String>[];
+    var column = 0;
+    final lastColumn = rowSpans.keys.fold<int>(0, (a, b) => a > b ? a : b);
+    while (column <= lastColumn) {
+      final span = rowSpans[column];
+      if (span == null) {
+        row.add('');
+      } else {
+        row.add(span.text);
+        if (span.remaining <= 1) {
+          rowSpans.remove(column);
+        } else {
+          rowSpans[column] = (text: span.text, remaining: span.remaining - 1);
+        }
+      }
+      column++;
+    }
+    if (row.any((cell) => cell.trim().isNotEmpty)) {
+      expanded.add(row);
+    }
+  }
+
+  final columnCount = expanded.fold<int>(
+    0,
+    (max, row) => row.length > max ? row.length : max,
+  );
+  return [for (final row in expanded) _normalizeCells(row, columnCount)];
 }
 
 bool containsReaderTable(String text) {
@@ -239,6 +434,26 @@ _ParsedTable? _parseTableAt(List<_Line> lines, int startIndex, String source) {
       _parseDelimitedTableAt(lines, startIndex, source, _tabCells) ??
       _parseDelimitedTableAt(lines, startIndex, source, _spacedCells) ??
       _parsePreformattedTableAt(lines, startIndex, source);
+}
+
+_ParsedTable? _parseEncodedTableAt(
+  List<_Line> lines,
+  int startIndex,
+  String source,
+) {
+  final line = lines[startIndex];
+  final table = _decodeReaderTableBlock(line.text);
+  if (table == null) return null;
+
+  return _ParsedTable(
+    ReaderContentBlock.table(
+      rawText: source.substring(line.startOffset, line.endOffset),
+      startOffset: line.startOffset,
+      table: table,
+    ),
+    startIndex + 1,
+    hasExplicitHeader: table.headers.any((header) => header.trim().isNotEmpty),
+  );
 }
 
 _ParsedTable? _parsePipeTableAt(

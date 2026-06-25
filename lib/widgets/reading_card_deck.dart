@@ -74,6 +74,8 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
   VelocityTracker? _velocityTracker;
   Timer? _swipeStartTimer;
   final Map<_DeckCardCacheKey, Widget> _cardWidgetCache = {};
+  bool _isDisposed = false;
+  double _lastLayoutExtent = 1;
 
   @override
   void initState() {
@@ -81,6 +83,7 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
     widget.controller?._attach(this);
     _settleController = AnimationController(vsync: this)
       ..addListener(() {
+        if (!mounted || _isDisposed) return;
         final animation = _settleAnimation;
         if (animation == null) return;
         setState(() => _dragOffset = animation.value);
@@ -105,6 +108,7 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
     }
     if (oldWidget.currentIndex != widget.currentIndex ||
         oldWidget.itemCount != widget.itemCount) {
+      if (!mounted || _isDisposed) return;
       _settleController.stop();
       _settleAnimation = null;
       _dragOffset = 0;
@@ -113,7 +117,11 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
 
   @override
   void dispose() {
+    _isDisposed = true;
     _swipeStartTimer?.cancel();
+    _swipeStartTimer = null;
+    _activePointer = null;
+    _velocityTracker = null;
     widget.controller?._detach(this);
     _settleController.dispose();
     super.dispose();
@@ -149,6 +157,7 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
   }
 
   void _handlePointerDown(PointerDownEvent event) {
+    if (!mounted || _isDisposed) return;
     if (!widget.canSwipe || widget.itemCount <= 1 || _activePointer != null) {
       return;
     }
@@ -161,11 +170,13 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
     _velocityTracker = VelocityTracker.withKind(event.kind)
       ..addPosition(event.timeStamp, event.position);
     _swipeStartTimer = Timer(_swipeStartTimeout, () {
+      if (!mounted || _isDisposed) return;
       if (!_isTrackingSwipe) _resetPointerTracking();
     });
   }
 
   void _handlePointerMove(PointerMoveEvent event) {
+    if (!mounted || _isDisposed) return;
     if (!widget.canSwipe || widget.itemCount <= 1) return;
     if (event.pointer != _activePointer) return;
 
@@ -199,12 +210,14 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
     }
 
     _settleController.stop();
+    if (!mounted || _isDisposed) return;
     setState(() {
       _dragOffset = _resistedOffset(_dragOffset + _primaryDelta(delta));
     });
   }
 
   void _handlePointerUp(PointerUpEvent event) {
+    if (!mounted || _isDisposed) return;
     if (event.pointer != _activePointer) return;
     final velocity = _velocityTracker?.getVelocity().pixelsPerSecond;
     final primaryVelocity = velocity == null ? 0.0 : _primaryDelta(velocity);
@@ -215,6 +228,7 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
   }
 
   void _handlePointerCancel(PointerCancelEvent event) {
+    if (!mounted || _isDisposed) return;
     if (event.pointer != _activePointer) return;
     _resetPointerTracking();
     if (_dragOffset != 0) {
@@ -223,14 +237,13 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
   }
 
   void _handleDragEnd(double primaryVelocity) {
+    if (!mounted || _isDisposed) return;
     if (!widget.canSwipe || widget.itemCount <= 1) {
       _animateDragTo(0, const Duration(milliseconds: 180), Curves.easeOutCubic);
       return;
     }
 
-    final size = context.size ?? Size.zero;
-    final extent = widget.axis == Axis.vertical ? size.height : size.width;
-    final safeExtent = math.max(extent, 1).toDouble();
+    final safeExtent = math.max(_lastLayoutExtent, 1).toDouble();
     final progress = (_dragOffset.abs() / safeExtent).clamp(0.0, 1.0);
     final wantsNext =
         _dragOffset < 0 &&
@@ -266,13 +279,12 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
   }
 
   bool _animateToIndex(int targetIndex, Duration duration, Curve curve) {
+    if (!mounted || _isDisposed) return false;
     if (widget.itemCount <= 1) return false;
     if (targetIndex < 0 || targetIndex >= widget.itemCount) return false;
     if ((targetIndex - widget.currentIndex).abs() != 1) return false;
 
-    final size = context.size ?? Size.zero;
-    final extent = widget.axis == Axis.vertical ? size.height : size.width;
-    final safeExtent = math.max(extent, 1).toDouble();
+    final safeExtent = math.max(_lastLayoutExtent, 1).toDouble();
     final endOffset = targetIndex > widget.currentIndex
         ? -safeExtent
         : safeExtent;
@@ -295,6 +307,7 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
     Curve curve, {
     VoidCallback? onComplete,
   }) {
+    if (!mounted || _isDisposed) return;
     _settleController.stop();
     _settleController.duration = duration;
     _settleAnimation = Tween<double>(
@@ -302,7 +315,7 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
       end: target,
     ).animate(CurvedAnimation(parent: _settleController, curve: curve));
     _settleController.forward(from: 0).whenComplete(() {
-      if (!mounted) return;
+      if (!mounted || _isDisposed) return;
       if (onComplete != null) {
         onComplete();
       } else {
@@ -353,7 +366,8 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
         final extent = widget.axis == Axis.vertical
             ? constraints.maxHeight
             : constraints.maxWidth;
-        return _buildDeck(context, math.max(extent, 1).toDouble());
+        _lastLayoutExtent = math.max(extent, 1).toDouble();
+        return _buildDeck(context, _lastLayoutExtent);
       },
     );
   }

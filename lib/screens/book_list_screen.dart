@@ -160,6 +160,10 @@ class _BookListScreenState extends State<BookListScreen> {
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _publicDomainBookService.maybePrefetchDefaultList();
+        if (widget.initiallyOpenFile != null) {
+          BookPreparseService.instance.cancelQueue();
+          return;
+        }
         BookPreparseService.instance.queueBooks(validBooks);
       });
     }
@@ -294,6 +298,11 @@ class _BookListScreenState extends State<BookListScreen> {
           );
           return; // Stop here, don't refresh library to show a ghost
         }
+      } else if (meta.managedFilePath != imported.path) {
+        await _metadataService.updateManagedFilePath(
+          bookId: bookId,
+          managedFilePath: imported.path,
+        );
       }
       if (_enhanceBookDetailsOnline) {
         await _metadataService.enhanceMetadataFromOpenLibrary(bookId);
@@ -306,12 +315,20 @@ class _BookListScreenState extends State<BookListScreen> {
   }
 
   Future<void> _openBook(File file) async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => BookLoadingScreen(bookFile: file, settings: _settings),
-      ),
-    );
+    final bookId = p.basename(file.path);
+    BookPreparseService.instance.cancelQueue();
+    BookPreparseService.instance.beginForegroundWork('readerOpen:$bookId');
+    try {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              BookLoadingScreen(bookFile: file, settings: _settings),
+        ),
+      );
+    } finally {
+      BookPreparseService.instance.endForegroundWork('readerOpen:$bookId');
+    }
 
     // Re-sort and refresh UI when returning from reading
     _refreshLibrary();

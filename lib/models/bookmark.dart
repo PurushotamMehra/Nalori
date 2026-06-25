@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'stable_book_location.dart';
+
 /// Predefined bookmark colors.
 /// Index 0 is the default (Instagram pink).
 const List<Color> kBookmarkColors = [
@@ -54,6 +56,7 @@ class Bookmark {
   final String name;
   final DateTime createdAt;
   final String? previewText;
+  final StableBookLocation? stableLocation;
 
   /// Index into [kBookmarkColors]. Defaults to 0 (pink).
   final int colorIndex;
@@ -67,6 +70,7 @@ class Bookmark {
     this.originalStartOffset = 0,
     DateTime? createdAt,
     this.previewText,
+    this.stableLocation,
     this.colorIndex = 0,
     this.colorValue,
   }) : createdAt = createdAt ?? DateTime.now();
@@ -91,6 +95,7 @@ class Bookmark {
     String? name,
     DateTime? createdAt,
     String? previewText,
+    StableBookLocation? stableLocation,
     int? colorIndex,
     int? colorValue,
     bool clearColorValue = false,
@@ -101,6 +106,7 @@ class Bookmark {
       name: name ?? this.name,
       createdAt: createdAt ?? this.createdAt,
       previewText: previewText ?? this.previewText,
+      stableLocation: stableLocation ?? this.stableLocation,
       colorIndex: colorIndex ?? this.colorIndex,
       colorValue: clearColorValue ? null : colorValue ?? this.colorValue,
     );
@@ -113,6 +119,7 @@ class Bookmark {
     'createdAt': createdAt.toIso8601String(),
     if (previewText != null && previewText!.isNotEmpty)
       'previewText': previewText,
+    if (stableLocation != null) 'stableLocation': stableLocation!.toJson(),
     'colorIndex': colorIndex,
     if (colorValue != null) 'colorValue': colorValue,
   };
@@ -123,6 +130,7 @@ class Bookmark {
     name: json['name'] as String,
     createdAt: DateTime.parse(json['createdAt'] as String),
     previewText: json['previewText'] as String?,
+    stableLocation: StableBookLocation.maybeFromJson(json['stableLocation']),
     colorIndex: (json['colorIndex'] as int?) ?? 0,
     colorValue: _parseColorValue(json['colorValue'] ?? json['color']),
   );
@@ -153,6 +161,7 @@ int? _parseColorValue(Object? raw) {
 class ChapterInfo {
   final String title;
   final int chunkIndex;
+  final StableBookLocation? stableLocation;
 
   /// 0 = top-level (e.g. "Part I"), 1 = chapter, 2 = sub-section, etc.
   final int depth;
@@ -163,6 +172,7 @@ class ChapterInfo {
   const ChapterInfo({
     required this.title,
     required this.chunkIndex,
+    this.stableLocation,
     this.depth = 0,
     this.children = const [],
   });
@@ -170,6 +180,7 @@ class ChapterInfo {
   Map<String, dynamic> toJson() => {
     't': title,
     'ci': chunkIndex,
+    if (stableLocation != null) 'loc': stableLocation!.toJson(),
     'd': depth,
     if (children.isNotEmpty) 'ch': children.map((c) => c.toJson()).toList(),
   };
@@ -177,6 +188,7 @@ class ChapterInfo {
   factory ChapterInfo.fromJson(Map<String, dynamic> json) => ChapterInfo(
     title: json['t'] as String,
     chunkIndex: json['ci'] as int,
+    stableLocation: StableBookLocation.maybeFromJson(json['loc']),
     depth: json['d'] as int? ?? 0,
     children: json['ch'] != null
         ? (json['ch'] as List)

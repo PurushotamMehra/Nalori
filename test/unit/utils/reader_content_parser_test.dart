@@ -210,6 +210,38 @@ radius | Optional value''';
       expect(table.rows.single, ['latitude', 'decimal']);
     });
 
+    test('decodes preserved EPUB HTML table blocks with spans', () {
+      final encoded = encodeReaderTableBlock(
+        ReaderTableBlock.fromCellRows([
+          const [
+            ReaderTableCell(text: 'Speaker', isHeader: true),
+            ReaderTableCell(text: 'Line', isHeader: true, columnSpan: 2),
+          ],
+          const [
+            ReaderTableCell(text: 'Ada', rowSpan: 2),
+            ReaderTableCell(text: 'First remark'),
+            ReaderTableCell(text: 'Tone'),
+          ],
+          const [
+            ReaderTableCell(text: 'Second remark'),
+            ReaderTableCell(text: 'Aside'),
+          ],
+        ]),
+      );
+
+      final blocks = parseReaderContentBlocks(encoded);
+      final table = blocks.single.table!;
+
+      expect(blocks.single.type, ReaderContentBlockType.table);
+      expect(table.headers, ['Speaker', 'Line', '']);
+      expect(table.rows, [
+        ['Ada', 'First remark', 'Tone'],
+        ['Ada', 'Second remark', 'Aside'],
+      ]);
+      expect(table.cellRows.first[1].columnSpan, 2);
+      expect(table.cellRows[1].first.rowSpan, 2);
+    });
+
     test('does not detect normal prose as a table', () {
       const text =
           'This sentence mentions Field | Description once, but it is prose.';
