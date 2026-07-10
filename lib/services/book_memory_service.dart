@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import '../models/book_memory_entry.dart';
 import '../models/book_chunk.dart';
 import '../models/book_metadata.dart';
@@ -9,6 +11,7 @@ import 'book_character_occurrence_service.dart';
 import 'book_cache_service.dart';
 import 'book_memory_entry_service.dart';
 import 'book_metadata_service.dart';
+import 'book_preparse_service.dart';
 import 'bookmark_service.dart';
 import 'dictionary_service.dart';
 import 'highlight_service.dart';
@@ -16,14 +19,17 @@ import 'highlight_service.dart';
 class BookMemoryService {
   final BookMetadataService _metadataService;
   final BookCacheService _cacheService;
+  final Future<BookPreparationResult> Function(File file)? _prepareBook;
 
   BookMemoryService({
     BookMetadataService? metadataService,
     BookCacheService? cacheService,
+    Future<BookPreparationResult> Function(File file)? prepareBook,
   }) : _metadataService = metadataService ?? BookMetadataService(),
-       _cacheService = cacheService ?? BookCacheService();
+       _cacheService = cacheService ?? BookCacheService(),
+       _prepareBook = prepareBook;
 
-  Future<BookMemorySnapshot> load(String bookId) async {
+  Future<BookMemorySnapshot> load(String bookId, {File? bookFile}) async {
     await _metadataService.init();
 
     final metadata = _metadataService.getMetadata(bookId);
@@ -31,7 +37,15 @@ class BookMemoryService {
     final highlights = await HighlightService(bookId: bookId).load();
     final words = await DictionaryService(bookId: bookId).loadWords();
     final entries = await BookMemoryEntryService(bookId: bookId).loadForBook();
-    final cached = await _cacheService.loadCachedBook(bookId);
+    CachedBook? cached;
+    if (bookFile != null) {
+      final prepareBook =
+          _prepareBook ?? BookPreparseService.instance.ensureParsed;
+      final preparation = await prepareBook(bookFile);
+      cached = preparation.cachedBook;
+    } else {
+      cached = await _cacheService.loadCachedBook(bookId);
+    }
     final occurrenceService = BookCharacterOccurrenceService(bookId: bookId);
     var occurrenceIndex = await occurrenceService.load();
 

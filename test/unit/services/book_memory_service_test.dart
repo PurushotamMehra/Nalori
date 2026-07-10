@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/book_chunk.dart';
 import 'package:nalori/models/book_memory_entry.dart';
@@ -6,8 +8,18 @@ import 'package:nalori/models/highlight.dart';
 import 'package:nalori/models/saved_word.dart';
 import 'package:nalori/services/book_character_occurrence_service.dart';
 import 'package:nalori/services/book_memory_service.dart';
+import 'package:nalori/services/book_preparse_service.dart';
+import 'package:nalori/services/book_cache_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  PathProviderPlatform.instance = _TestPathProvider();
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
   Highlight highlight({
     required String id,
     required String text,
@@ -28,6 +40,38 @@ void main() {
       createdAt: createdAt ?? DateTime(2026, 5),
     );
   }
+
+  test(
+    'explicit Book Memory preparation uses the requested book only',
+    () async {
+      var prepareCalls = 0;
+      final service = BookMemoryService(
+        prepareBook: (file) async {
+          prepareCalls++;
+          return BookPreparationResult(
+            status: BookPreparationStatus.stored,
+            bookId: 'memory.epub',
+            cacheLimitBytes: BookCacheService.parsedBookCacheLimitBytes,
+            cachedBook: const CachedBook(
+              title: 'Memory',
+              chunks: [],
+              anchorMap: {},
+              chapters: [],
+              searchIndex: {},
+            ),
+          );
+        },
+      );
+
+      final snapshot = await service.load(
+        'memory.epub',
+        bookFile: File('memory.epub'),
+      );
+
+      expect(prepareCalls, 1);
+      expect(snapshot.bookId, 'memory.epub');
+    },
+  );
 
   test('filters highlights, notes, and character groups', () {
     final memory = BookMemorySnapshot.fromStorage(
@@ -528,4 +572,10 @@ void main() {
       'Character thought',
     );
   });
+}
+
+class _TestPathProvider extends PathProviderPlatform {
+  @override
+  Future<String?> getApplicationDocumentsPath() async =>
+      Directory.systemTemp.path;
 }

@@ -93,6 +93,67 @@ class CachedDisplayChunks {
   });
 }
 
+/// Filesystem evidence used to validate a whole-book preparation result.
+class BookCacheFileIdentity {
+  final String bookId;
+  final int fileSizeBytes;
+  final int modifiedMs;
+
+  const BookCacheFileIdentity({
+    required this.bookId,
+    required this.fileSizeBytes,
+    required this.modifiedMs,
+  });
+}
+
+enum BookCacheProbeStatus {
+  validPayload,
+  noCache,
+  stale,
+  knownTooLarge,
+  missingPayload,
+  corruptMetadata,
+  unsupportedVersion,
+}
+
+class BookCacheProbe {
+  final BookCacheProbeStatus status;
+  final String bookId;
+  final BookCacheFileIdentity identity;
+  final int? serializedSizeBytes;
+  final int cacheLimitBytes;
+
+  const BookCacheProbe({
+    required this.status,
+    required this.bookId,
+    required this.identity,
+    required this.cacheLimitBytes,
+    this.serializedSizeBytes,
+  });
+
+  bool get hasValidPayload => status == BookCacheProbeStatus.validPayload;
+}
+
+enum BookCacheWriteStatus { stored, tooLarge, failed }
+
+class BookCacheWriteResult {
+  final BookCacheWriteStatus status;
+  final String bookId;
+  final BookCacheFileIdentity? identity;
+  final int? serializedSizeBytes;
+  final int cacheLimitBytes;
+  final String? failureMessage;
+
+  const BookCacheWriteResult({
+    required this.status,
+    required this.bookId,
+    required this.cacheLimitBytes,
+    this.identity,
+    this.serializedSizeBytes,
+    this.failureMessage,
+  });
+}
+
 /// Service managing disk cache for parsed EPUB books.
 ///
 /// Saves/loads parsed chunks, anchors, and chapters to/from compressed
@@ -104,17 +165,18 @@ class BookCacheService {
   // Singleton
   static final BookCacheService _instance = BookCacheService._internal();
   factory BookCacheService() => _instance;
-  BookCacheService._internal();
 
   static const String _cacheDirName = 'book_cache';
   static const String _manifestFileName = 'manifest.json';
   static const String _displayManifestFileName = 'display_manifest.json';
   static const int parsedBookCacheFormatVersion = 4;
+  static const String wholeBookPreparationVersion = 'whole_book_preparation_v1';
   static const int displayCacheFormatVersion = 2;
   static const String displayLayoutVersion = 'v11';
 
   /// Maximum total cache size in bytes (10 MB).
-  static const int _maxCacheSizeBytes = 10 * 1024 * 1024;
+  static const int parsedBookCacheLimitBytes = 10 * 1024 * 1024;
+  static const int _defaultMaxCacheSizeBytes = parsedBookCacheLimitBytes;
 
   /// Maximum total display-layout cache size in bytes (20 MB).
   static const int _maxDisplayCacheSizeBytes = 20 * 1024 * 1024;
@@ -126,19 +188,35 @@ class BookCacheService {
   static const int _maxFileNameLength = 200;
 
   Directory? _cacheDir;
+  final Directory? _testCacheDir;
+  final int _maxCacheSizeBytes;
 
   /// Manifest: bookId → { fileSizeBytes, lastAccessedMs }
   Map<String, _CacheEntry> _manifest = {};
+  Map<String, _PreparationEntry> _preparationManifest = {};
   Map<String, _CacheEntry> _displayManifest = {};
   bool _initialized = false;
+  bool _preparationManifestCorrupt = false;
+
+  BookCacheService._internal()
+    : _testCacheDir = null,
+      _maxCacheSizeBytes = _defaultMaxCacheSizeBytes;
+
+  @visibleForTesting
+  factory BookCacheService.testing({
+    required Directory cacheDirectory,
+    int maxCacheSizeBytes = _defaultMaxCacheSizeBytes,
+  }) => BookCacheService._testing(cacheDirectory, maxCacheSizeBytes);
+
+  BookCacheService._testing(this._testCacheDir, this._maxCacheSizeBytes);
 
   // ─── Initialization ─────────────────────────────────────────────────
 
   Future<void> _ensureInit() async {
     if (_initialized) return;
 
-    final appDir = await getApplicationDocumentsDirectory();
-    _cacheDir = Directory(p.join(appDir.path, _cacheDirName));
+    final appDir = _testCacheDir ?? await getApplicationDocumentsDirectory();
+    _cacheDir = _testCacheDir ?? Directory(p.join(appDir.path, _cacheDirName));
     if (!await _cacheDir!.exists()) {
       await _cacheDir!.create(recursive: true);
     }
@@ -176,6 +254,34 @@ class BookCacheService {
     return true;
   }
 
+  /// Inspects whole-book preparation metadata without reading the payload.
+  ///
+  /// The payload is only decompressed by [loadCachedBook] for a consumer that
+  /// actually needs its chunks. Stale records are removed so a future request
+  /// can prepare the current EPUB rather than treating a filename as durable.
+  Future<BookCacheProbe> probeBook(
+    String bookId,
+    BookCacheFileIdentity identity,
+  ) async {
+    await _ensureInit();
+    var result = _probeResult(bookId, identity);
+    if (result.status == BookCacheProbeStatus.validPayload &&
+        !await _fileFor(bookId).exists()) {
+      result = _probe(
+        BookCacheProbeStatus.missingPayload,
+        bookId,
+        identity,
+        serializedSizeBytes: result.serializedSizeBytes,
+      );
+    }
+    if (result.status == BookCacheProbeStatus.stale ||
+        result.status == BookCacheProbeStatus.unsupportedVersion ||
+        result.status == BookCacheProbeStatus.missingPayload) {
+      await _removeBookRecords(bookId, removePayload: true);
+    }
+    return result;
+  }
+
   /// Load a cached book. Returns null if not found.
   Future<CachedBook?> loadCachedBook(String bookId) async {
     await _ensureInit();
@@ -211,13 +317,14 @@ class BookCacheService {
   }
 
   /// Save a parsed book to the cache.
-  Future<void> cacheBook({
+  Future<BookCacheWriteResult> cacheBook({
     required String bookId,
     required String title,
     required List<BookChunk> chunks,
     required Map<String, int> anchorMap,
     required List<ChapterInfo> chapters,
     required Map<String, List<int>> searchIndex,
+    BookCacheFileIdentity? fileIdentity,
   }) async {
     await _ensureInit();
 
@@ -248,7 +355,22 @@ class BookCacheService {
             '(${compressedBytes.length} bytes > $_maxCacheSizeBytes limit)',
           );
         }
-        return;
+        await _removeBookRecords(bookId, removePayload: true);
+        if (fileIdentity != null) {
+          _preparationManifest[bookId] = _PreparationEntry.tooLarge(
+            identity: fileIdentity,
+            serializedSizeBytes: compressedBytes.length,
+            cacheLimitBytes: _maxCacheSizeBytes,
+          );
+          await _savePreparationManifest();
+        }
+        return BookCacheWriteResult(
+          status: BookCacheWriteStatus.tooLarge,
+          bookId: bookId,
+          identity: fileIdentity,
+          serializedSizeBytes: compressedBytes.length,
+          cacheLimitBytes: _maxCacheSizeBytes,
+        );
       }
 
       // Evict oldest entries until there's room
@@ -269,6 +391,14 @@ class BookCacheService {
         lastAccessedMs: DateTime.now().millisecondsSinceEpoch,
       );
       await _saveManifest();
+      if (fileIdentity != null) {
+        _preparationManifest[bookId] = _PreparationEntry.stored(
+          identity: fileIdentity,
+          serializedSizeBytes: compressedBytes.length,
+          cacheLimitBytes: _maxCacheSizeBytes,
+        );
+        await _savePreparationManifest();
+      }
 
       if (kDebugMode) {
         debugPrint(
@@ -276,10 +406,24 @@ class BookCacheService {
           '(${(compressedBytes.length / 1024).toStringAsFixed(1)} KB)',
         );
       }
+      return BookCacheWriteResult(
+        status: BookCacheWriteStatus.stored,
+        bookId: bookId,
+        identity: fileIdentity,
+        serializedSizeBytes: compressedBytes.length,
+        cacheLimitBytes: _maxCacheSizeBytes,
+      );
     } catch (e) {
       if (kDebugMode) {
         debugPrint('BookCacheService: Failed to cache $bookId: $e');
       }
+      return BookCacheWriteResult(
+        status: BookCacheWriteStatus.failed,
+        bookId: bookId,
+        identity: fileIdentity,
+        cacheLimitBytes: _maxCacheSizeBytes,
+        failureMessage: 'Unable to store the prepared book cache.',
+      );
     }
   }
 
@@ -291,6 +435,7 @@ class BookCacheService {
       await _cacheDir!.create(recursive: true);
     }
     _manifest.clear();
+    _preparationManifest.clear();
     _displayManifest.clear();
     await _saveManifest();
     await _saveDisplayManifest();
@@ -311,7 +456,7 @@ class BookCacheService {
   /// Delete cached data for a specific book.
   Future<void> deleteCachedBook(String bookId) async {
     await _ensureInit();
-    await _evict(bookId);
+    await _removeBookRecords(bookId, removePayload: true);
   }
 
   // ─── Display Chunk Cache ─────────────────────────────────────────────
@@ -619,14 +764,88 @@ class BookCacheService {
   }
 
   Future<void> _evict(String bookId) async {
-    final file = _fileFor(bookId);
-    if (await file.exists()) {
-      await file.delete();
-    }
-    _manifest.remove(bookId);
-    await _saveManifest();
+    await _removeBookRecords(bookId, removePayload: true);
     if (kDebugMode) {
       debugPrint('BookCacheService: Evicted $bookId');
+    }
+  }
+
+  BookCacheProbe _probeResult(String bookId, BookCacheFileIdentity identity) {
+    if (_preparationManifestCorrupt) {
+      return _probe(BookCacheProbeStatus.corruptMetadata, bookId, identity);
+    }
+    final preparation = _preparationManifest[bookId];
+    if (preparation == null) {
+      return _probe(BookCacheProbeStatus.noCache, bookId, identity);
+    }
+    if (preparation.formatVersion != parsedBookCacheFormatVersion ||
+        preparation.preparationVersion != wholeBookPreparationVersion) {
+      return _probe(
+        BookCacheProbeStatus.unsupportedVersion,
+        bookId,
+        identity,
+        serializedSizeBytes: preparation.serializedSizeBytes,
+      );
+    }
+    if (!preparation.matches(identity, _maxCacheSizeBytes)) {
+      return _probe(
+        BookCacheProbeStatus.stale,
+        bookId,
+        identity,
+        serializedSizeBytes: preparation.serializedSizeBytes,
+      );
+    }
+    if (preparation.outcome == _PreparationOutcome.tooLarge) {
+      return _probe(
+        BookCacheProbeStatus.knownTooLarge,
+        bookId,
+        identity,
+        serializedSizeBytes: preparation.serializedSizeBytes,
+      );
+    }
+    if (!_manifest.containsKey(bookId)) {
+      return _probe(
+        BookCacheProbeStatus.missingPayload,
+        bookId,
+        identity,
+        serializedSizeBytes: preparation.serializedSizeBytes,
+      );
+    }
+    return _probe(
+      BookCacheProbeStatus.validPayload,
+      bookId,
+      identity,
+      serializedSizeBytes: preparation.serializedSizeBytes,
+    );
+  }
+
+  BookCacheProbe _probe(
+    BookCacheProbeStatus status,
+    String bookId,
+    BookCacheFileIdentity identity, {
+    int? serializedSizeBytes,
+  }) => BookCacheProbe(
+    status: status,
+    bookId: bookId,
+    identity: identity,
+    serializedSizeBytes: serializedSizeBytes,
+    cacheLimitBytes: _maxCacheSizeBytes,
+  );
+
+  Future<void> _removeBookRecords(
+    String bookId, {
+    required bool removePayload,
+  }) async {
+    if (removePayload) {
+      final file = _fileFor(bookId);
+      if (await file.exists()) {
+        await file.delete();
+      }
+      _manifest.remove(bookId);
+      await _saveManifest();
+    }
+    if (_preparationManifest.remove(bookId) != null) {
+      await _savePreparationManifest();
     }
   }
 
@@ -665,6 +884,7 @@ class BookCacheService {
 
   Future<void> _loadManifests() async {
     await _loadManifest();
+    await _loadPreparationManifest();
     await _loadDisplayManifest();
   }
 
@@ -693,6 +913,40 @@ class BookCacheService {
     final file = File(p.join(_cacheDir!.path, _manifestFileName));
     final data = _manifest.map((k, v) => MapEntry(k, v.toJson()));
     await file.writeAsString(jsonEncode(data));
+  }
+
+  Future<void> _loadPreparationManifest() async {
+    final file = File(p.join(_cacheDir!.path, 'preparation_manifest.json'));
+    if (!await file.exists()) {
+      _preparationManifest = {};
+      return;
+    }
+    try {
+      final data =
+          jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      _preparationManifest = data.map(
+        (key, value) => MapEntry(
+          key,
+          _PreparationEntry.fromJson(value as Map<String, dynamic>),
+        ),
+      );
+      _preparationManifestCorrupt = false;
+    } catch (e) {
+      if (kDebugMode) {
+        debugPrint('BookCacheService: Failed to load preparation manifest: $e');
+      }
+      _preparationManifest = {};
+      _preparationManifestCorrupt = true;
+    }
+  }
+
+  Future<void> _savePreparationManifest() async {
+    final file = File(p.join(_cacheDir!.path, 'preparation_manifest.json'));
+    final data = _preparationManifest.map(
+      (key, value) => MapEntry(key, value.toJson()),
+    );
+    await file.writeAsString(jsonEncode(data));
+    _preparationManifestCorrupt = false;
   }
 
   Future<void> _loadDisplayManifest() async {
@@ -769,4 +1023,91 @@ class _CacheEntry {
     cachedAtMs: json['cached'] as int,
     lastAccessedMs: json['accessed'] as int,
   );
+}
+
+enum _PreparationOutcome { stored, tooLarge }
+
+class _PreparationEntry {
+  final _PreparationOutcome outcome;
+  final String bookId;
+  final int fileSizeBytes;
+  final int modifiedMs;
+  final int serializedSizeBytes;
+  final int cacheLimitBytes;
+  final int formatVersion;
+  final String preparationVersion;
+
+  const _PreparationEntry({
+    required this.outcome,
+    required this.bookId,
+    required this.fileSizeBytes,
+    required this.modifiedMs,
+    required this.serializedSizeBytes,
+    required this.cacheLimitBytes,
+    required this.formatVersion,
+    required this.preparationVersion,
+  });
+
+  factory _PreparationEntry.stored({
+    required BookCacheFileIdentity identity,
+    required int serializedSizeBytes,
+    required int cacheLimitBytes,
+  }) => _PreparationEntry(
+    outcome: _PreparationOutcome.stored,
+    bookId: identity.bookId,
+    fileSizeBytes: identity.fileSizeBytes,
+    modifiedMs: identity.modifiedMs,
+    serializedSizeBytes: serializedSizeBytes,
+    cacheLimitBytes: cacheLimitBytes,
+    formatVersion: BookCacheService.parsedBookCacheFormatVersion,
+    preparationVersion: BookCacheService.wholeBookPreparationVersion,
+  );
+
+  factory _PreparationEntry.tooLarge({
+    required BookCacheFileIdentity identity,
+    required int serializedSizeBytes,
+    required int cacheLimitBytes,
+  }) => _PreparationEntry(
+    outcome: _PreparationOutcome.tooLarge,
+    bookId: identity.bookId,
+    fileSizeBytes: identity.fileSizeBytes,
+    modifiedMs: identity.modifiedMs,
+    serializedSizeBytes: serializedSizeBytes,
+    cacheLimitBytes: cacheLimitBytes,
+    formatVersion: BookCacheService.parsedBookCacheFormatVersion,
+    preparationVersion: BookCacheService.wholeBookPreparationVersion,
+  );
+
+  bool matches(BookCacheFileIdentity identity, int cacheLimit) =>
+      bookId == identity.bookId &&
+      fileSizeBytes == identity.fileSizeBytes &&
+      modifiedMs == identity.modifiedMs &&
+      cacheLimitBytes == cacheLimit;
+
+  Map<String, dynamic> toJson() => {
+    'outcome': outcome.name,
+    'bookId': bookId,
+    'fileSizeBytes': fileSizeBytes,
+    'modifiedMs': modifiedMs,
+    'serializedSizeBytes': serializedSizeBytes,
+    'cacheLimitBytes': cacheLimitBytes,
+    'formatVersion': formatVersion,
+    'preparationVersion': preparationVersion,
+  };
+
+  factory _PreparationEntry.fromJson(Map<String, dynamic> json) {
+    final outcome = _PreparationOutcome.values.byName(
+      json['outcome'] as String,
+    );
+    return _PreparationEntry(
+      outcome: outcome,
+      bookId: json['bookId'] as String,
+      fileSizeBytes: json['fileSizeBytes'] as int,
+      modifiedMs: json['modifiedMs'] as int,
+      serializedSizeBytes: json['serializedSizeBytes'] as int,
+      cacheLimitBytes: json['cacheLimitBytes'] as int,
+      formatVersion: json['formatVersion'] as int,
+      preparationVersion: json['preparationVersion'] as String,
+    );
+  }
 }

@@ -160,11 +160,6 @@ class _BookListScreenState extends State<BookListScreen> {
       });
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _publicDomainBookService.maybePrefetchDefaultList();
-        if (widget.initiallyOpenFile != null) {
-          BookPreparseService.instance.cancelQueue();
-          return;
-        }
-        BookPreparseService.instance.queueBooks(validBooks);
       });
     }
   }

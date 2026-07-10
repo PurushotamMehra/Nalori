@@ -219,9 +219,16 @@ class _BookLoadingScreenState extends State<BookLoadingScreen>
     try {
       if (mounted) setState(() => _statusText = 'Parsing book…');
       final stopwatch = Stopwatch()..start();
-      final cached = await BookPreparseService.instance.ensureParsed(
+      final preparation = await BookPreparseService.instance.ensureParsed(
         widget.bookFile,
       );
+      final cached = preparation.cachedBook;
+      if (cached == null) {
+        final detail = preparation.status == BookPreparationStatus.tooLarge
+            ? 'This book is too large for the legacy reader cache.'
+            : preparation.failureMessage ?? 'Unable to prepare this book.';
+        throw StateError(detail);
+      }
       _lazyReaderOpenDiagLog('legacy_reader_ready', {
         'book': bookId,
         'sourceChunks': cached.chunks.length,

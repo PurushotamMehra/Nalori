@@ -28,6 +28,30 @@ void _preparseDiagLog(String phase, Map<String, Object?> fields) {
 
 enum BookPreparsePriority { foreground, background }
 
+enum BookPreparationStatus { alreadyCached, stored, tooLarge, failed }
+
+class BookPreparationResult {
+  final BookPreparationStatus status;
+  final String bookId;
+  final BookCacheFileIdentity? fileIdentity;
+  final CachedBook? cachedBook;
+  final int? serializedSizeBytes;
+  final int cacheLimitBytes;
+  final String? failureMessage;
+
+  const BookPreparationResult({
+    required this.status,
+    required this.bookId,
+    required this.cacheLimitBytes,
+    this.fileIdentity,
+    this.cachedBook,
+    this.serializedSizeBytes,
+    this.failureMessage,
+  });
+
+  bool get hasCachedBook => cachedBook != null;
+}
+
 typedef EpubParseFile =
     Future<
       ({
@@ -39,16 +63,21 @@ typedef EpubParseFile =
       })
     >
     Function(File file);
-typedef HasCachedBook = Future<bool> Function(String bookId, int modifiedMs);
+typedef ProbeCachedBook =
+    Future<BookCacheProbe> Function(
+      String bookId,
+      BookCacheFileIdentity identity,
+    );
 typedef LoadCachedBook = Future<CachedBook?> Function(String bookId);
 typedef CacheParsedBook =
-    Future<void> Function({
+    Future<BookCacheWriteResult> Function({
       required String bookId,
       required String title,
       required List<BookChunk> chunks,
       required Map<String, int> anchorMap,
       required List<ChapterInfo> chapters,
       required Map<String, List<int>> searchIndex,
+      BookCacheFileIdentity? fileIdentity,
     });
 
 /// Builds parsed-book caches in the background and shares in-flight parses.
@@ -59,24 +88,24 @@ typedef CacheParsedBook =
 class BookPreparseService {
   BookPreparseService._({
     EpubParseFile? parseFile,
-    HasCachedBook? hasCachedBook,
+    ProbeCachedBook? probeCachedBook,
     LoadCachedBook? loadCachedBook,
     CacheParsedBook? cacheParsedBook,
   }) : _cacheService = BookCacheService(),
        _parseFile = parseFile ?? EpubParserService.parseFileInBackground,
-       _hasCachedBook = hasCachedBook,
+       _probeCachedBook = probeCachedBook,
        _loadCachedBook = loadCachedBook,
        _cacheParsedBook = cacheParsedBook;
 
   @visibleForTesting
   BookPreparseService.testing({
     EpubParseFile? parseFile,
-    HasCachedBook? hasCachedBook,
+    ProbeCachedBook? probeCachedBook,
     LoadCachedBook? loadCachedBook,
     CacheParsedBook? cacheParsedBook,
   }) : this._(
          parseFile: parseFile,
-         hasCachedBook: hasCachedBook,
+         probeCachedBook: probeCachedBook,
          loadCachedBook: loadCachedBook,
          cacheParsedBook: cacheParsedBook,
        );
@@ -85,10 +114,10 @@ class BookPreparseService {
 
   final BookCacheService _cacheService;
   final EpubParseFile _parseFile;
-  final HasCachedBook? _hasCachedBook;
+  final ProbeCachedBook? _probeCachedBook;
   final LoadCachedBook? _loadCachedBook;
   final CacheParsedBook? _cacheParsedBook;
-  final Map<String, Future<CachedBook>> _inFlightParses = {};
+  final Map<String, Future<BookPreparationResult>> _inFlightParses = {};
   final Queue<File> _queue = Queue<File>();
   final Set<String> _queuedBookIds = {};
   final Set<String> _foregroundBookIds = {};
@@ -182,9 +211,10 @@ class BookPreparseService {
     _queuedBookIds.clear();
   }
 
-  Future<CachedBook> ensureParsed(
+  Future<BookPreparationResult> ensureParsed(
     File file, {
     BookPreparsePriority priority = BookPreparsePriority.foreground,
+    bool loadCachedBook = true,
   }) async {
     final bookId = p.basename(file.path);
     final isForeground = priority == BookPreparsePriority.foreground;
@@ -200,12 +230,36 @@ class BookPreparseService {
 
     try {
       final fileStat = await file.stat();
-      final bookModifiedMs = fileStat.modified.millisecondsSinceEpoch;
-      final hasCached = await (_hasCachedBook ?? _cacheService.hasCachedBook)(
-        bookId,
-        bookModifiedMs,
+      final identity = BookCacheFileIdentity(
+        bookId: bookId,
+        fileSizeBytes: fileStat.size,
+        modifiedMs: fileStat.modified.millisecondsSinceEpoch,
       );
-      if (hasCached) {
+      final probe = await (_probeCachedBook ?? _cacheService.probeBook)(
+        bookId,
+        identity,
+      );
+      if (probe.status == BookCacheProbeStatus.knownTooLarge) {
+        _log('preparse skipped known too large: $bookId');
+        return BookPreparationResult(
+          status: BookPreparationStatus.tooLarge,
+          bookId: bookId,
+          fileIdentity: identity,
+          serializedSizeBytes: probe.serializedSizeBytes,
+          cacheLimitBytes: probe.cacheLimitBytes,
+        );
+      }
+      if (probe.hasValidPayload) {
+        if (!loadCachedBook) {
+          _log('preparse skipped valid cached payload: $bookId');
+          return BookPreparationResult(
+            status: BookPreparationStatus.alreadyCached,
+            bookId: bookId,
+            fileIdentity: identity,
+            serializedSizeBytes: probe.serializedSizeBytes,
+            cacheLimitBytes: probe.cacheLimitBytes,
+          );
+        }
         final cached = await (_loadCachedBook ?? _cacheService.loadCachedBook)(
           bookId,
         );
@@ -219,7 +273,14 @@ class BookPreparseService {
             'chapters': cached.chapters.length,
           });
           _log('preparse skipped cache hit: $bookId');
-          return cached;
+          return BookPreparationResult(
+            status: BookPreparationStatus.alreadyCached,
+            bookId: bookId,
+            fileIdentity: identity,
+            cachedBook: cached,
+            serializedSizeBytes: probe.serializedSizeBytes,
+            cacheLimitBytes: probe.cacheLimitBytes,
+          );
         }
       }
 
@@ -236,7 +297,7 @@ class BookPreparseService {
       if (!isForeground) {
         _throwIfBackgroundSuppressed(bookId);
       }
-      final future = _scheduleParseAndCache(bookId, file, priority);
+      final future = _scheduleParseAndCache(bookId, file, identity, priority);
       _inFlightParses[bookId] = future;
       future.whenComplete(() {
         if (identical(_inFlightParses[bookId], future)) {
@@ -244,6 +305,13 @@ class BookPreparseService {
         }
       });
       return await future;
+    } catch (_) {
+      return BookPreparationResult(
+        status: BookPreparationStatus.failed,
+        bookId: bookId,
+        cacheLimitBytes: BookCacheService.parsedBookCacheLimitBytes,
+        failureMessage: 'Unable to prepare this book right now.',
+      );
     } finally {
       if (isForeground) {
         endForegroundWork('ensureParsed:$bookId');
@@ -279,8 +347,12 @@ class BookPreparseService {
         }
 
         try {
-          await ensureParsed(file, priority: BookPreparsePriority.background);
-          _log('preparse completed: $bookId');
+          final result = await ensureParsed(
+            file,
+            priority: BookPreparsePriority.background,
+            loadCachedBook: false,
+          );
+          _log('preparse ${result.status.name}: $bookId');
         } catch (e) {
           _log('preparse failed: $bookId $e');
         }
@@ -328,12 +400,13 @@ class BookPreparseService {
     throw StateError('Background preparse suppressed for active book $bookId');
   }
 
-  Future<CachedBook> _scheduleParseAndCache(
+  Future<BookPreparationResult> _scheduleParseAndCache(
     String bookId,
     File file,
+    BookCacheFileIdentity identity,
     BookPreparsePriority priority,
   ) {
-    final completer = Completer<CachedBook>();
+    final completer = Completer<BookPreparationResult>();
     _parseTail = _parseTail
         .catchError((_) {
           // Keep the serial parse chain alive after a previous book fails.
@@ -349,16 +422,28 @@ class BookPreparseService {
             if (priority == BookPreparsePriority.background) {
               _throwIfBackgroundSuppressed(bookId);
             }
-            final parsed = await _parseAndCache(bookId, file);
+            final parsed = await _parseAndCache(bookId, file, identity);
             completer.complete(parsed);
-          } catch (e, stackTrace) {
-            completer.completeError(e, stackTrace);
+          } catch (_) {
+            completer.complete(
+              BookPreparationResult(
+                status: BookPreparationStatus.failed,
+                bookId: bookId,
+                fileIdentity: identity,
+                cacheLimitBytes: BookCacheService.parsedBookCacheLimitBytes,
+                failureMessage: 'Unable to prepare this book right now.',
+              ),
+            );
           }
         });
     return completer.future;
   }
 
-  Future<CachedBook> _parseAndCache(String bookId, File file) async {
+  Future<BookPreparationResult> _parseAndCache(
+    String bookId,
+    File file,
+    BookCacheFileIdentity identity,
+  ) async {
     _log('preparse started: $bookId');
     _preparseDiagLog('preparse_parse_begin', {
       'book': bookId,
@@ -375,13 +460,14 @@ class BookPreparseService {
       searchIndex: result.searchIndex,
     );
 
-    await (_cacheParsedBook ?? _cacheService.cacheBook)(
+    final cacheResult = await (_cacheParsedBook ?? _cacheService.cacheBook)(
       bookId: bookId,
       title: parsed.title,
       chunks: parsed.chunks,
       anchorMap: parsed.anchorMap,
       chapters: parsed.chapters,
       searchIndex: parsed.searchIndex,
+      fileIdentity: identity,
     );
 
     _preparseDiagLog('preparse_parse_end', {
@@ -393,7 +479,21 @@ class BookPreparseService {
       'inFlight': _inFlightParses.length,
       'foregroundPressure': _foregroundPressure,
     });
-    return parsed;
+    return BookPreparationResult(
+      status: switch (cacheResult.status) {
+        BookCacheWriteStatus.stored => BookPreparationStatus.stored,
+        BookCacheWriteStatus.tooLarge => BookPreparationStatus.tooLarge,
+        BookCacheWriteStatus.failed => BookPreparationStatus.failed,
+      },
+      bookId: bookId,
+      fileIdentity: identity,
+      cachedBook: cacheResult.status == BookCacheWriteStatus.tooLarge
+          ? null
+          : parsed,
+      serializedSizeBytes: cacheResult.serializedSizeBytes,
+      cacheLimitBytes: cacheResult.cacheLimitBytes,
+      failureMessage: cacheResult.failureMessage,
+    );
   }
 
   void _log(String message) {

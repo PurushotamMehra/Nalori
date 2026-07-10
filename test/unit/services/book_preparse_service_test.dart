@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/book_chunk.dart';
 import 'package:nalori/models/bookmark.dart';
 import 'package:nalori/services/book_preparse_service.dart';
+import 'package:nalori/services/book_cache_service.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
@@ -31,7 +32,12 @@ void main() {
     final parseCompleters = <String, Completer<void>>{};
 
     final service = BookPreparseService.testing(
-      hasCachedBook: (_, _) async => false,
+      probeCachedBook: (bookId, identity) async => BookCacheProbe(
+        status: BookCacheProbeStatus.noCache,
+        bookId: bookId,
+        identity: identity,
+        cacheLimitBytes: BookCacheService.parsedBookCacheLimitBytes,
+      ),
       loadCachedBook: (_) async => null,
       cacheParsedBook:
           ({
@@ -41,7 +47,12 @@ void main() {
             required anchorMap,
             required chapters,
             required searchIndex,
-          }) async {},
+            fileIdentity,
+          }) async => BookCacheWriteResult(
+            status: BookCacheWriteStatus.stored,
+            bookId: bookId,
+            cacheLimitBytes: BookCacheService.parsedBookCacheLimitBytes,
+          ),
       parseFile: (file) async {
         final bookId = p.basename(file.path);
         parseOrder.add(bookId);
@@ -89,7 +100,12 @@ void main() {
       final parseOrder = <String>[];
 
       final service = BookPreparseService.testing(
-        hasCachedBook: (_, _) async => false,
+        probeCachedBook: (bookId, identity) async => BookCacheProbe(
+          status: BookCacheProbeStatus.noCache,
+          bookId: bookId,
+          identity: identity,
+          cacheLimitBytes: BookCacheService.parsedBookCacheLimitBytes,
+        ),
         loadCachedBook: (_) async => null,
         cacheParsedBook:
             ({
@@ -99,7 +115,12 @@ void main() {
               required anchorMap,
               required chapters,
               required searchIndex,
-            }) async {},
+              fileIdentity,
+            }) async => BookCacheWriteResult(
+              status: BookCacheWriteStatus.stored,
+              bookId: bookId,
+              cacheLimitBytes: BookCacheService.parsedBookCacheLimitBytes,
+            ),
         parseFile: (file) async {
           final bookId = p.basename(file.path);
           parseOrder.add(bookId);
@@ -126,4 +147,197 @@ void main() {
       service.resumeBackgroundBook('active.epub');
     },
   );
+
+  test(
+    'known oversized preparation is reused until the EPUB changes',
+    () async {
+      var parseCount = 0;
+      var knownTooLarge = false;
+      BookCacheFileIdentity? storedIdentity;
+      final file = await bookFile('oversized.epub');
+
+      final service = BookPreparseService.testing(
+        probeCachedBook: (bookId, identity) async => BookCacheProbe(
+          status:
+              knownTooLarge &&
+                  storedIdentity!.fileSizeBytes == identity.fileSizeBytes
+              ? BookCacheProbeStatus.knownTooLarge
+              : BookCacheProbeStatus.noCache,
+          bookId: bookId,
+          identity: identity,
+          serializedSizeBytes: knownTooLarge ? 1024 : null,
+          cacheLimitBytes: 100,
+        ),
+        cacheParsedBook:
+            ({
+              required bookId,
+              required title,
+              required chunks,
+              required anchorMap,
+              required chapters,
+              required searchIndex,
+              fileIdentity,
+            }) async {
+              knownTooLarge = true;
+              storedIdentity = fileIdentity;
+              return BookCacheWriteResult(
+                status: BookCacheWriteStatus.tooLarge,
+                bookId: bookId,
+                identity: fileIdentity,
+                serializedSizeBytes: 1024,
+                cacheLimitBytes: 100,
+              );
+            },
+        parseFile: (file) async {
+          parseCount++;
+          return (
+            title: 'Oversized',
+            chunks: [
+              const BookChunk(index: 0, type: BookChunkType.text, text: 'text'),
+            ],
+            anchorMap: <String, int>{},
+            chapters: <ChapterInfo>[],
+            searchIndex: <String, List<int>>{},
+          );
+        },
+      );
+
+      expect(
+        (await service.ensureParsed(file)).status,
+        BookPreparationStatus.tooLarge,
+      );
+      expect(
+        (await service.ensureParsed(file)).status,
+        BookPreparationStatus.tooLarge,
+      );
+      expect(parseCount, 1);
+
+      await file.writeAsString('changed epub bytes', flush: true);
+      expect(
+        (await service.ensureParsed(file)).status,
+        BookPreparationStatus.tooLarge,
+      );
+      expect(parseCount, 2);
+    },
+  );
+
+  test(
+    'valid background payload probe does not deserialize the book',
+    () async {
+      var parseCount = 0;
+      var deserializeCount = 0;
+      final file = await bookFile('cached.epub');
+
+      final service = BookPreparseService.testing(
+        probeCachedBook: (bookId, identity) async => BookCacheProbe(
+          status: BookCacheProbeStatus.validPayload,
+          bookId: bookId,
+          identity: identity,
+          cacheLimitBytes: BookCacheService.parsedBookCacheLimitBytes,
+        ),
+        loadCachedBook: (_) async {
+          deserializeCount++;
+          return null;
+        },
+        parseFile: (_) async {
+          parseCount++;
+          throw StateError('should not parse');
+        },
+      );
+
+      final result = await service.ensureParsed(
+        file,
+        priority: BookPreparsePriority.background,
+        loadCachedBook: false,
+      );
+
+      expect(result.status, BookPreparationStatus.alreadyCached);
+      expect(deserializeCount, 0);
+      expect(parseCount, 0);
+    },
+  );
+
+  test('an explicit request parses only its requested book', () async {
+    final parsedBooks = <String>[];
+    final service = BookPreparseService.testing(
+      probeCachedBook: (bookId, identity) async => BookCacheProbe(
+        status: BookCacheProbeStatus.noCache,
+        bookId: bookId,
+        identity: identity,
+        cacheLimitBytes: BookCacheService.parsedBookCacheLimitBytes,
+      ),
+      cacheParsedBook:
+          ({
+            required bookId,
+            required title,
+            required chunks,
+            required anchorMap,
+            required chapters,
+            required searchIndex,
+            fileIdentity,
+          }) async => BookCacheWriteResult(
+            status: BookCacheWriteStatus.stored,
+            bookId: bookId,
+            cacheLimitBytes: BookCacheService.parsedBookCacheLimitBytes,
+          ),
+      parseFile: (file) async {
+        parsedBooks.add(p.basename(file.path));
+        return (
+          title: 'One',
+          chunks: const <BookChunk>[],
+          anchorMap: <String, int>{},
+          chapters: <ChapterInfo>[],
+          searchIndex: <String, List<int>>{},
+        );
+      },
+    );
+    final requested = await bookFile('requested.epub');
+    await bookFile('unrelated.epub');
+
+    await service.ensureParsed(requested);
+
+    expect(parsedBooks, ['requested.epub']);
+  });
+
+  test('queueBooks deduplicates duplicate explicit submissions', () async {
+    var parseCount = 0;
+    final service = BookPreparseService.testing(
+      probeCachedBook: (bookId, identity) async => BookCacheProbe(
+        status: BookCacheProbeStatus.noCache,
+        bookId: bookId,
+        identity: identity,
+        cacheLimitBytes: BookCacheService.parsedBookCacheLimitBytes,
+      ),
+      cacheParsedBook:
+          ({
+            required bookId,
+            required title,
+            required chunks,
+            required anchorMap,
+            required chapters,
+            required searchIndex,
+            fileIdentity,
+          }) async => BookCacheWriteResult(
+            status: BookCacheWriteStatus.stored,
+            bookId: bookId,
+            cacheLimitBytes: BookCacheService.parsedBookCacheLimitBytes,
+          ),
+      parseFile: (_) async {
+        parseCount++;
+        return (
+          title: 'One',
+          chunks: const <BookChunk>[],
+          anchorMap: <String, int>{},
+          chapters: <ChapterInfo>[],
+          searchIndex: <String, List<int>>{},
+        );
+      },
+    );
+    final file = await bookFile('dedupe.epub');
+
+    service.queueBooks([file, file]);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+
+    expect(parseCount, 1);
+  });
 }

@@ -58,7 +58,9 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
   }
 
   void _reloadMemory() {
-    _memoryFuture = widget.memoryFuture ?? _memoryService.load(widget.bookId);
+    _memoryFuture =
+        widget.memoryFuture ??
+        _memoryService.load(widget.bookId, bookFile: widget.bookFile);
   }
 
   void _refreshMemory() {

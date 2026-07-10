@@ -2,8 +2,8 @@
 
 ## Overall Status
 
-- Overall state: Planning complete / implementation not started
-- Current phase: Phase 1
+- Overall state: Phase 1 complete / later phases not started
+- Current phase: Phase 2 (not started)
 - Last updated: 2026-07-11
 - Source plan: `docs/lazy_random_access_reader_plan.md`
 - Evidence:
@@ -34,7 +34,7 @@ These are current defaults that may be adjusted through measured profiling; they
 
 | Phase | Status | Started | Completed | Exit Criteria Met | Notes |
 |---|---|---|---|---|---|
-| Phase 1 — Stop avoidable legacy work safely | Not started | — | — | No | Canonical first implementation phase. |
+| Phase 1 — Stop avoidable legacy work safely | Complete | 2026-07-11 | 2026-07-11 | Yes | Explicit legacy and Book Memory preparation retained; normal refresh no longer queues whole books. |
 | Phase 2 — Persistent structural index | Not started | — | — | No | Depends on Phase 1 exit criteria. |
 | Phase 3 — Stable random-access navigation | Not started | — | — | No | Depends on persistent publication identity. |
 | Phase 4 — Shared section work and cache retention | Not started | — | — | No | Depends on canonical section identity. |
@@ -44,56 +44,76 @@ These are current defaults that may be adjusted through measured profiling; they
 
 ## Phase 1 Checklist
 
-- [ ] Remove automatic whole-library preparsing from normal library refresh.
-- [ ] Add explicit preparation outcomes for cached, stored, terminal oversized, invalidated/changed, and retryable failure states.
-- [ ] Persist an oversized terminal status so unchanged files are not retried.
-- [ ] Add a lightweight validity probe that does not deserialize `CachedBook` payloads.
-- [ ] Invalidate preparation outcomes and caches when file identity changes.
-- [ ] Preserve explicit legacy reader compatibility through `BookLoadingScreen`/`BookPreparseService`.
-- [ ] Preserve explicit Book Memory compatibility while it still depends on `CachedBook`.
-- [ ] Coordinate cache, outcome, deletion, and reset cleanup for Phase 1-owned data.
-- [ ] Add and run focused Phase 1 tests.
-- [ ] Run `flutter analyze`.
-- [ ] Run `git diff --check` and inspect the scoped diff.
+- [x] Remove automatic whole-library preparsing from normal library refresh.
+- [x] Add explicit preparation outcomes for cached, stored, terminal oversized, and retryable failure states.
+- [x] Persist an oversized terminal status so unchanged files are not retried.
+- [x] Add a lightweight validity probe that does not deserialize `CachedBook` payloads.
+- [x] Invalidate preparation outcomes and caches when file identity, cache limit, or format/version changes.
+- [x] Preserve explicit legacy reader compatibility through `BookLoadingScreen`/`BookPreparseService`.
+- [x] Preserve explicit Book Memory compatibility while it still depends on `CachedBook`.
+- [x] Coordinate cache, outcome, deletion, and reset cleanup for Phase 1-owned data.
+- [x] Add and run focused Phase 1 tests.
+- [x] Run `flutter analyze`.
+- [x] Run `git diff --check` and inspect the scoped diff.
 
 ## Completed Work
 
 - EPUB parsing system audit completed in `docs/epub_parsing_system_audit.md`.
 - Lazy random-access architectural verification completed in `docs/lazy_random_access_reader_verification.md`.
-- Canonical implementation plan and this progress tracker completed.
+- Phase 1 implemented and verified on 2026-07-11.
 
-No production implementation has started, and no phase is complete.
+Phase 1 removed the normal-library-refresh `BookPreparseService.queueBooks` submission. The singleton service and its explicit queue API remain for diagnostics, tests, and other deliberate callers.
+
+`BookPreparseService.ensureParsed` now returns `BookPreparationResult` with `alreadyCached`, `stored`, `tooLarge`, or `failed`. Cache hits are probed first; background callers that only need validity do not load or deserialize `CachedBook`. Foreground legacy loading obtains the payload only when it is valid and needed. A known oversized result returns `tooLarge` without reparsing.
+
+`BookCacheService` now persists `preparation_manifest.json` next to the existing whole-book manifest and payloads. Each record stores the outcome, book ID, EPUB size, modification time, serialized size, applicable cache limit, whole-cache format version, and preparation-version owner. The lightweight `probeBook` result distinguishes valid payload, no cache, stale, known too large, missing payload, corrupt metadata, and unsupported version. Changed file evidence, cache-limit changes, format/preparation-version changes, missing payloads, `deleteCachedBook`, and `clearAll` invalidate or clear the record.
+
+Book Memory now explicitly requests preparation only for its own `bookFile` when it needs its temporary `CachedBook` compatibility data. A `tooLarge` result leaves its existing partial/unavailable snapshot path in place; repeated access rechecks the durable outcome and does not repeat the EPUB parser work. The legacy foreground route reports a controlled unavailable error for a known oversized book rather than claiming it was cached.
 
 ## Current Codebase Risks
 
-- `BookListScreen._refreshLibrary` still queues all valid books through `BookPreparseService`, so automatic eager work remains active until Phase 1.
-- Oversized whole-book cache output has no durable terminal outcome and can be reparsed after later queue passes.
-- A lightweight `hasCachedBook` probe exists, but current preparation still loads/deserializes the full `CachedBook` on a cache hit before returning it.
-- `CachedBook` remains required by the explicit legacy reader path and by `BookMemoryService`; automatic preparation cannot be removed by deleting compatibility APIs.
-- Cache/outcome identity is filename/mtime-oriented and must not suppress preparation after same-name content replacement.
-- Book deletion currently removes the legacy whole-book cache but does not coordinate every lazy/display cache owner; Phase 1 cleanup must stay scoped while preserving the later full-deletion boundary.
+- `CachedBook` remains required by the explicit legacy reader path and by temporary Book Memory compatibility; Phase 6/7 own their replacement and retirement.
+- Phase 1 preparation identity is intentionally filesystem-based (book ID, size, and modification time) plus cache/parser contract fields. A stronger publication fingerprint belongs to Phase 2.
+- Book deletion clears Phase 1 whole-cache and preparation metadata, but coordinated parsed-section/display/index cleanup remains a later-phase boundary.
 
 ## Decisions and Deviations Log
 
 | Date | Phase | Decision or Deviation | Evidence | Impact |
 |---|---|---|---|---|
+| 2026-07-11 | 1 | Use a small `preparation_manifest.json` owned by `BookCacheService`, rather than changing `CachedBook` payload format. | Existing payloads must remain readable; validity must be checked without decompression/deserialization. | Adds an independently invalidatable metadata format while retaining legacy payload compatibility. |
+| 2026-07-11 | 1 | Book Memory explicitly prepares only its requested file when its compatibility payload is absent. | Audit confirmed it consumed `CachedBook`; removing refresh preparation otherwise left it unprepared. | Preserves the temporary compatibility path without whole-library work. |
+| 2026-07-11 | 1 | No automatic lazy-to-legacy fallback was added. | Canonical plan explicitly excludes route-selection/fallback expansion in this phase. | Existing lazy-reader policy remains unchanged. |
 
 ## Files Changed by Phase
 
 ### Phase 1
 
-None. Implementation not started.
+- `lib/screens/book_list_screen.dart`
+- `lib/screens/book_loading_screen.dart`
+- `lib/screens/book_memory_screen.dart`
+- `lib/services/book_cache_service.dart`
+- `lib/services/book_memory_service.dart`
+- `lib/services/book_preparse_service.dart`
+- `test/unit/services/book_cache_service_test.dart`
+- `test/unit/services/book_memory_service_test.dart`
+- `test/unit/services/book_preparse_service_test.dart`
+- `docs/lazy_random_access_reader_progress.md`
 
 ## Tests and Verification by Phase
 
 ### Phase 1
 
-None. Implementation not started.
+- `flutter test test/unit/services/book_cache_service_test.dart test/unit/services/book_preparse_service_test.dart test/unit/services/book_memory_service_test.dart test/widgets/book_memory_screen_test.dart` — 31 passed.
+- `flutter test test/unit/services/feature_rich_lazy_reader_fixture_test.dart test/unit/services/lazy_book_session_test.dart test/unit/services/lazy_reader_route_service_test.dart` — 18 passed.
+- `flutter analyze` — no issues found.
+- `git diff --check` — passed.
+
+Focused coverage proves stored/oversized outcomes, repeated oversized avoidance, changed-file invalidation, cache-limit and format invalidation, missing/corrupt metadata handling, deletion/reset cleanup, no-deserialize validity checks, explicit one-book preparation, queue deduplication, explicit Book Memory preparation, and unchanged lazy session behavior.
 
 ## Known Blockers
 
-None currently known.
+No Phase 1 blockers. Legacy `CachedBook` remains intentionally in use by the explicit legacy reader and temporary Book Memory compatibility path until Phase 6/7.
 
 ## Next Exact Step
 
-Implement Phase 1 only using the canonical plan and update this progress document with files changed, tests, decisions, blockers and exit-criteria status.
+Begin Phase 2 only after separately approving its persistent structural-index scope.
