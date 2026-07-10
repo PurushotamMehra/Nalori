@@ -24,6 +24,8 @@ Move Nalori's user-facing Gutenberg feature to a lean "find and import an EPUB" 
 
 ## 3. Current Implementation Summary
 
+Note: this section records the pre-migration implementation inspected during planning. See "Final State" below for the current shipped API-only behavior after Phases 1-7.
+
 Entry points:
 
 * `lib/widgets/add_book_sheet.dart`: `AddBookSheet` exposes a "Browse Project Gutenberg" action.
@@ -385,6 +387,9 @@ Selected EPUBs still download, import, and open; already-imported books show "In
 **Goal:**
 Align coverage with API-only behavior and error handling.
 
+**Status:**
+Complete as of 2026-06-24. Focused service and widget tests now cover the API-only request contract, cache-first screen flow, stale/offline states, absence of full-catalogue main-flow copy, and hardened download failure behavior.
+
 **Files likely changed:**
 
 * `test/widgets/public_domain_books_screen_test.dart`
@@ -415,6 +420,9 @@ Tests describe the API-only user-facing contract.
 
 **Goal:**
 Remove dead UI paths and keep docs accurate.
+
+**Status:**
+Complete as of 2026-06-24. Main-flow stale catalogue copy was checked, conservative cleanup was applied, and dormant SQLite/starter catalogue infrastructure remains documented as legacy/future infrastructure outside the current user-facing flow.
 
 **Files likely changed:**
 
@@ -516,6 +524,27 @@ Assumptions:
 | --- | --- | --- | --- |
 | 2026-06-24 | Move user-facing Gutenberg browsing to API-only Gutendex flow for now. | Product wants a lean find-and-import EPUB flow without hosting, local full-catalog install, or full-library claims. | Main browsing flow uses Gutendex search/list API; Project Gutenberg URLs are used only for selected EPUB downloads. |
 
+## Final State
+
+The shipped Gutenberg/public-domain flow is now API-only for user-facing discovery:
+
+* `PublicDomainBooksScreen` uses Gutendex cache-first browsing for popular books, search, filters, sort, refresh, and load more.
+* Gutendex list requests explicitly ask for public-domain EPUB records with `copyright=false`, `mime_type=application/epub+zip`, language filtering when selected, and explicit sort mapping.
+* Gutendex `next` URLs are followed as the source of truth for pagination; Nalori does not crawl Project Gutenberg or prefetch beyond the visible flow.
+* The main UI no longer presents a full-catalogue install/update/download path and does not claim complete Gutenberg coverage.
+* Selected books still download from Project Gutenberg EPUB URLs only when the user imports/reads a specific book.
+* Download/import handling rejects missing EPUB URLs, network failures, invalid EPUB containers, and storage failures with friendly messages; cancellation is not shown as an import failure.
+* Valid EPUBs can still import if metadata extraction fails, using Gutendex title/author metadata; cover download failure is non-blocking.
+* Cached Gutendex results are shown quickly and stale/offline results are labelled when used.
+* SQLite/starter catalogue services, installer code, generator tooling, and local catalogue tests remain in the repository as dormant legacy/future infrastructure and rollback support. They are not part of the current main Gutenberg browsing flow.
+
+Known limitations:
+
+* Gutendex coverage may not equal the complete Project Gutenberg library.
+* Topic/bookshelf search remains internal/secondary where already wired from detail chips, but the main supported search is title/book name/author.
+* EPUB validation is stronger than magic-byte checking but still lightweight; a future hardening pass can adopt full ZIP/EPUB parsing if needed.
+* The "visit Project Gutenberg" copy is informational; no external deep-catalogue link action was added in this migration.
+
 ## 14. Work Log
 
 No implementation work logged yet.
@@ -559,3 +588,207 @@ Important documentation rule:
 * Do not rewrite or delete old Work Log entries.
 * If something in an old entry becomes outdated, add a new entry explaining the correction.
 * Keep the document useful for a human developer who wants to understand what changed and why.
+
+### 2026-06-24 00:38 - Phase 1/2 Main Screen API Path
+
+**Goal:**
+Rewire the main Gutenberg browsing screen from the local SQLite/starter catalogue path to the Gutendex/cache-first API path.
+
+**Files changed:**
+
+* `lib/screens/public_domain_books_screen.dart`
+* `test/widgets/public_domain_books_screen_test.dart`
+* `docs/gutenberg_api_only_migration.md`
+
+**What changed:**
+
+* `PublicDomainBooksScreen` now loads, refreshes, paginates, and screen-prefetches through `fetchBooksCacheFirst()`.
+* The screen now carries Gutendex `nextUrl` into load-more requests.
+* The main-screen full-catalog manifest/install check was removed from the user-facing flow.
+* Focused widget tests now fail if the screen calls `fetchLocalCatalogPage()` and assert no manifest check runs.
+
+**Why:**
+Phase 1/2 requires the user-facing browsing flow to use Gutendex/cache-first discovery while leaving SQLite/starter catalogue code dormant.
+
+**Tests run:**
+
+* `flutter test test/widgets/public_domain_books_screen_test.dart`
+* Result: passed.
+* `flutter analyze`
+* Result: passed with no issues.
+
+**Issues found:**
+
+* None.
+
+**Next recommended step:**
+Start Phase 3 by adding the required Gutendex query parameters for public-domain EPUB search/filter/sort.
+
+### 2026-06-24 00:38 - Phase 3 Gutendex Query Contract
+
+**Goal:**
+Update Gutendex list/search requests to use the API-only query contract.
+
+**Files changed:**
+
+* `lib/services/public_domain_book_service.dart`
+* `test/unit/services/public_domain_book_service_test.dart`
+* `test/widgets/public_domain_books_screen_test.dart`
+* `docs/gutenberg_api_only_migration.md`
+
+**What changed:**
+
+* First-page Gutendex list requests now include `copyright=false`, `mime_type=application/epub+zip`, explicit `sort`, and `languages` when selected.
+* Title/book-name/author search continues to use `search`, while existing topic search remains supported without expansion.
+* Gutendex `nextUrl` pagination remains the source of truth and is not rebuilt with first-page params.
+* Cache and in-flight request keys now distinguish identical query/page pairs with different `nextUrl` values.
+* Service tests now assert the query contract, sort mapping, next-url preservation, defensive eligibility filtering, and stale-cache behavior.
+
+**Why:**
+Phase 3 requires Nalori's API-only Gutenberg flow to ask Gutendex directly for public-domain EPUB results instead of relying only on client-side filtering.
+
+**Tests run:**
+
+* `flutter test test/unit/services/public_domain_book_service_test.dart`
+* Result: passed.
+* `flutter test test/widgets/public_domain_books_screen_test.dart`
+* Result: passed.
+* `flutter analyze`
+* Result: passed with no issues.
+
+**Issues found:**
+
+* Widget test fakes needed signature updates after cache helpers gained optional `pageUrl` support.
+
+**Next recommended step:**
+Start Phase 4 by removing or replacing remaining main-flow copy that implies full-catalogue browsing.
+
+### 2026-06-24 00:39 - Phase 4 API-Only UI Copy
+
+**Goal:**
+Update user-facing Gutenberg copy so the main flow presents Gutendex discovery and selected EPUB import without full/offline catalogue claims.
+
+**Files changed:**
+
+* `lib/screens/public_domain_books_screen.dart`
+* `lib/l10n/app_en.arb`
+* `lib/l10n/app_en_IN.arb`
+* `lib/l10n/app_localizations.dart`
+* `lib/l10n/app_localizations_en.dart`
+* `test/widgets/public_domain_books_screen_test.dart`
+* `test/widgets/add_book_sheet_test.dart`
+* `lib/models/public_domain_catalog.dart`
+* `docs/gutenberg_api_only_migration.md`
+
+**What changed:**
+
+* The Gutenberg screen subtitle now says: "Search public-domain EPUBs from Project Gutenberg via Gutendex."
+* The Gutenberg screen now adds: "For deeper catalogue browsing, visit Project Gutenberg."
+* Refresh and stale-cache banners now use saved/offline wording instead of generic catalogue refresh copy.
+* The add-book sheet now says: "Import your own EPUB or find public-domain EPUBs." and "Search public-domain EPUBs via Gutendex."
+* Widget tests assert the honest API-only copy and absence of full/starter/offline catalogue claims in the main UI.
+
+**Why:**
+Phase 4 requires the user-facing flow to stop implying a full local catalogue and to describe the actual Gutendex discovery plus selected EPUB import path.
+
+**Tests run:**
+
+* `flutter test test/widgets/public_domain_books_screen_test.dart`
+* Result: passed.
+* `flutter test test/widgets/add_book_sheet_test.dart`
+* Result: passed.
+* `flutter analyze`
+* Result: passed with no issues.
+
+**Issues found:**
+
+* A test initially rejected all uses of "catalogue", but the approved honest copy includes "deeper catalogue browsing"; the assertion was narrowed to forbidden full/starter/offline catalogue claims.
+
+**Next recommended step:**
+Start Phase 5 by preserving and hardening the selected EPUB download/import/reader flow.
+
+### 2026-06-24 01:02 - Phase 5 Download Import Hardening
+
+**Goal:**
+Harden selected EPUB download, validation, import fallback, and cancellation behavior without changing catalogue browsing/search logic.
+
+**Files changed:**
+
+* `lib/services/public_domain_download_service.dart`
+* `lib/screens/public_domain_books_screen.dart`
+* `test/unit/services/public_domain_download_service_test.dart`
+* `test/widgets/public_domain_books_screen_test.dart`
+* `docs/gutenberg_api_only_migration.md`
+
+**What changed:**
+
+* `PublicDomainDownloadService` now rejects missing/non-http EPUB URLs before requesting, maps timeout/socket/client/non-200 failures to friendly download errors, rejects invalid EPUB bytes, and maps save failures to a friendly import error.
+* EPUB validation was strengthened beyond ZIP magic bytes by parsing ZIP local headers and requiring an uncompressed `mimetype` entry containing `application/epub+zip` plus `META-INF/container.xml`.
+* The Gutenberg screen now avoids queueing books without readable EPUB URLs, suppresses cancellation as a failure snackbar, and keeps queued/active download state clearing on cancellation.
+* Metadata extraction failure no longer blocks a valid saved EPUB; the screen falls back to Gutendex title/author/source metadata and still imports the book.
+* Gutendex cover download failure is now non-blocking and import continues without the remote cover.
+* Focused tests cover missing EPUB URL rejection, timeout/non-200/storage failure mapping, invalid EPUB rejection, cancellation behavior, and the screen-level missing/cancelled download states.
+
+**Why:**
+Phase 5 requires the selected Project Gutenberg EPUB import path to fail clearly and safely while preserving duplicate detection, queue/progress/cancel UI, and the API-only browsing flow from earlier phases.
+
+**Tests run:**
+
+* `flutter test test/unit/services/public_domain_download_service_test.dart`
+* Result: passed.
+* `flutter test test/widgets/public_domain_books_screen_test.dart`
+* Result: passed.
+* `flutter analyze`
+* Result: passed with no issues.
+
+**Issues found:**
+
+* EPUB validation is stronger but still intentionally lightweight; it does not fully decompress or validate every EPUB resource. A later focused phase can switch to a full ZIP/EPUB parser if needed.
+
+**Next recommended step:**
+Start Phase 6 by broadening/updating remaining tests around API-only Gutenberg behavior and any service/widget expectations not yet covered.
+
+### 2026-06-24 01:02 - Phase 6/7 Final Tests and Cleanup
+
+**Goal:**
+Complete the remaining test alignment, conservative cleanup, and documentation finalization for the API-only Gutenberg migration.
+
+**Files changed:**
+
+* `test/widgets/add_book_sheet_test.dart`
+* `lib/models/public_domain_catalog.dart`
+* `docs/gutenberg_api_only_migration.md`
+
+**What changed:**
+
+* Added AddBookSheet assertions that the user-facing import sheet does not imply full, complete, all-book, or offline catalogue access.
+* Searched the app, tests, and docs for stale full/starter/offline/SQLite catalogue copy.
+* Replaced dormant local-catalogue status messages that said "starter offline catalogue" or "Full catalogue available offline" with neutral local/saved book-list wording.
+* Left dormant SQLite/starter catalogue infrastructure in place because it remains referenced by legacy services/tests/tools and provides low-risk rollback support.
+* Marked Phases 6 and 7 complete in this document.
+* Added a Final State section summarizing the shipped API-only Gutendex discovery, selected EPUB import, cache/offline behavior, dormant legacy catalogue code, and known limitations.
+
+**Why:**
+Phase 6/7 requires the migration to be ready to commit without broad refactors or deletion of rollback infrastructure.
+
+**Tests run:**
+
+* `flutter test test/unit/services/public_domain_book_service_test.dart`
+* Result: passed.
+* `flutter test test/unit/services/public_domain_download_service_test.dart`
+* Result: passed.
+* `flutter test test/widgets/public_domain_books_screen_test.dart`
+* Result: passed.
+* `flutter test test/widgets/add_book_sheet_test.dart`
+* Result: passed.
+* `flutter analyze`
+* Result: passed with no issues.
+* `flutter test`
+* Result: passed.
+
+**Issues found:**
+
+* Stale catalogue phrases remain only in tests/docs where they assert absence or describe pre-migration history; not in the current main user-facing Gutenberg flow.
+
+**Next recommended step:**
+Commit the completed API-only Gutenberg migration after final verification passes.

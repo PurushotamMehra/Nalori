@@ -43,13 +43,13 @@ class PublicDomainCatalogStatus {
 
   static const starterOnly = PublicDomainCatalogStatus(
     availability: PublicDomainCatalogAvailability.starterOnly,
-    message: 'Showing starter offline catalogue',
+    message: 'Showing limited saved book list',
     isFallbackOnly: true,
   );
 
   static const fullInstalled = PublicDomainCatalogStatus(
     availability: PublicDomainCatalogAvailability.fullInstalled,
-    message: 'Full catalogue available offline',
+    message: 'Local book list available',
   );
 }
 

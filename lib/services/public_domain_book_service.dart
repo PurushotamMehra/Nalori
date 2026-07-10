@@ -110,9 +110,12 @@ class PublicDomainBookService {
   Future<PublicDomainBookPage?> readCachedBooks({
     PublicDomainBookQuery query = const PublicDomainBookQuery(),
     int page = 1,
+    String? pageUrl,
   }) async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_cacheKey(query: query, page: page));
+    final raw = prefs.getString(
+      _cacheKey(query: query, page: page, pageUrl: pageUrl),
+    );
     if (raw == null) return null;
 
     try {
@@ -127,9 +130,12 @@ class PublicDomainBookService {
   Future<bool> isCacheFresh({
     PublicDomainBookQuery query = const PublicDomainBookQuery(),
     int page = 1,
+    String? pageUrl,
   }) async {
     final prefs = await SharedPreferences.getInstance();
-    final cachedAt = prefs.getInt(_cacheTimestampKey(query: query, page: page));
+    final cachedAt = prefs.getInt(
+      _cacheTimestampKey(query: query, page: page, pageUrl: pageUrl),
+    );
     if (cachedAt == null) return false;
 
     final age = DateTime.now().difference(
@@ -198,7 +204,7 @@ class PublicDomainBookService {
     int page = 1,
     String? pageUrl,
   }) async {
-    final key = _cacheKey(query: query, page: page);
+    final key = _cacheKey(query: query, page: page, pageUrl: pageUrl);
     final existing = _inFlightRequests[key];
     if (existing != null) return existing;
 
@@ -220,8 +226,13 @@ class PublicDomainBookService {
     int page = 1,
     String? pageUrl,
   }) async {
-    final cached = await readCachedBooks(query: query, page: page);
-    if (cached != null && await isCacheFresh(query: query, page: page)) {
+    final cached = await readCachedBooks(
+      query: query,
+      page: page,
+      pageUrl: pageUrl,
+    );
+    if (cached != null &&
+        await isCacheFresh(query: query, page: page, pageUrl: pageUrl)) {
       return cached;
     }
 
@@ -304,15 +315,21 @@ class PublicDomainBookService {
     final params = <String, String>{};
 
     if (pageUrl == null) {
+      params['copyright'] = 'false';
+      params['mime_type'] = 'application/epub+zip';
+      params['sort'] = _sortValue(query.sort);
+
+      final languageCode = query.languageCode?.trim().toLowerCase();
+      if (languageCode != null && languageCode.isNotEmpty) {
+        params['languages'] = languageCode;
+      }
+
       final seededText = _seededText(query);
       if (seededText != null) {
         final key = query.searchMode == PublicDomainSearchMode.topic
             ? 'topic'
             : 'search';
         params[key] = seededText;
-      }
-      if (query.sort != PublicDomainSort.popular) {
-        params['sort'] = _sortValue(query.sort);
       }
       if (page > 1) {
         params['page'] = page.toString();
@@ -419,10 +436,10 @@ class PublicDomainBookService {
   }) async {
     final result = await fetchBooks(query: query, page: page, pageUrl: pageUrl);
     final prefs = await SharedPreferences.getInstance();
-    final key = _cacheKey(query: query, page: page);
+    final key = _cacheKey(query: query, page: page, pageUrl: pageUrl);
     await prefs.setString(key, json.encode(result.toCacheJson()));
     await prefs.setInt(
-      _cacheTimestampKey(query: query, page: page),
+      _cacheTimestampKey(query: query, page: page, pageUrl: pageUrl),
       DateTime.now().millisecondsSinceEpoch,
     );
     return result;
@@ -531,15 +548,31 @@ class PublicDomainBookService {
     return query.hasText ? _searchCacheTtl : _defaultCacheTtl;
   }
 
-  String _cacheKey({required PublicDomainBookQuery query, required int page}) {
-    return '$_cachePrefix${query.cacheKey}_page_$page';
+  String _cacheKey({
+    required PublicDomainBookQuery query,
+    required int page,
+    String? pageUrl,
+  }) {
+    final normalizedPageUrl = _normalizedCachePageUrl(pageUrl);
+    final pageUrlKey = normalizedPageUrl == null
+        ? ''
+        : '_url_${base64Url.encode(utf8.encode(normalizedPageUrl))}';
+    return '$_cachePrefix${query.cacheKey}_page_$page$pageUrlKey';
   }
 
   String _cacheTimestampKey({
     required PublicDomainBookQuery query,
     required int page,
+    String? pageUrl,
   }) {
-    return '${_cacheKey(query: query, page: page)}_cached_at';
+    return '${_cacheKey(query: query, page: page, pageUrl: pageUrl)}_cached_at';
+  }
+
+  String? _normalizedCachePageUrl(String? pageUrl) {
+    final trimmed = pageUrl?.trim();
+    if (trimmed == null || trimmed.isEmpty) return null;
+    final parsed = Uri.tryParse(trimmed);
+    return parsed?.toString() ?? trimmed;
   }
 
   Future<PublicDomainBook?> _readCachedBookDetails(int id) async {

@@ -1,4 +1,7 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -44,13 +47,29 @@ class PublicDomainDownloadService {
     PublicDomainDownloadProgress? onProgress,
     PublicDomainDownloadCancelToken? cancelToken,
   }) async {
-    final uri = Uri.parse(book.epubUrl);
+    final uri = _downloadUriFor(book);
+    if (cancelToken?.isCancelled == true) {
+      throw const PublicDomainDownloadCancelledException();
+    }
+
     final request = http.Request('GET', uri);
-    final response = await _client.send(request, headers: _headers);
+    final http.StreamedResponse response;
+    try {
+      response = await _client.send(request, headers: _headers);
+    } on Object catch (error) {
+      if (error is TimeoutException ||
+          error is SocketException ||
+          error is http.ClientException) {
+        throw const PublicDomainDownloadException(
+          "Couldn't download this EPUB. Please check your connection and try again.",
+        );
+      }
+      rethrow;
+    }
 
     if (response.statusCode != 200) {
-      throw PublicDomainDownloadException(
-        'Book download failed (${response.statusCode})',
+      throw const PublicDomainDownloadException(
+        "Couldn't download this EPUB. Please check your connection and try again.",
       );
     }
 
@@ -65,18 +84,27 @@ class PublicDomainDownloadService {
       receivedBytes += chunk.length;
       onProgress?.call(receivedBytes, totalBytes);
     }
+    if (cancelToken?.isCancelled == true) {
+      throw const PublicDomainDownloadCancelledException();
+    }
 
     final bytes = <int>[];
     for (final chunk in chunks) {
       bytes.addAll(chunk);
     }
-    if (!_looksLikeEpub(bytes)) {
+    if (!_isValidEpub(bytes)) {
       throw const PublicDomainDownloadException(
-        'Downloaded file is not a valid EPUB',
+        'This file does not appear to be a valid EPUB.',
       );
     }
 
-    return _saveBookBytes(fileName: fileNameFor(book), bytes: bytes);
+    try {
+      return await _saveBookBytes(fileName: fileNameFor(book), bytes: bytes);
+    } catch (_) {
+      throw const PublicDomainDownloadException(
+        "Couldn't import this book. Please try again.",
+      );
+    }
   }
 
   String fileNameFor(PublicDomainBook book) {
@@ -84,8 +112,77 @@ class PublicDomainDownloadService {
     return 'gutenberg_${book.id}_$slug.epub';
   }
 
-  bool _looksLikeEpub(List<int> bytes) {
-    return bytes.length > 4 && bytes[0] == 0x50 && bytes[1] == 0x4B;
+  Uri _downloadUriFor(PublicDomainBook book) {
+    final uri = Uri.tryParse(book.epubUrl.trim());
+    if (uri == null ||
+        !uri.hasScheme ||
+        (uri.scheme != 'https' && uri.scheme != 'http') ||
+        uri.host.isEmpty) {
+      throw const PublicDomainDownloadException(
+        'This book does not have a readable EPUB download available.',
+      );
+    }
+    return uri;
+  }
+
+  bool _isValidEpub(List<int> bytes) {
+    try {
+      if (bytes.length <= 4 || bytes[0] != 0x50 || bytes[1] != 0x4B) {
+        return false;
+      }
+
+      var hasContainer = false;
+      var hasEpubMimeType = false;
+      var offset = 0;
+      while (offset + 30 <= bytes.length) {
+        final signature = _readUint32(bytes, offset);
+        if (signature != 0x04034B50) break;
+
+        final compressionMethod = _readUint16(bytes, offset + 8);
+        final compressedSize = _readUint32(bytes, offset + 18);
+        final fileNameLength = _readUint16(bytes, offset + 26);
+        final extraLength = _readUint16(bytes, offset + 28);
+        final nameStart = offset + 30;
+        final nameEnd = nameStart + fileNameLength;
+        final dataStart = nameEnd + extraLength;
+        final dataEnd = dataStart + compressedSize;
+        if (nameEnd > bytes.length || dataStart > bytes.length) return false;
+
+        final name = utf8.decode(bytes.sublist(nameStart, nameEnd));
+        if (name == 'META-INF/container.xml') {
+          hasContainer = true;
+        }
+        if (name == 'mimetype' &&
+            compressionMethod == 0 &&
+            dataEnd <= bytes.length) {
+          final value = utf8.decode(bytes.sublist(dataStart, dataEnd)).trim();
+          hasEpubMimeType = value == 'application/epub+zip';
+        }
+        if (hasContainer && hasEpubMimeType) return true;
+        if (dataEnd > bytes.length) return false;
+        offset = dataEnd;
+      }
+
+      return hasContainer && hasEpubMimeType;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  int _readUint16(List<int> bytes, int offset) {
+    return ByteData.sublistView(
+      Uint8List.fromList(bytes),
+      offset,
+      offset + 2,
+    ).getUint16(0, Endian.little);
+  }
+
+  int _readUint32(List<int> bytes, int offset) {
+    return ByteData.sublistView(
+      Uint8List.fromList(bytes),
+      offset,
+      offset + 4,
+    ).getUint32(0, Endian.little);
   }
 
   String _slugify(String value) {

@@ -36,7 +36,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get addBookSheetSubtitle =>
-      'Import your own EPUB or browse free classics.';
+      'Import your own EPUB or find public-domain EPUBs.';
 
   @override
   String get importEpub => 'Import EPUB';
@@ -52,7 +52,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get browseProjectGutenbergSubtitle =>
-      'Explore free public-domain EPUBs';
+      'Search public-domain EPUBs via Gutendex';
 
   @override
   String get addBookSupportNote =>
@@ -129,7 +129,7 @@ class AppLocalizationsEnIn extends AppLocalizationsEn {
 
   @override
   String get addBookSheetSubtitle =>
-      'Import your own EPUB or browse free classics.';
+      'Import your own EPUB or find public-domain EPUBs.';
 
   @override
   String get importEpub => 'Import EPUB';
@@ -145,7 +145,7 @@ class AppLocalizationsEnIn extends AppLocalizationsEn {
 
   @override
   String get browseProjectGutenbergSubtitle =>
-      'Explore free public-domain EPUBs';
+      'Search public-domain EPUBs via Gutendex';
 
   @override
   String get addBookSupportNote =>

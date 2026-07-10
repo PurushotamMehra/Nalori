@@ -23,21 +23,14 @@ void main() {
           client: MockClient((request) async {
             expect(request.url.host, 'gutendex.com');
             expect(request.url.path, '/books/');
-            expect(
-              request.url.queryParameters.containsKey('copyright'),
-              isFalse,
-            );
-            expect(
-              request.url.queryParameters.containsKey('languages'),
-              isFalse,
-            );
-            expect(
-              request.url.queryParameters.containsKey('mime_type'),
-              isFalse,
-            );
-            expect(request.url.queryParameters['search'], 'austen');
+            expect(request.url.queryParameters, {
+              'copyright': 'false',
+              'mime_type': 'application/epub+zip',
+              'sort': 'popular',
+              'languages': 'en',
+              'search': 'austen',
+            });
             expect(request.url.queryParameters.containsKey('page'), isFalse);
-            expect(request.url.queryParameters.containsKey('sort'), isFalse);
             expect(
               request.headers['User-Agent'],
               contains('naloriapp@gmail.com'),
@@ -109,38 +102,44 @@ void main() {
       },
     );
 
-    test('default popular catalog uses unfiltered books endpoint', () async {
-      final service = PublicDomainBookService(
-        client: MockClient((request) async {
-          expect(request.url.host, 'gutendex.com');
-          expect(request.url.path, '/books/');
-          expect(request.url.queryParameters, isEmpty);
-          expect(request.url.queryParameters.containsKey('page'), isFalse);
-          expect(request.url.queryParameters.containsKey('sort'), isFalse);
-          expect(request.url.queryParameters.containsKey('copyright'), isFalse);
-          expect(request.url.queryParameters.containsKey('languages'), isFalse);
-          expect(request.url.queryParameters.containsKey('mime_type'), isFalse);
+    test(
+      'default popular catalog requests public-domain EPUBs explicitly',
+      () async {
+        final service = PublicDomainBookService(
+          client: MockClient((request) async {
+            expect(request.url.host, 'gutendex.com');
+            expect(request.url.path, '/books/');
+            expect(request.url.queryParameters, {
+              'copyright': 'false',
+              'mime_type': 'application/epub+zip',
+              'sort': 'popular',
+              'languages': 'en',
+            });
+            expect(request.url.queryParameters.containsKey('page'), isFalse);
 
-          return http.Response(
-            _catalogResponse(id: 1, title: 'Default Book'),
-            200,
-          );
-        }),
-      );
+            return http.Response(
+              _catalogResponse(id: 1, title: 'Default Book'),
+              200,
+            );
+          }),
+        );
 
-      final page = await service.fetchBooks();
+        final page = await service.fetchBooks();
 
-      expect(page.books.single.title, 'Default Book');
-    });
+        expect(page.books.single.title, 'Default Book');
+      },
+    );
 
     test('uses topic queries and custom filters', () async {
       final service = PublicDomainBookService(
         client: MockClient((request) async {
-          expect(request.url.queryParameters['topic'], 'children');
-          expect(request.url.queryParameters['sort'], 'descending');
-          expect(request.url.queryParameters.containsKey('copyright'), isFalse);
-          expect(request.url.queryParameters.containsKey('languages'), isFalse);
-          expect(request.url.queryParameters.containsKey('mime_type'), isFalse);
+          expect(request.url.queryParameters, {
+            'copyright': 'false',
+            'mime_type': 'application/epub+zip',
+            'sort': 'descending',
+            'languages': 'fr',
+            'topic': 'children',
+          });
           expect(request.url.queryParameters.containsKey('page'), isFalse);
           expect(request.url.queryParameters.containsKey('search'), isFalse);
 
@@ -172,7 +171,12 @@ void main() {
     test('local filtering excludes ineligible unfiltered results', () async {
       final service = PublicDomainBookService(
         client: MockClient((request) async {
-          expect(request.url.queryParameters, isEmpty);
+          expect(request.url.queryParameters, {
+            'copyright': 'false',
+            'mime_type': 'application/epub+zip',
+            'sort': 'popular',
+            'languages': 'en',
+          });
           return http.Response(
             jsonEncode({
               'count': 4,
@@ -198,6 +202,31 @@ void main() {
 
       expect(page.books.map((book) => book.title), ['Eligible']);
     });
+
+    test(
+      'oldest and newest sort map to Gutendex ascending and descending',
+      () async {
+        final requestedSorts = <String?>[];
+        final service = PublicDomainBookService(
+          client: MockClient((request) async {
+            requestedSorts.add(request.url.queryParameters['sort']);
+            return http.Response(
+              _catalogResponse(id: requestedSorts.length, title: 'Sorted Book'),
+              200,
+            );
+          }),
+        );
+
+        await service.fetchBooks(
+          query: const PublicDomainBookQuery(sort: PublicDomainSort.ascending),
+        );
+        await service.fetchBooks(
+          query: const PublicDomainBookQuery(sort: PublicDomainSort.descending),
+        );
+
+        expect(requestedSorts, ['ascending', 'descending']);
+      },
+    );
 
     test('bundled catalog loads and maps entries to existing model', () async {
       final service = PublicDomainBookService(
@@ -458,6 +487,13 @@ void main() {
         client: MockClient((request) async {
           final page = request.url.queryParameters['page'];
           if (page == null) {
+            expect(request.url.queryParameters['search'], 'Austen, Jane');
+            expect(request.url.queryParameters['copyright'], 'false');
+            expect(
+              request.url.queryParameters['mime_type'],
+              'application/epub+zip',
+            );
+            expect(request.url.queryParameters['sort'], 'popular');
             return http.Response(
               jsonEncode({
                 'count': 2,
@@ -524,6 +560,9 @@ void main() {
           expect(request.url.host, 'gutendex.com');
           expect(request.url.path, '/books');
           expect(request.url.queryParameters['page'], '2');
+          expect(request.url.queryParameters.containsKey('copyright'), isFalse);
+          expect(request.url.queryParameters.containsKey('mime_type'), isFalse);
+          expect(request.url.queryParameters.containsKey('languages'), isFalse);
           return http.Response(
             _catalogResponse(id: 22, title: 'Relative Page'),
             200,
@@ -535,6 +574,80 @@ void main() {
 
       expect(page.books.single.title, 'Relative Page');
     });
+
+    test(
+      'absolute nextUrl pagination preserves returned query params',
+      () async {
+        final service = PublicDomainBookService(
+          client: MockClient((request) async {
+            expect(
+              request.url.toString(),
+              'https://gutendex.com/books/?page=2&search=Austen&languages=fr',
+            );
+            expect(request.url.queryParameters, {
+              'page': '2',
+              'search': 'Austen',
+              'languages': 'fr',
+            });
+            return http.Response(
+              _catalogResponse(id: 23, title: 'Absolute Page'),
+              200,
+            );
+          }),
+        );
+
+        final page = await service.fetchBooks(
+          query: const PublicDomainBookQuery(
+            text: 'ignored',
+            languageCode: 'en',
+            sort: PublicDomainSort.descending,
+          ),
+          page: 2,
+          pageUrl:
+              'https://gutendex.com/books/?page=2&search=Austen&languages=fr',
+        );
+
+        expect(page.books.single.title, 'Absolute Page');
+      },
+    );
+
+    test(
+      'cache keys distinguish same page with different nextUrl values',
+      () async {
+        var requests = 0;
+        final service = PublicDomainBookService(
+          client: MockClient((request) async {
+            requests += 1;
+            return http.Response(
+              _catalogResponse(id: requests, title: 'Page $requests'),
+              200,
+            );
+          }),
+        );
+
+        const query = PublicDomainBookQuery(text: 'austen');
+        final first = await service.fetchBooksAndCache(
+          query: query,
+          page: 2,
+          pageUrl: 'https://gutendex.com/books/?page=2&search=austen',
+        );
+        final second = await service.fetchBooksAndCache(
+          query: query,
+          page: 2,
+          pageUrl: 'https://gutendex.com/books/?page=2&search=bronte',
+        );
+        final cachedFirst = await service.fetchBooksCacheFirst(
+          query: query,
+          page: 2,
+          pageUrl: 'https://gutendex.com/books/?page=2&search=austen',
+        );
+
+        expect(first.books.single.title, 'Page 1');
+        expect(second.books.single.title, 'Page 2');
+        expect(cachedFirst.books.single.title, 'Page 1');
+        expect(requests, 2);
+      },
+    );
 
     test('caps exact-author automatic page scanning', () async {
       var requests = 0;

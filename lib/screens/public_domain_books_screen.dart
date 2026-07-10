@@ -6,7 +6,6 @@ import 'package:path/path.dart' as p;
 
 import '../models/book_metadata.dart';
 import '../models/public_domain_book.dart';
-import '../models/public_domain_catalog.dart';
 import '../models/reading_settings.dart';
 import '../services/book_metadata_service.dart';
 import '../services/library_service.dart';
@@ -30,7 +29,8 @@ class PublicDomainBooksScreen extends StatefulWidget {
     super.key,
     required this.settings,
     this.title = 'Project Gutenberg',
-    this.subtitle = 'Explore free public-domain books in the U.S. catalog',
+    this.subtitle =
+        'Search public-domain EPUBs from Project Gutenberg via Gutendex.',
     this.initialQuery = const PublicDomainBookQuery(),
     this.catalogService,
     this.downloadService,
@@ -118,17 +118,15 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   bool _loadingMore = false;
   bool _refreshing = false;
   bool _hasNextPage = false;
+  bool _showingSavedResults = false;
   int _page = 1;
+  String? _nextPageUrl;
   int _requestGeneration = 0;
   String? _activeInitialLoadKey;
   Timer? _searchDebounce;
   bool _prefetchingMore = false;
   PublicDomainBookPage? _prefetchedPage;
   String? _prefetchedPageKey;
-  PublicDomainCatalogManifest? _availableCatalogManifest;
-  String? _statusActionLabel;
-  bool _catalogInstallInProgress = false;
-  double? _catalogInstallProgress;
 
   ReadingSettings get _s => widget.settings;
 
@@ -156,69 +154,6 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   Future<void> _loadInitialData() async {
     if (!widget.skipLocalBookLoad) await _loadLocalBooks();
     await _loadBooks(reset: true);
-    unawaited(_checkForFullCatalog());
-  }
-
-  Future<void> _checkForFullCatalog() async {
-    try {
-      final manifest = await _catalogService.fetchCatalogManifest();
-      if (!mounted || manifest == null) return;
-      setState(() {
-        _availableCatalogManifest = manifest;
-        if (manifest.compressedSizeBytes > 10 * 1024 * 1024) {
-          _statusMessage =
-              'Full Gutenberg catalogue available (${_formatBytes(manifest.compressedSizeBytes)})';
-          _statusActionLabel = 'Download';
-        } else {
-          _statusMessage = 'Downloading full Gutenberg catalogue';
-          _statusActionLabel = null;
-        }
-      });
-      if (manifest.compressedSizeBytes <= 10 * 1024 * 1024) {
-        await _installFullCatalog(manifest);
-      }
-    } catch (_) {
-      if (!mounted || _books.isEmpty) return;
-      setState(() {
-        _statusMessage = 'Could not check for catalogue updates.';
-        _statusActionLabel = 'Retry';
-      });
-    }
-  }
-
-  Future<void> _installFullCatalog(PublicDomainCatalogManifest manifest) async {
-    if (_catalogInstallInProgress) return;
-    setState(() {
-      _catalogInstallInProgress = true;
-      _catalogInstallProgress = null;
-      _statusMessage = 'Downloading full Gutenberg catalogue';
-      _statusActionLabel = null;
-    });
-    try {
-      await _catalogService.installCatalog(
-        manifest,
-        onProgress: (received, total) {
-          if (!mounted || total == null || total <= 0) return;
-          setState(() => _catalogInstallProgress = received / total);
-        },
-      );
-      if (!mounted) return;
-      setState(() {
-        _catalogInstallInProgress = false;
-        _catalogInstallProgress = null;
-        _availableCatalogManifest = null;
-        _statusMessage = 'Full catalogue available offline';
-      });
-      await _loadBooks(reset: true);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _catalogInstallInProgress = false;
-        _catalogInstallProgress = null;
-        _statusMessage = 'Could not update catalogue. Showing saved results.';
-        _statusActionLabel = 'Retry';
-      });
-    }
   }
 
   Future<void> _loadLocalBooks() async {
@@ -309,9 +244,12 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
         _loadingMore = false;
         _refreshing = _books.isNotEmpty;
         _error = null;
-        _statusMessage = _books.isNotEmpty ? 'Refreshing catalogue' : null;
-        _statusActionLabel = null;
+        _statusMessage = _books.isNotEmpty
+            ? 'Showing saved results while refreshing.'
+            : null;
+        _showingSavedResults = _books.isNotEmpty;
         _page = 1;
+        _nextPageUrl = null;
       });
     } else {
       setState(() => _loadingMore = true);
@@ -324,9 +262,10 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
           : _takePrefetchedPage(query: query, page: requestedPage);
       final page =
           prefetchedPage ??
-          await _catalogService.fetchLocalCatalogPage(
+          await _catalogService.fetchBooksCacheFirst(
             query: query,
             page: requestedPage,
+            pageUrl: reset ? null : _nextPageUrl,
           );
 
       if (!mounted || generation != _requestGeneration) return;
@@ -334,11 +273,12 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
         _books = reset ? page.books : _appendUniqueBooks(_books, page.books);
         _page = page.page;
         _hasNextPage = page.hasNextPage;
+        _nextPageUrl = page.nextUrl;
         _loading = false;
         _loadingMore = false;
         _refreshing = false;
         _statusMessage = page.catalogStatusMessage;
-        _statusActionLabel = null;
+        _showingSavedResults = page.isFallbackOnly;
       });
       if (!reset) _maybePrefetchNextPage();
     } catch (e) {
@@ -347,10 +287,10 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
         _error = _books.isEmpty ? _catalogUnavailableMessage(e) : null;
         _statusMessage = _books.isNotEmpty
             ? reset
-                  ? 'Could not refresh. Showing saved Project Gutenberg results.'
+                  ? 'You appear to be offline. Showing saved results.'
                   : 'Could not load more books. Try again when the catalog responds.'
             : null;
-        _statusActionLabel = null;
+        _showingSavedResults = _books.isNotEmpty;
         _loading = false;
         _loadingMore = false;
         _refreshing = false;
@@ -418,6 +358,7 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
 
     final query = _activeQuery;
     final nextPage = _page + 1;
+    final nextPageUrl = _nextPageUrl;
     final key = _pageCacheKey(query: query, page: nextPage);
     if (_prefetchedPageKey == key && _prefetchedPage != null) return;
 
@@ -425,7 +366,11 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
     _prefetchedPageKey = key;
     unawaited(
       _catalogService
-          .fetchLocalCatalogPage(query: query, page: nextPage)
+          .fetchBooksCacheFirst(
+            query: query,
+            page: nextPage,
+            pageUrl: nextPageUrl,
+          )
           .then((page) {
             if (!mounted || _prefetchedPageKey != key) return;
             _prefetchedPage = page;
@@ -650,6 +595,15 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       return existingFile.path;
     }
 
+    if (!_hasReadableEpubUrl(book)) {
+      _showDownloadError(
+        const PublicDomainDownloadException(
+          'This book does not have a readable EPUB download available.',
+        ),
+      );
+      return null;
+    }
+
     if (onProgress != null) {
       return _downloadBookForDetail(book, onProgress);
     }
@@ -820,15 +774,30 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
   }
 
   void _showDownloadError(Object error) {
+    if (error is PublicDomainDownloadCancelledException) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          'Could not download this book: $error',
+          _friendlyDownloadErrorMessage(error),
           style: _s.uiText(color: _s.textColor, fontWeight: FontWeight.w600),
         ),
         backgroundColor: _s.menuColor,
       ),
     );
+  }
+
+  String _friendlyDownloadErrorMessage(Object error) {
+    if (error is PublicDomainDownloadException) return error.message;
+    return "Couldn't import this book. Please try again.";
+  }
+
+  bool _hasReadableEpubUrl(PublicDomainBook book) {
+    final uri = Uri.tryParse(book.epubUrl.trim());
+    return uri != null &&
+        uri.hasScheme &&
+        (uri.scheme == 'https' || uri.scheme == 'http') &&
+        uri.host.isNotEmpty;
   }
 
   Future<File> _prepareDownloadedBook(
@@ -838,23 +807,52 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
     await _metadataService.init();
     final bookId = p.basename(downloadedFile.path);
     var metadata = _metadataService.getMetadata(bookId);
-    metadata ??= await _metadataService.extractAndCacheMetadata(downloadedFile);
+    if (metadata == null) {
+      try {
+        metadata = await _metadataService.extractAndCacheMetadata(
+          downloadedFile,
+        );
+      } catch (_) {
+        metadata = null;
+      }
+    }
 
     if (metadata == null) {
-      throw const PublicDomainDownloadException(
-        'The downloaded EPUB could not be opened',
+      metadata = BookMetadata(
+        id: bookId,
+        managedFilePath: downloadedFile.path,
+        title: book.title,
+        author: book.authorLabel,
+        embeddedTitle: book.title,
+        embeddedAuthor: book.authorLabel,
+        titleSource: 'gutendex',
+        authorSource: 'gutendex',
+        metadataSource: 'gutendex',
+        source: 'gutenberg',
+        gutenbergId: book.id,
+        sourceUrl: 'https://www.gutenberg.org/ebooks/${book.id}',
+        downloadUrl: book.epubUrl,
+        importedAt: DateTime.now().millisecondsSinceEpoch,
+        originalSourceTitle: book.title,
+        originalSourceAuthor: book.authorLabel,
+        metadataConfidence: 0.78,
       );
+      await _metadataService.updateMetadata(metadata);
     }
 
     var coverPath = metadata.coverImagePath;
     final coverUrl = book.coverUrl;
     if (coverPath == null && coverUrl != null) {
-      final updated = await _metadataService.saveRemoteCover(
-        bookId: bookId,
-        coverUrl: coverUrl,
-        source: 'gutendex',
-      );
-      coverPath = updated?.coverImagePath;
+      try {
+        final updated = await _metadataService.saveRemoteCover(
+          bookId: bookId,
+          coverUrl: coverUrl,
+          source: 'gutendex',
+        );
+        coverPath = updated?.coverImagePath;
+      } catch (_) {
+        coverPath = null;
+      }
     }
 
     final updated = await _metadataService.applyRemoteMetadata(
@@ -1017,6 +1015,15 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
           Text(
             widget.subtitle,
             style: _s.uiText(fontSize: 13, color: _s.mutedColor, height: 1.4),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'For deeper catalogue browsing, visit Project Gutenberg.',
+            style: _s.uiText(
+              fontSize: 12,
+              color: _s.mutedColor.withValues(alpha: 0.82),
+              height: 1.35,
+            ),
           ),
           const SizedBox(height: 14),
           TextField(
@@ -1354,19 +1361,24 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       ),
       child: Row(
         children: [
-          if (_refreshing || _catalogInstallInProgress) ...[
+          if (_refreshing) ...[
             SizedBox(
               width: 14,
               height: 14,
               child: CircularProgressIndicator(
-                value: _catalogInstallProgress,
                 strokeWidth: 2,
                 color: _s.accentColor,
               ),
             ),
             const SizedBox(width: 10),
           ] else
-            Icon(Icons.info_outline_rounded, size: 16, color: _s.mutedColor),
+            Icon(
+              _showingSavedResults
+                  ? Icons.cloud_off_rounded
+                  : Icons.info_outline_rounded,
+              size: 16,
+              color: _s.mutedColor,
+            ),
           if (!_refreshing) const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -1374,32 +1386,9 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
               style: _s.uiText(fontSize: 12, color: _s.mutedColor),
             ),
           ),
-          if (_statusActionLabel != null) ...[
-            const SizedBox(width: 8),
-            TextButton(
-              onPressed: _handleStatusAction,
-              style: TextButton.styleFrom(
-                foregroundColor: _s.accentColor,
-                visualDensity: VisualDensity.compact,
-              ),
-              child: Text(
-                _statusActionLabel!,
-                style: _s.uiText(fontSize: 12, fontWeight: FontWeight.w700),
-              ),
-            ),
-          ],
         ],
       ),
     );
-  }
-
-  void _handleStatusAction() {
-    final manifest = _availableCatalogManifest;
-    if (manifest != null) {
-      unawaited(_installFullCatalog(manifest));
-      return;
-    }
-    unawaited(_checkForFullCatalog());
   }
 
   Widget _buildMessageState({
@@ -1772,15 +1761,5 @@ class _PublicDomainBooksScreenState extends State<PublicDomainBooksScreen> {
       case PublicDomainSort.descending:
         return 'Newest IDs';
     }
-  }
-
-  String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    final kb = bytes / 1024;
-    if (kb < 1024) return '${kb.toStringAsFixed(1)} KB';
-    final mb = kb / 1024;
-    if (mb < 1024) return '${mb.toStringAsFixed(1)} MB';
-    final gb = mb / 1024;
-    return '${gb.toStringAsFixed(1)} GB';
   }
 }

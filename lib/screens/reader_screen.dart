@@ -91,6 +91,23 @@ void _readerDiagLog(String phase, Map<String, Object?> fields) {
   print(parts.join(' '));
 }
 
+@visibleForTesting
+LazySectionWorkPriority lazySectionPriorityForReaderReason(String reason) {
+  if (reason.startsWith('next_page_') ||
+      reason.startsWith('previous_page_') ||
+      reason.contains('source_anchor_navigation') ||
+      reason.contains('card_depth_current_chapter')) {
+    return LazySectionWorkPriority.explicitNavigation;
+  }
+  if (reason.contains('warmup') || reason.contains('cold_restore')) {
+    return LazySectionWorkPriority.adjacentReadiness;
+  }
+  if (reason.contains('boundary')) {
+    return LazySectionWorkPriority.boundaryPrefetch;
+  }
+  return LazySectionWorkPriority.explicitNavigation;
+}
+
 typedef ProgressiveDisplayRangeGenerator =
     Future<DisplayRangeResult> Function(DisplayRangeRequest request);
 
@@ -591,6 +608,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   int? _lazyMaxLoadedSpineIndex;
   bool _isLoadingLazyForwardSection = false;
   final Map<DisplayRangeDirection, Future<bool>> _activeLazyAdjacentLoads = {};
+  String? _activeCardDepthChapterCompletionKey;
   int _lazyAdjacentOperationSequence = 0;
   static const Duration _lazyHydrationQuietPeriod = Duration(milliseconds: 900);
   int _lastForegroundReaderWorkMs = 0;
@@ -4035,6 +4053,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       });
       if (mounted) setState(() {});
       _scheduleLazyInitialAdjacentWarmup();
+      _maybeRequestCardDepthChapterCompletion(_currentPage);
       final forwardRange = progressiveState.nextForwardRange(
         _adjacentRangeSourceChunks,
       );
@@ -4174,6 +4193,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     });
     if (mounted) setState(() {});
     _scheduleLazyInitialAdjacentWarmup();
+    _maybeRequestCardDepthChapterCompletion(_currentPage);
 
     final forwardRange = progressiveState.nextForwardRange(
       _adjacentRangeSourceChunks,
@@ -5402,18 +5422,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   LazySectionWorkPriority _lazySectionPriorityForReason(String reason) {
-    if (reason.startsWith('next_page_') ||
-        reason.startsWith('previous_page_') ||
-        reason.contains('source_anchor_navigation')) {
-      return LazySectionWorkPriority.explicitNavigation;
-    }
-    if (reason.contains('warmup') || reason.contains('cold_restore')) {
-      return LazySectionWorkPriority.adjacentReadiness;
-    }
-    if (reason.contains('boundary')) {
-      return LazySectionWorkPriority.boundaryPrefetch;
-    }
-    return LazySectionWorkPriority.explicitNavigation;
+    return lazySectionPriorityForReaderReason(reason);
   }
 
   Future<void> _integrateLazyForwardSection(
@@ -6790,6 +6799,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       _deferSaveReadingPosition(index);
     }
     _maybeRequestProgressiveBoundaryRange(index);
+    _maybeRequestCardDepthChapterCompletion(index);
 
     // Detect book completion — show overlay when reaching the last page
     if (!_hasShownCompletion &&
@@ -6804,6 +6814,144 @@ class _ReaderScreenState extends State<ReaderScreen>
         unawaited(_statsService.recordBookCompleted());
       }
       unawaited(_syncNativeReaderControlsState());
+    }
+  }
+
+  CardDepthChapterPageMeta _cardDepthChapterMetaForDisplayIndex(
+    int displayIndex,
+  ) {
+    return CardDepthChapterProgressService.calculate(
+      displayIndex: displayIndex,
+      displayChunkCount: _displayChunks.length,
+      displayToOriginal: _displayToOriginal,
+      locationsByChunkIndex: _sourceLocationsByChunkIndex,
+      chapterNavigationTargets: _chapterNavigationTargets,
+      displayChunksComplete: _displayChunksComplete,
+      fallbackFlatChapters: _flatChapters,
+    );
+  }
+
+  StableBookLocation? _firstLocationForDisplayIndex(int displayIndex) {
+    if (displayIndex < 0 || displayIndex >= _displayToOriginal.length) {
+      return null;
+    }
+    for (final original in _displayToOriginal[displayIndex]) {
+      final location = _sourceLocationsByChunkIndex[original];
+      if (location != null) return location;
+    }
+    return null;
+  }
+
+  void _maybeRequestCardDepthChapterCompletion(int displayIndex) {
+    if (!_settings.enableCardDepth ||
+        _lazySession == null ||
+        _displayChunksComplete ||
+        displayIndex < 0 ||
+        displayIndex >= _displayToOriginal.length) {
+      return;
+    }
+
+    final meta = _cardDepthChapterMetaForDisplayIndex(displayIndex);
+    if (!meta.shouldRequestChapterCompletion) return;
+
+    final currentLocation = _firstLocationForDisplayIndex(displayIndex);
+    if (currentLocation == null) return;
+    final selectableTargets = _chapterNavigationTargets
+        .where((target) => target.isSelectable)
+        .toList(growable: false);
+    final currentTargetIndex = ChapterNavigationService.currentTargetIndex(
+      selectableTargets,
+      currentLocation,
+    );
+    if (currentTargetIndex < 0) return;
+
+    final nextTarget = currentTargetIndex + 1 < selectableTargets.length
+        ? selectableTargets[currentTargetIndex + 1]
+        : null;
+    if (nextTarget == null) {
+      // With no canonical next chapter target, avoid walking the whole book just
+      // to prove the final denominator. The inexact `page / ?` footer remains
+      // honest while normal lazy boundary reads continue to load content.
+      return;
+    }
+
+    final key =
+        '$_rebuildGeneration:${nextTarget.spineIndex}:'
+        '${nextTarget.anchorId ?? ''}:'
+        '${nextTarget.resolvedLocalChunkIndex ?? -1}:'
+        '${nextTarget.textOffset}';
+    if (_activeCardDepthChapterCompletionKey == key) return;
+    _activeCardDepthChapterCompletionKey = key;
+    unawaited(
+      _completeCardDepthCurrentChapterBoundary(
+        nextTarget: nextTarget,
+        key: key,
+        generation: _rebuildGeneration,
+      ),
+    );
+  }
+
+  Future<void> _completeCardDepthCurrentChapterBoundary({
+    required ChapterNavigationTarget nextTarget,
+    required String key,
+    required int generation,
+  }) async {
+    try {
+      _readerDiagLog('card_depth_chapter_completion_requested', {
+        'book': widget.bookId,
+        'generation': generation,
+        'targetSpineIndex': nextTarget.spineIndex,
+        'targetHref': nextTarget.href,
+        'targetAnchorId': nextTarget.anchorId,
+      });
+
+      while (mounted &&
+          generation == _rebuildGeneration &&
+          _lazySession != null) {
+        final loadedSpines = _loadedLazySpineIndexes();
+        if (loadedSpines.contains(nextTarget.spineIndex)) break;
+        if (loadedSpines.isEmpty ||
+            nextTarget.spineIndex < loadedSpines.reduce(math.min)) {
+          return;
+        }
+        if (nextTarget.spineIndex <= loadedSpines.reduce(math.max)) break;
+
+        final loaded = await _ensureAdjacentSectionAvailable(
+          DisplayRangeDirection.forward,
+          reason: 'card_depth_current_chapter_boundary',
+        );
+        if (!loaded) return;
+      }
+      if (!mounted || generation != _rebuildGeneration) return;
+
+      final targetSourceIndex = _sourceIndexForStableLocation(
+        nextTarget.stableLocation,
+      );
+      if (targetSourceIndex == null) return;
+      if (_progressiveDisplayState?.isSourcePrepared(targetSourceIndex) ==
+          true) {
+        if (mounted) setState(() {});
+        return;
+      }
+
+      final prepared = _progressiveDisplayState?.preparedSourceRange;
+      final start = prepared == null
+          ? math.max(0, targetSourceIndex - _lazyInitialRangeLookBehind)
+          : prepared.endExclusive;
+      final end = math.min(_sourceChunks.length, targetSourceIndex + 1);
+      if (end <= start) return;
+
+      await _prepareProgressiveDisplayRange(
+        direction: DisplayRangeDirection.forward,
+        sourceRange: SourceChunkRange(start, end),
+        reason: 'card_depth_current_chapter_boundary',
+        parentGeneration: generation,
+        targetOriginalIndex: targetSourceIndex,
+      );
+    } finally {
+      if (_activeCardDepthChapterCompletionKey == key) {
+        _activeCardDepthChapterCompletionKey = null;
+      }
     }
   }
 

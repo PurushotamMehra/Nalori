@@ -48,7 +48,7 @@ void main() {
 
     expect(find.text('Add a book'), findsOneWidget);
     expect(
-      find.text('Import your own EPUB or browse free classics.'),
+      find.text('Import your own EPUB or find public-domain EPUBs.'),
       findsOneWidget,
     );
     expect(find.text('Import EPUB'), findsOneWidget);
@@ -58,6 +58,11 @@ void main() {
       find.text('Supported format: EPUB. Imported books stay on this device.'),
       findsOneWidget,
     );
+    expect(find.textContaining('full catalogue'), findsNothing);
+    expect(find.textContaining('Full catalogue'), findsNothing);
+    expect(find.textContaining('complete Gutenberg'), findsNothing);
+    expect(find.textContaining('all Gutenberg'), findsNothing);
+    expect(find.textContaining('offline catalogue'), findsNothing);
   });
 
   testWidgets('import card dismisses the sheet and triggers callback', (
@@ -106,6 +111,9 @@ void main() {
     expect(find.text('Import EPUB'), findsOneWidget);
     expect(find.text('Choose a book file from this device'), findsOneWidget);
     expect(find.text('Browse Project Gutenberg'), findsOneWidget);
-    expect(find.text('Explore free public-domain EPUBs'), findsOneWidget);
+    expect(
+      find.text('Search public-domain EPUBs via Gutendex'),
+      findsOneWidget,
+    );
   });
 }

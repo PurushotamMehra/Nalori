@@ -7,12 +7,14 @@ class CardDepthChapterPageMeta {
     required this.pageLabel,
     required this.progress,
     required this.isExact,
+    required this.shouldRequestChapterCompletion,
   });
 
   final String title;
   final String pageLabel;
   final double progress;
   final bool isExact;
+  final bool shouldRequestChapterCompletion;
 }
 
 class CardDepthChapterProgressService {
@@ -33,6 +35,7 @@ class CardDepthChapterProgressService {
         pageLabel: '1 / 1',
         progress: 1,
         isExact: true,
+        shouldRequestChapterCompletion: false,
       );
     }
 
@@ -112,20 +115,27 @@ class CardDepthChapterProgressService {
         pageLabel: '$current / $total',
         progress: _progressForKnownTotal(current, total),
         isExact: true,
+        shouldRequestChapterCompletion: false,
       );
     }
 
     // Lazy mode often knows the current chapter start before the next chapter
     // boundary has been parsed/rendered. In that state, do not use the loaded
-    // window length as a fake chapter denominator; show local page position and
-    // keep the progress rail at the chapter-start baseline until exact bounds
-    // are available.
+    // window length as a fake chapter denominator. Keep the label inexact and
+    // let the rail move provisionally across already-rendered chapter pages
+    // while the reader prioritizes loading/rendering the canonical next chapter
+    // boundary. The provisional rail is capped below 100% so it cannot imply
+    // that the current loaded window is the full chapter.
     final current = zeroBasedPage >= 0 ? zeroBasedPage + 1 : 1;
     return CardDepthChapterPageMeta(
       title: _safeTitle(currentTarget.title),
       pageLabel: '$current / ?',
-      progress: 0,
+      progress: _progressForInexactKnownPages(
+        zeroBasedPage: zeroBasedPage,
+        knownPageCount: chapterDisplayIndexes.length,
+      ),
       isExact: false,
+      shouldRequestChapterCompletion: true,
     );
   }
 
@@ -240,8 +250,12 @@ class CardDepthChapterProgressService {
     return CardDepthChapterPageMeta(
       title: _safeTitle(title),
       pageLabel: '${page >= 0 ? page + 1 : 1} / ?',
-      progress: 0,
+      progress: _progressForInexactKnownPages(
+        zeroBasedPage: page,
+        knownPageCount: indexes.length,
+      ),
       isExact: false,
+      shouldRequestChapterCompletion: true,
     );
   }
 
@@ -297,6 +311,7 @@ class CardDepthChapterProgressService {
       pageLabel: '$current / $total',
       progress: _progressForKnownTotal(current, total),
       isExact: true,
+      shouldRequestChapterCompletion: false,
     );
   }
 
@@ -311,12 +326,21 @@ class CardDepthChapterProgressService {
       pageLabel: '$current / $total',
       progress: _progressForKnownTotal(current, total),
       isExact: true,
+      shouldRequestChapterCompletion: false,
     );
   }
 
   static double _progressForKnownTotal(int current, int total) {
     if (total <= 1) return 1;
     return ((current - 1) / (total - 1)).clamp(0.0, 1.0).toDouble();
+  }
+
+  static double _progressForInexactKnownPages({
+    required int zeroBasedPage,
+    required int knownPageCount,
+  }) {
+    if (zeroBasedPage <= 0 || knownPageCount <= 1) return 0;
+    return (zeroBasedPage / knownPageCount).clamp(0.0, 0.98).toDouble();
   }
 
   static String _safeTitle(String title) {

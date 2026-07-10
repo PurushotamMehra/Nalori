@@ -136,7 +136,7 @@ abstract class AppLocalizations {
   /// No description provided for @addBookSheetSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Import your own EPUB or browse free classics.'**
+  /// **'Import your own EPUB or find public-domain EPUBs.'**
   String get addBookSheetSubtitle;
 
   /// No description provided for @importEpub.
@@ -166,7 +166,7 @@ abstract class AppLocalizations {
   /// No description provided for @browseProjectGutenbergSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'Explore free public-domain EPUBs'**
+  /// **'Search public-domain EPUBs via Gutendex'**
   String get browseProjectGutenbergSubtitle;
 
   /// No description provided for @addBookSupportNote.

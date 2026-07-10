@@ -196,6 +196,41 @@ void main() {
         expect(meta.pageLabel, '1 / ?');
         expect(meta.progress, 0);
         expect(meta.isExact, isFalse);
+        expect(meta.shouldRequestChapterCompletion, isTrue);
+      },
+    );
+
+    test(
+      'lazy partial window with missing next boundary advances provisionally after first page',
+      () {
+        final fixture = _fixture(
+          chapters: [
+            _chapter('Chapter 1', spineIndex: 0, localChunkIndex: 0),
+            _chapter('Chapter 2', spineIndex: 2, localChunkIndex: 0),
+          ],
+          locations: {
+            0: _location(spineIndex: 0, localChunkIndex: 0),
+            1: _location(spineIndex: 0, localChunkIndex: 1),
+            2: _location(spineIndex: 0, localChunkIndex: 2),
+          },
+        );
+
+        final meta = _calculate(
+          fixture,
+          displayIndex: 1,
+          displayToOriginal: const [
+            [0],
+            [1],
+            [2],
+          ],
+          displayChunksComplete: false,
+        );
+
+        expect(meta.title, 'Chapter 1');
+        expect(meta.pageLabel, '2 / ?');
+        expect(meta.progress, closeTo(1 / 3, 0.0001));
+        expect(meta.isExact, isFalse);
+        expect(meta.shouldRequestChapterCompletion, isTrue);
       },
     );
 
@@ -233,6 +268,65 @@ void main() {
         expect(meta.pageLabel, '2 / 3');
         expect(meta.progress, 0.5);
         expect(meta.isExact, isTrue);
+        expect(meta.shouldRequestChapterCompletion, isFalse);
+      },
+    );
+
+    test(
+      'integrated missing boundary recomputes from provisional to exact progress',
+      () {
+        final partialFixture = _fixture(
+          chapters: [
+            _chapter('Chapter 1', spineIndex: 0, localChunkIndex: 0),
+            _chapter('Chapter 2', spineIndex: 2, localChunkIndex: 0),
+          ],
+          locations: {
+            0: _location(spineIndex: 0, localChunkIndex: 0),
+            1: _location(spineIndex: 0, localChunkIndex: 1),
+          },
+        );
+        final exactFixture = _fixture(
+          chapters: [
+            _chapter('Chapter 1', spineIndex: 0, localChunkIndex: 0),
+            _chapter('Chapter 2', spineIndex: 2, localChunkIndex: 0),
+          ],
+          locations: {
+            0: _location(spineIndex: 0, localChunkIndex: 0),
+            1: _location(spineIndex: 0, localChunkIndex: 1),
+            2: _location(spineIndex: 1, localChunkIndex: 0),
+            3: _location(spineIndex: 2, localChunkIndex: 0),
+          },
+        );
+
+        final partial = _calculate(
+          partialFixture,
+          displayIndex: 1,
+          displayToOriginal: const [
+            [0],
+            [1],
+          ],
+          displayChunksComplete: false,
+        );
+        final exact = _calculate(
+          exactFixture,
+          displayIndex: 1,
+          displayToOriginal: const [
+            [0],
+            [1],
+            [2],
+            [3],
+          ],
+          displayChunksComplete: false,
+        );
+
+        expect(partial.pageLabel, '2 / ?');
+        expect(partial.progress, closeTo(0.5, 0.0001));
+        expect(partial.isExact, isFalse);
+        expect(partial.shouldRequestChapterCompletion, isTrue);
+        expect(exact.pageLabel, '2 / 3');
+        expect(exact.progress, closeTo(0.5, 0.0001));
+        expect(exact.isExact, isTrue);
+        expect(exact.shouldRequestChapterCompletion, isFalse);
       },
     );
 
