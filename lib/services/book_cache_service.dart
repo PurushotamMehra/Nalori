@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/book_chunk.dart';
 import '../models/bookmark.dart';
+import 'lazy_epub_index_service.dart';
 
 const bool _bookCacheDiagEnabled = bool.fromEnvironment('NALORI_EPUB_DIAG');
 const String _bookCacheDiagPrefix = 'NALORI_EPUB_DIAG';
@@ -439,6 +440,11 @@ class BookCacheService {
     _displayManifest.clear();
     await _saveManifest();
     await _saveDisplayManifest();
+    try {
+      await LazyEpubIndexStore().clearAll();
+    } catch (_) {
+      // Structural-index cleanup must not make a legacy cache reset fail.
+    }
   }
 
   Future<int> getTotalCacheSize() async {

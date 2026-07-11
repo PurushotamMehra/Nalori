@@ -46,11 +46,11 @@ enum LazySectionWorkPriority {
 
 final class LazySectionRepository {
   LazySectionRepository({
-    LazyEpubIndexService indexService = const LazyEpubIndexService(),
+    LazyEpubIndexService? indexService,
     ParsedSectionCacheService? cache,
     int retainedSectionLimit = 3,
     int retainedSectionByteBudget = 6 * 1024 * 1024,
-  }) : _indexService = indexService,
+  }) : _indexService = indexService ?? LazyEpubIndexService(),
        _cache = cache ?? ParsedSectionCacheService(),
        _retainedSectionLimit = retainedSectionLimit,
        _retainedSectionByteBudget = retainedSectionByteBudget;

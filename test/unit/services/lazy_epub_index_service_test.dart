@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
@@ -25,7 +26,9 @@ void main() {
       final file = File(p.join(tempDir.path, 'lazy.epub'));
       await file.writeAsBytes(_buildLazyFixture(), flush: true);
 
-      final handle = await const LazyEpubIndexService().openBookIndex(file);
+      final handle = await LazyEpubIndexService(
+        store: LazyEpubIndexStore(directory: tempDir),
+      ).openBookIndex(file);
       addTearDown(handle.close);
 
       expect(handle.index.bookId, 'lazy.epub');
@@ -60,7 +63,9 @@ void main() {
     final file = File(p.join(tempDir.path, 'resources.epub'));
     await file.writeAsBytes(_buildLazyFixture(), flush: true);
 
-    final handle = await const LazyEpubIndexService().openBookIndex(file);
+    final handle = await LazyEpubIndexService(
+      store: LazyEpubIndexStore(directory: tempDir),
+    ).openBookIndex(file);
     addTearDown(handle.close);
 
     expect(handle.index.coverHref, 'images/cover.png');
@@ -74,11 +79,172 @@ void main() {
     expect(css.mediaType, 'text/css');
     expect(String.fromCharCodes(css.bytes), contains('line-height'));
   });
+
+  test(
+    'persists, restores, and validates the existing structural index',
+    () async {
+      final file = File(p.join(tempDir.path, 'persisted.epub'));
+      await file.writeAsBytes(_buildLazyFixture(), flush: true);
+      final store = LazyEpubIndexStore(directory: tempDir);
+      var builds = 0;
+
+      final first = await LazyEpubIndexService(
+        store: store,
+        onIndexBuild: () => builds++,
+      ).openBookIndex(file);
+      final firstIndex = first.index;
+      await first.close();
+      expect(builds, 1);
+
+      final reopened = await LazyEpubIndexService(
+        store: store,
+        onIndexBuild: () => builds++,
+      ).openBookIndex(file);
+      addTearDown(reopened.close);
+
+      expect(builds, 1);
+      expect(
+        reopened.index.publicationFingerprint,
+        firstIndex.publicationFingerprint,
+      );
+      expect(reopened.index.normalizedHrefToSpineIndex['text/ch2.xhtml'], 1);
+      expect(reopened.index.chapters.first.spineIndex, 0);
+      expect(reopened.index.chapters.first.anchor, 'ch1');
+      expect(reopened.index.spine.first.prefixWeight, 0);
+      expect(reopened.index.totalReadableWeight, isPositive);
+    },
+  );
+
+  test('same-name replacement invalidates fingerprint and rebuilds', () async {
+    final file = File(p.join(tempDir.path, 'replacement.epub'));
+    final store = LazyEpubIndexStore(directory: tempDir);
+    var builds = 0;
+    await file.writeAsBytes(
+      _buildLazyFixture(secondText: 'First version'),
+      flush: true,
+    );
+    final first = await LazyEpubIndexService(
+      store: store,
+      onIndexBuild: () => builds++,
+    ).openBookIndex(file);
+    final fingerprint = first.index.publicationFingerprint;
+    await first.close();
+
+    await file.writeAsBytes(
+      _buildLazyFixture(secondText: 'Second version'),
+      flush: true,
+    );
+    final replaced = await LazyEpubIndexService(
+      store: store,
+      onIndexBuild: () => builds++,
+    ).openBookIndex(file);
+    addTearDown(replaced.close);
+
+    expect(builds, 2);
+    expect(replaced.index.publicationFingerprint, isNot(fingerprint));
+  });
+
+  test(
+    'round trips non-linear structural weights and deletion recovery',
+    () async {
+      final file = File(p.join(tempDir.path, 'weights.epub'));
+      await file.writeAsBytes(
+        _buildLazyFixture(secondLinear: false),
+        flush: true,
+      );
+      final store = LazyEpubIndexStore(directory: tempDir);
+      final service = LazyEpubIndexService(store: store);
+      final handle = await service.openBookIndex(file);
+      final index = handle.index;
+      await handle.close();
+
+      expect(index.spine[1].isLinear, isFalse);
+      expect(index.spine[1].structuralWeight, 0);
+      expect(index.totalReadableWeight, index.spine.first.structuralWeight);
+      final restored = await store.load('weights.epub');
+      expect(restored?.spine[1].prefixWeight, index.spine[1].prefixWeight);
+
+      await store.deleteForBook('weights.epub');
+      expect(await store.load('weights.epub'), isNull);
+    },
+  );
+
+  test('corrupt persisted index safely rebuilds', () async {
+    final file = File(p.join(tempDir.path, 'corrupt.epub'));
+    await file.writeAsBytes(_buildLazyFixture(), flush: true);
+    final store = LazyEpubIndexStore(directory: tempDir);
+    var builds = 0;
+    final first = await LazyEpubIndexService(
+      store: store,
+      onIndexBuild: () => builds++,
+    ).openBookIndex(file);
+    await first.close();
+    final indexFile =
+        (await Directory(
+              tempDir.path,
+            ).list().where((entity) => entity.path.endsWith('.json')).first)
+            as File;
+    await indexFile.writeAsString('{not json');
+
+    final rebuilt = await LazyEpubIndexService(
+      store: store,
+      onIndexBuild: () => builds++,
+    ).openBookIndex(file);
+    addTearDown(rebuilt.close);
+    expect(builds, 2);
+  });
+
+  test('incompatible persisted schema safely rebuilds', () async {
+    final file = File(p.join(tempDir.path, 'schema.epub'));
+    await file.writeAsBytes(_buildLazyFixture(), flush: true);
+    final store = LazyEpubIndexStore(directory: tempDir);
+    var builds = 0;
+    final first = await LazyEpubIndexService(
+      store: store,
+      onIndexBuild: () => builds++,
+    ).openBookIndex(file);
+    await first.close();
+    final indexFile =
+        (await Directory(
+              tempDir.path,
+            ).list().where((entity) => entity.path.endsWith('.json')).first)
+            as File;
+    final json =
+        jsonDecode(await indexFile.readAsString()) as Map<String, dynamic>;
+    json['schemaVersion'] = 0;
+    await indexFile.writeAsString(jsonEncode(json));
+
+    final rebuilt = await LazyEpubIndexService(
+      store: store,
+      onIndexBuild: () => builds++,
+    ).openBookIndex(file);
+    addTearDown(rebuilt.close);
+    expect(builds, 2);
+  });
+
+  test(
+    'incomplete TOC records a warning and keeps direct section loading',
+    () async {
+      final file = File(p.join(tempDir.path, 'incomplete-toc.epub'));
+      await file.writeAsBytes(_buildLazyFixture(tocContents: '<not-valid-xml'));
+      final handle = await LazyEpubIndexService(
+        store: LazyEpubIndexStore(directory: tempDir),
+      ).openBookIndex(file);
+      addTearDown(handle.close);
+
+      expect(handle.index.warnings, isNotEmpty);
+      expect((await handle.readSection(1)).href, 'text/ch2.xhtml');
+    },
+  );
 }
 
 const _coverBytes = <int>[137, 80, 78, 71, 13, 10, 26, 10];
 
-List<int> _buildLazyFixture() {
+List<int> _buildLazyFixture({
+  String secondText = 'Second section unique text.',
+  bool secondLinear = true,
+  String? tocContents,
+}) {
   final archive = Archive()
     ..addFile(
       ArchiveFile.string(
@@ -112,7 +278,7 @@ List<int> _buildLazyFixture() {
   </manifest>
   <spine toc="ncx">
     <itemref idref="ch1"/>
-    <itemref idref="ch2"/>
+    <itemref idref="ch2"${secondLinear ? '' : ' linear="no"'}/>
   </spine>
 </package>''',
       ),
@@ -120,7 +286,8 @@ List<int> _buildLazyFixture() {
     ..addFile(
       ArchiveFile.string(
         'OEBPS/toc.ncx',
-        '''<?xml version="1.0" encoding="UTF-8"?>
+        tocContents ??
+            '''<?xml version="1.0" encoding="UTF-8"?>
 <ncx version="2005-1" xmlns="http://www.daisy.org/z3986/2005/ncx/">
   <head><meta name="dtb:uid" content="lazy-fixture"/></head>
   <docTitle><text>Lazy Fixture</text></docTitle>
@@ -153,7 +320,7 @@ List<int> _buildLazyFixture() {
         '''<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml">
   <head><title>Two</title><link rel="stylesheet" href="../styles/book.css"/></head>
-  <body><h1 id="ch2">Chapter Two</h1><p>Second section unique text.</p></body>
+  <body><h1 id="ch2">Chapter Two</h1><p>$secondText</p></body>
 </html>''',
       ),
     )

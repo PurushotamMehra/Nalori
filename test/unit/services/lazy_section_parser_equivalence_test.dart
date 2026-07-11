@@ -29,7 +29,7 @@ void main() {
 
     final parser = EpubParserService();
     final full = await parser.loadAndParseFromFile(file);
-    final handle = await const LazyEpubIndexService().openBookIndex(file);
+    final handle = await LazyEpubIndexService().openBookIndex(file);
     addTearDown(handle.close);
 
     final lazyChunks = <BookChunk>[];

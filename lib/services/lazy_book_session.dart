@@ -322,7 +322,13 @@ final class LazyBookSession {
   StableBookLocation? resolveChapterTarget(LazyEpubChapter chapter) {
     final href = chapter.contentFileName;
     if (href.isEmpty) return null;
-    final spineItem = _spineItemForHref(href);
+    final chapterSpineIndex = chapter.spineIndex;
+    final spineItem =
+        chapterSpineIndex != null &&
+            chapterSpineIndex >= 0 &&
+            chapterSpineIndex < index.spine.length
+        ? index.spine[chapterSpineIndex]
+        : _spineItemForHref(href);
     if (spineItem == null) return null;
     return StableBookLocation(
       bookId: index.bookId,
@@ -363,6 +369,12 @@ final class LazyBookSession {
   }
 
   LazyEpubSpineItem? _spineItemForHref(String href) {
+    final mappedIndex = index.spineIndexForHref(href);
+    if (mappedIndex != null &&
+        mappedIndex >= 0 &&
+        mappedIndex < index.spine.length) {
+      return index.spine[mappedIndex];
+    }
     final normalized = href.split('#').first;
     for (final item in index.spine) {
       if (item.href == normalized || item.fullPath.endsWith(normalized)) {

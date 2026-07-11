@@ -1,8 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:epubx/epubx.dart';
 import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 
 const bool _lazyEpubDiagEnabled = bool.fromEnvironment('NALORI_EPUB_DIAG');
 const String _lazyEpubDiagPrefix = 'NALORI_EPUB_DIAG';
@@ -27,6 +30,7 @@ class LazyEpubManifestItem {
     required this.mediaType,
     required this.fullPath,
     required this.sizeBytes,
+    required this.normalizedHref,
     this.properties,
   });
 
@@ -35,6 +39,7 @@ class LazyEpubManifestItem {
   final String mediaType;
   final String fullPath;
   final int? sizeBytes;
+  final String normalizedHref;
   final String? properties;
 }
 
@@ -48,6 +53,9 @@ class LazyEpubSpineItem {
     required this.isLinear,
     required this.sizeBytes,
     required this.sourceChecksum,
+    required this.normalizedHref,
+    required this.structuralWeight,
+    required this.prefixWeight,
   });
 
   final int index;
@@ -58,6 +66,9 @@ class LazyEpubSpineItem {
   final bool isLinear;
   final int? sizeBytes;
   final String sourceChecksum;
+  final String normalizedHref;
+  final int structuralWeight;
+  final int prefixWeight;
 }
 
 class LazyEpubChapter {
@@ -66,12 +77,18 @@ class LazyEpubChapter {
     required this.contentFileName,
     required this.anchor,
     required this.children,
+    required this.normalizedHref,
+    required this.spineIndex,
+    required this.resolution,
   });
 
   final String title;
   final String contentFileName;
   final String? anchor;
   final List<LazyEpubChapter> children;
+  final String normalizedHref;
+  final int? spineIndex;
+  final String resolution;
 }
 
 class LazyEpubIndex {
@@ -86,6 +103,14 @@ class LazyEpubIndex {
     required this.spine,
     required this.chapters,
     required this.coverHref,
+    required this.schemaVersion,
+    required this.publicationFingerprint,
+    required this.fileSizeBytes,
+    required this.fileModifiedMs,
+    required this.normalizedHrefToManifestHref,
+    required this.normalizedHrefToSpineIndex,
+    required this.totalReadableWeight,
+    required this.warnings,
   });
 
   final String filePath;
@@ -98,6 +123,48 @@ class LazyEpubIndex {
   final List<LazyEpubSpineItem> spine;
   final List<LazyEpubChapter> chapters;
   final String? coverHref;
+  final int schemaVersion;
+  final String publicationFingerprint;
+  final int fileSizeBytes;
+  final int fileModifiedMs;
+  final Map<String, String> normalizedHrefToManifestHref;
+  final Map<String, int> normalizedHrefToSpineIndex;
+  final int totalReadableWeight;
+  final List<String> warnings;
+
+  bool isValidFor(LazyEpubFileIdentity identity) =>
+      schemaVersion == LazyEpubIndexService.schemaVersion &&
+      fileSizeBytes == identity.sizeBytes &&
+      fileModifiedMs == identity.modifiedMs &&
+      publicationFingerprint == identity.publicationFingerprint;
+
+  LazyEpubIndex withFilePath(String value) => LazyEpubIndex(
+    filePath: value,
+    bookId: bookId,
+    title: title,
+    author: author,
+    authorList: authorList,
+    contentDirectoryPath: contentDirectoryPath,
+    manifest: manifest,
+    spine: spine,
+    chapters: chapters,
+    coverHref: coverHref,
+    schemaVersion: schemaVersion,
+    publicationFingerprint: publicationFingerprint,
+    fileSizeBytes: fileSizeBytes,
+    fileModifiedMs: fileModifiedMs,
+    normalizedHrefToManifestHref: normalizedHrefToManifestHref,
+    normalizedHrefToSpineIndex: normalizedHrefToSpineIndex,
+    totalReadableWeight: totalReadableWeight,
+    warnings: warnings,
+  );
+
+  int? spineIndexForHref(String href) {
+    final normalized = p.posix.normalize(
+      Uri.decodeFull(href.split('#').first.split('?').first.trim()),
+    );
+    return normalizedHrefToSpineIndex[normalized];
+  }
 }
 
 class LazyEpubSection {
@@ -236,7 +303,16 @@ class LazyEpubBookHandle {
 }
 
 class LazyEpubIndexService {
-  const LazyEpubIndexService();
+  LazyEpubIndexService({
+    LazyEpubIndexStore? store,
+    void Function()? onIndexBuild,
+  }) : _store = store ?? LazyEpubIndexStore(),
+       _onIndexBuild = onIndexBuild;
+
+  static const int schemaVersion = 1;
+
+  final LazyEpubIndexStore _store;
+  final void Function()? _onIndexBuild;
 
   Future<LazyEpubBookHandle> openBookIndex(File file) async {
     final stopwatch = Stopwatch()..start();
@@ -244,8 +320,37 @@ class LazyEpubIndexService {
       'path': file.path,
       'book': p.basename(file.path),
     });
+    final stat = await file.stat();
     final bytes = await file.readAsBytes();
+    final identity = LazyEpubFileIdentity(
+      sizeBytes: stat.size,
+      modifiedMs: stat.modified.millisecondsSinceEpoch,
+      publicationFingerprint: sha256.convert(bytes).toString(),
+    );
     final bookRef = await EpubReader.openBook(bytes);
+    final contentRefs = _contentRefs(bookRef);
+    LazyEpubIndex? cached;
+    try {
+      cached = await _store.load(p.basename(file.path));
+    } catch (_) {
+      // Persistence is an optimization; a valid live archive remains usable.
+    }
+    if (cached != null && cached.isValidFor(identity)) {
+      final handle = LazyEpubBookHandle._(
+        bookRef: bookRef,
+        index: cached.withFilePath(file.path),
+        contentRefs: contentRefs,
+      );
+      stopwatch.stop();
+      _lazyEpubDiagLog('lazy_epub_index_cache_hit', {
+        'path': file.path,
+        'book': cached.bookId,
+        'spineItems': cached.spine.length,
+        'elapsedMs': stopwatch.elapsedMilliseconds,
+      });
+      return handle;
+    }
+    _onIndexBuild?.call();
     final schema = bookRef.Schema;
     final package = schema?.Package;
     if (schema == null || package == null) {
@@ -270,6 +375,7 @@ class LazyEpubIndexService {
         mediaType: mediaType,
         fullPath: fullPath,
         sizeBytes: _archiveEntrySize(archive, fullPath),
+        normalizedHref: _normalizeHref(href),
         properties: item.Properties,
       );
       byId[id] = lazyItem;
@@ -278,6 +384,7 @@ class LazyEpubIndexService {
 
     final spineRefs = package.Spine?.Items ?? const <EpubSpineItemRef>[];
     final spine = <LazyEpubSpineItem>[];
+    var prefixWeight = 0;
     for (var i = 0; i < spineRefs.length; i++) {
       final idRef = spineRefs[i].IdRef;
       if (idRef == null) continue;
@@ -297,20 +404,35 @@ class LazyEpubIndexService {
             manifestItem.fullPath,
             manifestItem.sizeBytes,
           ),
+          normalizedHref: manifestItem.normalizedHref,
+          structuralWeight: spineRefs[i].IsLinear == false
+              ? 0
+              : (manifestItem.sizeBytes ?? 1).clamp(1, 1 << 31).toInt(),
+          prefixWeight: prefixWeight,
         ),
       );
+      if (spine.last.isLinear) {
+        prefixWeight += spine.last.structuralWeight;
+      }
     }
 
-    final chapterRefs = await bookRef.getChapters();
-    final contentRefs = <String, EpubContentFileRef>{};
-    final content = bookRef.Content;
-    if (content != null) {
-      contentRefs.addAll(content.Html ?? {});
-      contentRefs.addAll(content.Css ?? {});
-      contentRefs.addAll(content.Images ?? {});
-      contentRefs.addAll(content.Fonts ?? {});
-      contentRefs.addAll(content.AllFiles ?? {});
+    final warnings = <String>[];
+    List<EpubChapterRef> chapterRefs;
+    try {
+      chapterRefs = await bookRef.getChapters();
+    } catch (_) {
+      chapterRefs = const [];
+      warnings.add('toc_unavailable');
     }
+    if (chapterRefs.isEmpty && spine.isNotEmpty && warnings.isEmpty) {
+      warnings.add('toc_empty');
+    }
+    final normalizedManifest = <String, String>{
+      for (final item in byHref.values) item.normalizedHref: item.href,
+    };
+    final normalizedSpine = <String, int>{
+      for (final item in spine) item.normalizedHref: item.index,
+    };
 
     final handle = LazyEpubBookHandle._(
       bookRef: bookRef,
@@ -325,11 +447,24 @@ class LazyEpubIndexService {
         contentDirectoryPath: contentDirectoryPath,
         manifest: byHref,
         spine: spine,
-        chapters: _mapChapters(chapterRefs),
+        chapters: _mapChapters(chapterRefs, normalizedSpine),
         coverHref: _findCoverHref(package, byId, byHref),
+        schemaVersion: schemaVersion,
+        publicationFingerprint: identity.publicationFingerprint,
+        fileSizeBytes: identity.sizeBytes,
+        fileModifiedMs: identity.modifiedMs,
+        normalizedHrefToManifestHref: normalizedManifest,
+        normalizedHrefToSpineIndex: normalizedSpine,
+        totalReadableWeight: prefixWeight,
+        warnings: warnings,
       ),
       contentRefs: contentRefs,
     );
+    try {
+      await _store.write(handle.index);
+    } catch (_) {
+      // Keep malformed or platform-unavailable storage from breaking opens.
+    }
     stopwatch.stop();
     _lazyEpubDiagLog('lazy_epub_index_open_end', {
       'path': file.path,
@@ -341,6 +476,18 @@ class LazyEpubIndexService {
       'elapsedMs': stopwatch.elapsedMilliseconds,
     });
     return handle;
+  }
+
+  static Map<String, EpubContentFileRef> _contentRefs(EpubBookRef bookRef) {
+    final refs = <String, EpubContentFileRef>{};
+    final content = bookRef.Content;
+    if (content == null) return refs;
+    refs.addAll(content.Html ?? {});
+    refs.addAll(content.Css ?? {});
+    refs.addAll(content.Images ?? {});
+    refs.addAll(content.Fonts ?? {});
+    refs.addAll(content.AllFiles ?? {});
+    return refs;
   }
 
   static String _fullContentPath(String contentDirectoryPath, String href) {
@@ -376,17 +523,38 @@ class LazyEpubIndexService {
     return '${fullPath.hashCode.toUnsigned(32).toRadixString(16)}_${sizeBytes ?? 'unknown'}';
   }
 
-  static List<LazyEpubChapter> _mapChapters(List<EpubChapterRef> refs) {
+  static List<LazyEpubChapter> _mapChapters(
+    List<EpubChapterRef> refs,
+    Map<String, int> normalizedSpine,
+  ) {
     return refs
         .map(
           (chapter) => LazyEpubChapter(
             title: chapter.Title ?? '',
             contentFileName: chapter.ContentFileName ?? '',
             anchor: chapter.Anchor,
-            children: _mapChapters(chapter.SubChapters ?? const []),
+            children: _mapChapters(
+              chapter.SubChapters ?? const [],
+              normalizedSpine,
+            ),
+            normalizedHref: _normalizeHref(chapter.ContentFileName ?? ''),
+            spineIndex:
+                normalizedSpine[_normalizeHref(chapter.ContentFileName ?? '')],
+            resolution:
+                normalizedSpine.containsKey(
+                  _normalizeHref(chapter.ContentFileName ?? ''),
+                )
+                ? 'resolved'
+                : 'unresolved',
           ),
         )
         .toList(growable: false);
+  }
+
+  static String _normalizeHref(String href) {
+    final withoutFragment = href.split('#').first.split('?').first.trim();
+    if (withoutFragment.isEmpty) return '';
+    return p.posix.normalize(Uri.decodeFull(withoutFragment));
   }
 
   static String? _findCoverHref(
@@ -410,3 +578,198 @@ class LazyEpubIndexService {
     return null;
   }
 }
+
+final class LazyEpubIndexStore {
+  LazyEpubIndexStore({Directory? directory}) : _directory = directory;
+
+  final Directory? _directory;
+
+  Future<Directory> _root() async {
+    final value = _directory;
+    if (value != null) {
+      if (!await value.exists()) await value.create(recursive: true);
+      return value;
+    }
+    final appDir = await getApplicationDocumentsDirectory();
+    final root = Directory(p.join(appDir.path, 'lazy_epub_indexes'));
+    if (!await root.exists()) await root.create(recursive: true);
+    return root;
+  }
+
+  Future<LazyEpubIndex?> load(String bookId) async {
+    final file = await _fileFor(bookId);
+    if (!await file.exists()) return null;
+    try {
+      return _indexFromJson(
+        jsonDecode(await file.readAsString()) as Map<String, dynamic>,
+      );
+    } catch (_) {
+      try {
+        await file.delete();
+      } catch (_) {}
+      return null;
+    }
+  }
+
+  Future<void> write(LazyEpubIndex index) async {
+    final file = await _fileFor(index.bookId);
+    final temporary = File('${file.path}.tmp');
+    await temporary.writeAsString(jsonEncode(_indexToJson(index)));
+    if (await file.exists()) await file.delete();
+    await temporary.rename(file.path);
+  }
+
+  Future<void> deleteForBook(String bookId) async {
+    final file = await _fileFor(bookId);
+    if (await file.exists()) await file.delete();
+  }
+
+  Future<void> clearAll() async {
+    final root = await _root();
+    if (await root.exists()) await root.delete(recursive: true);
+  }
+
+  Future<File> _fileFor(String bookId) async => File(
+    p.join((await _root()).path, '${sha256.convert(utf8.encode(bookId))}.json'),
+  );
+}
+
+final class LazyEpubFileIdentity {
+  const LazyEpubFileIdentity({
+    required this.sizeBytes,
+    required this.modifiedMs,
+    required this.publicationFingerprint,
+  });
+
+  final int sizeBytes;
+  final int modifiedMs;
+  final String publicationFingerprint;
+}
+
+Map<String, dynamic> _indexToJson(LazyEpubIndex index) => {
+  'schemaVersion': index.schemaVersion,
+  'filePath': index.filePath,
+  'bookId': index.bookId,
+  'title': index.title,
+  'author': index.author,
+  'authorList': index.authorList,
+  'contentDirectoryPath': index.contentDirectoryPath,
+  'coverHref': index.coverHref,
+  'publicationFingerprint': index.publicationFingerprint,
+  'fileSizeBytes': index.fileSizeBytes,
+  'fileModifiedMs': index.fileModifiedMs,
+  'manifest': index.manifest.map(
+    (key, value) => MapEntry(key, _manifestToJson(value)),
+  ),
+  'spine': index.spine.map(_spineToJson).toList(),
+  'chapters': index.chapters.map(_chapterToJson).toList(),
+  'normalizedHrefToManifestHref': index.normalizedHrefToManifestHref,
+  'normalizedHrefToSpineIndex': index.normalizedHrefToSpineIndex,
+  'totalReadableWeight': index.totalReadableWeight,
+  'warnings': index.warnings,
+};
+
+LazyEpubIndex _indexFromJson(Map<String, dynamic> json) => LazyEpubIndex(
+  filePath: json['filePath'] as String,
+  bookId: json['bookId'] as String,
+  title: json['title'] as String,
+  author: json['author'] as String,
+  authorList: (json['authorList'] as List).cast<String>(),
+  contentDirectoryPath: json['contentDirectoryPath'] as String,
+  manifest: (json['manifest'] as Map<String, dynamic>).map(
+    (key, value) =>
+        MapEntry(key, _manifestFromJson(value as Map<String, dynamic>)),
+  ),
+  spine: (json['spine'] as List)
+      .map((value) => _spineFromJson(value as Map<String, dynamic>))
+      .toList(),
+  chapters: (json['chapters'] as List)
+      .map((value) => _chapterFromJson(value as Map<String, dynamic>))
+      .toList(),
+  coverHref: json['coverHref'] as String?,
+  schemaVersion: json['schemaVersion'] as int,
+  publicationFingerprint: json['publicationFingerprint'] as String,
+  fileSizeBytes: json['fileSizeBytes'] as int,
+  fileModifiedMs: json['fileModifiedMs'] as int,
+  normalizedHrefToManifestHref:
+      (json['normalizedHrefToManifestHref'] as Map<String, dynamic>)
+          .cast<String, String>(),
+  normalizedHrefToSpineIndex:
+      (json['normalizedHrefToSpineIndex'] as Map<String, dynamic>).map(
+        (key, value) => MapEntry(key, value as int),
+      ),
+  totalReadableWeight: json['totalReadableWeight'] as int,
+  warnings: (json['warnings'] as List).cast<String>(),
+);
+
+Map<String, dynamic> _manifestToJson(LazyEpubManifestItem item) => {
+  'id': item.id,
+  'href': item.href,
+  'mediaType': item.mediaType,
+  'fullPath': item.fullPath,
+  'sizeBytes': item.sizeBytes,
+  'normalizedHref': item.normalizedHref,
+  'properties': item.properties,
+};
+
+LazyEpubManifestItem _manifestFromJson(Map<String, dynamic> json) =>
+    LazyEpubManifestItem(
+      id: json['id'] as String,
+      href: json['href'] as String,
+      mediaType: json['mediaType'] as String,
+      fullPath: json['fullPath'] as String,
+      sizeBytes: json['sizeBytes'] as int?,
+      normalizedHref: json['normalizedHref'] as String,
+      properties: json['properties'] as String?,
+    );
+
+Map<String, dynamic> _spineToJson(LazyEpubSpineItem item) => {
+  'index': item.index,
+  'idRef': item.idRef,
+  'href': item.href,
+  'mediaType': item.mediaType,
+  'fullPath': item.fullPath,
+  'isLinear': item.isLinear,
+  'sizeBytes': item.sizeBytes,
+  'sourceChecksum': item.sourceChecksum,
+  'normalizedHref': item.normalizedHref,
+  'structuralWeight': item.structuralWeight,
+  'prefixWeight': item.prefixWeight,
+};
+
+LazyEpubSpineItem _spineFromJson(Map<String, dynamic> json) =>
+    LazyEpubSpineItem(
+      index: json['index'] as int,
+      idRef: json['idRef'] as String,
+      href: json['href'] as String,
+      mediaType: json['mediaType'] as String,
+      fullPath: json['fullPath'] as String,
+      isLinear: json['isLinear'] as bool,
+      sizeBytes: json['sizeBytes'] as int?,
+      sourceChecksum: json['sourceChecksum'] as String,
+      normalizedHref: json['normalizedHref'] as String,
+      structuralWeight: json['structuralWeight'] as int,
+      prefixWeight: json['prefixWeight'] as int,
+    );
+
+Map<String, dynamic> _chapterToJson(LazyEpubChapter chapter) => {
+  'title': chapter.title,
+  'contentFileName': chapter.contentFileName,
+  'anchor': chapter.anchor,
+  'normalizedHref': chapter.normalizedHref,
+  'spineIndex': chapter.spineIndex,
+  'resolution': chapter.resolution,
+  'children': chapter.children.map(_chapterToJson).toList(),
+};
+
+LazyEpubChapter _chapterFromJson(Map<String, dynamic> json) => LazyEpubChapter(
+  title: json['title'] as String,
+  contentFileName: json['contentFileName'] as String,
+  anchor: json['anchor'] as String?,
+  children: (json['children'] as List)
+      .map((value) => _chapterFromJson(value as Map<String, dynamic>))
+      .toList(),
+  normalizedHref: json['normalizedHref'] as String,
+  spineIndex: json['spineIndex'] as int?,
+  resolution: json['resolution'] as String,
+);

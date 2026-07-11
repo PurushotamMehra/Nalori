@@ -107,7 +107,7 @@ class BookMetadataService {
     final bookId = p.basename(epubFile.path);
     LazyEpubBookHandle? handle;
     try {
-      handle = await const LazyEpubIndexService().openBookIndex(epubFile);
+      handle = await LazyEpubIndexService().openBookIndex(epubFile);
     } catch (e) {
       debugPrint('BookMetadataService: Failed to index EPUB ($bookId): $e');
       return null; // File is completely unreadable
