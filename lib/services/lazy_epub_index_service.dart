@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -579,10 +580,40 @@ class LazyEpubIndexService {
   }
 }
 
+final class _LazyIndexFileCoordinator {
+  Future<void> tail = Future<void>.value();
+  final Map<String, int> generations = {};
+  final Set<String> deleting = {};
+  int globalGeneration = 0;
+
+  int generation(String bookId) =>
+      globalGeneration * 0x100000000 + (generations[bookId] ?? 0);
+
+  Future<T> exclusive<T>(Future<T> Function() operation) {
+    final completer = Completer<T>();
+    tail = tail.then((_) async {
+      try {
+        completer.complete(await operation());
+      } catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    });
+    tail = tail.catchError((_) {});
+    return completer.future;
+  }
+}
+
 final class LazyEpubIndexStore {
   LazyEpubIndexStore({Directory? directory}) : _directory = directory;
 
+  static final Map<String, _LazyIndexFileCoordinator> _coordinators = {};
   final Directory? _directory;
+
+  String get _scopeKey =>
+      _directory?.absolute.path ?? '__default_lazy_epub_index_store__';
+
+  _LazyIndexFileCoordinator get _coordinator =>
+      _coordinators.putIfAbsent(_scopeKey, _LazyIndexFileCoordinator.new);
 
   Future<Directory> _root() async {
     final value = _directory;
@@ -597,6 +628,11 @@ final class LazyEpubIndexStore {
   }
 
   Future<LazyEpubIndex?> load(String bookId) async {
+    return _coordinator.exclusive(() => _loadUnlocked(bookId));
+  }
+
+  Future<LazyEpubIndex?> _loadUnlocked(String bookId) async {
+    if (_coordinator.deleting.contains(bookId)) return null;
     final file = await _fileFor(bookId);
     if (!await file.exists()) return null;
     try {
@@ -612,21 +648,47 @@ final class LazyEpubIndexStore {
   }
 
   Future<void> write(LazyEpubIndex index) async {
-    final file = await _fileFor(index.bookId);
-    final temporary = File('${file.path}.tmp');
-    await temporary.writeAsString(jsonEncode(_indexToJson(index)));
-    if (await file.exists()) await file.delete();
-    await temporary.rename(file.path);
+    final generation = _coordinator.generation(index.bookId);
+    await _coordinator.exclusive(() async {
+      if (_coordinator.deleting.contains(index.bookId) ||
+          generation != _coordinator.generation(index.bookId)) {
+        return;
+      }
+      final file = await _fileFor(index.bookId);
+      final temporary = File('${file.path}.tmp.$generation');
+      await temporary.writeAsString(jsonEncode(_indexToJson(index)));
+      if (_coordinator.deleting.contains(index.bookId) ||
+          generation != _coordinator.generation(index.bookId)) {
+        if (await temporary.exists()) await temporary.delete();
+        return;
+      }
+      if (await file.exists()) await file.delete();
+      await temporary.rename(file.path);
+    });
   }
 
   Future<void> deleteForBook(String bookId) async {
-    final file = await _fileFor(bookId);
-    if (await file.exists()) await file.delete();
+    final coordinator = _coordinator;
+    coordinator.generations[bookId] =
+        (coordinator.generations[bookId] ?? 0) + 1;
+    coordinator.deleting.add(bookId);
+    await coordinator.exclusive(() async {
+      try {
+        final file = await _fileFor(bookId);
+        if (await file.exists()) await file.delete();
+      } finally {
+        coordinator.deleting.remove(bookId);
+      }
+    });
   }
 
   Future<void> clearAll() async {
-    final root = await _root();
-    if (await root.exists()) await root.delete(recursive: true);
+    final coordinator = _coordinator;
+    coordinator.globalGeneration++;
+    await coordinator.exclusive(() async {
+      final root = await _root();
+      if (await root.exists()) await root.delete(recursive: true);
+    });
   }
 
   Future<File> _fileFor(String bookId) async => File(

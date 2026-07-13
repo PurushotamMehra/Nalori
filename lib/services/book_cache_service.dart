@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../models/book_chunk.dart';
 import '../models/bookmark.dart';
 import 'lazy_epub_index_service.dart';
+import 'parsed_section_cache_service.dart';
 
 const bool _bookCacheDiagEnabled = bool.fromEnvironment('NALORI_EPUB_DIAG');
 const String _bookCacheDiagPrefix = 'NALORI_EPUB_DIAG';
@@ -431,6 +432,9 @@ class BookCacheService {
   /// Clear all cached books.
   Future<void> clearAll() async {
     await _ensureInit();
+    if (_testCacheDir == null) {
+      await ParsedSectionCacheService().clearAll();
+    }
     if (await _cacheDir!.exists()) {
       await _cacheDir!.delete(recursive: true);
       await _cacheDir!.create(recursive: true);

@@ -7245,14 +7245,17 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     final metadata = _metadataService.getMetadata(widget.bookId);
     if (metadata != null) {
+      final meaningfulReadAt = DateTime.now().millisecondsSinceEpoch;
       final updated = metadata.copyWith(
         lastReadIndex: originalIndex,
         lastReadLocation: stableLocation,
         totalChunks: _sourceChunks.length,
-        lastReadTime: DateTime.now().millisecondsSinceEpoch,
+        lastReadTime: meaningfulReadAt,
+        lastMeaningfulReadAt: meaningfulReadAt,
       );
       await _metadataService.updateMetadata(updated);
       if (stableLocation != null) {
+        _lazySession?.recordMeaningfulRead(stableLocation, meaningfulReadAt);
         _readerDiagLog('stable_location_saved', {
           ..._stableLocationDiagFields(stableLocation),
           'displayIndex': index,

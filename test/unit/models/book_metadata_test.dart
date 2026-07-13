@@ -36,6 +36,43 @@ void main() {
       expect(restored.metadataConfidence, 0.92);
     });
 
+    test('persists opened and meaningful-read timestamps', () {
+      final metadata = BookMetadata(
+        id: 'book.epub',
+        title: 'Book',
+        author: 'Author',
+        lastOpenedAt: 100,
+        lastMeaningfulReadAt: 200,
+      );
+
+      final restored = BookMetadata.fromMap(metadata.toMap());
+
+      expect(restored.lastOpenedAt, 100);
+      expect(restored.lastMeaningfulReadAt, 200);
+    });
+
+    test('legacy progress migrates to meaningful recency only when proven', () {
+      final meaningfullyRead = BookMetadata.fromMap({
+        'id': 'read.epub',
+        'title': 'Read',
+        'author': 'Author',
+        'lastReadIndex': 4,
+        'lastReadTime': 500,
+      });
+      final importedOnly = BookMetadata.fromMap({
+        'id': 'imported.epub',
+        'title': 'Imported',
+        'author': 'Author',
+        'lastReadIndex': 0,
+        'lastReadTime': 600,
+      });
+
+      expect(meaningfullyRead.lastMeaningfulReadAt, 500);
+      expect(meaningfullyRead.lastOpenedAt, 500);
+      expect(importedOnly.lastMeaningfulReadAt, isNull);
+      expect(importedOnly.lastOpenedAt, isNull);
+    });
+
     test('copyWith can update online metadata fields', () {
       final metadata = BookMetadata(
         id: 'book.epub',

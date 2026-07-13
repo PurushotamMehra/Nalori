@@ -9,6 +9,7 @@ import '../models/book_metadata.dart';
 import '../utils/person_name_utils.dart';
 import 'lazy_epub_index_service.dart';
 import 'open_library_metadata_service.dart';
+import 'parsed_section_retention_policy.dart';
 
 /// Service managing persistent metadata for all imported books.
 /// Creates a cached JSON registry and extracts cover images.
@@ -46,6 +47,15 @@ class BookMetadataService {
         _cache = {};
       }
     }
+    for (final metadata in _cache.values) {
+      final meaningfulReadAt = metadata.lastMeaningfulReadAt;
+      if (meaningfulReadAt != null) {
+        ParsedSectionRetentionRegistry.instance.recordMeaningfulRead(
+          bookId: metadata.id,
+          readAtMs: meaningfulReadAt,
+        );
+      }
+    }
     _initialized = true;
   }
 
@@ -57,6 +67,13 @@ class BookMetadataService {
   /// Update metadata for a book inside the cache (e.g. updating progress)
   Future<void> updateMetadata(BookMetadata metadata) async {
     _cache[metadata.id] = _withEmbeddedFallbacks(metadata);
+    final meaningfulReadAt = metadata.lastMeaningfulReadAt;
+    if (meaningfulReadAt != null) {
+      ParsedSectionRetentionRegistry.instance.recordMeaningfulRead(
+        bookId: metadata.id,
+        readAtMs: meaningfulReadAt,
+      );
+    }
     await _save();
   }
 
@@ -96,6 +113,7 @@ class BookMetadataService {
         }
       }
       _cache.remove(bookId);
+      ParsedSectionRetentionRegistry.instance.removeBook(bookId);
       await _save();
     }
   }

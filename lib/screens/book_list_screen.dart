@@ -19,7 +19,7 @@ import '../services/book_import_service.dart';
 import '../services/book_preparse_service.dart';
 import '../services/book_metadata_service.dart';
 import '../services/library_service.dart';
-import '../services/lazy_epub_index_service.dart';
+import '../services/lazy_reader_cache_cleanup_service.dart';
 import '../services/metadata_enhancement_preferences.dart';
 import '../services/open_library_metadata_service.dart';
 import '../services/public_domain_book_service.dart';
@@ -1507,9 +1507,7 @@ class _BookListScreenState extends State<BookListScreen> {
       await BookMemoryEntryService(bookId: bookId).clearForBook();
 
       // 4. Clear disk cache
-      final cacheService = BookCacheService();
-      await cacheService.deleteCachedBook(bookId);
-      await LazyEpubIndexStore().deleteForBook(bookId);
+      await LazyReaderCacheCleanupService().deleteDerivativesForBook(bookId);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

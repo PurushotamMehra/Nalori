@@ -156,9 +156,14 @@ final class ReaderOpenService {
           persistedLocation == null &&
           legacyIndex > 0 &&
           (meta?.totalChunks ?? 0) > 1;
-      if (meta != null && (canMigratePersisted || canMigrateLegacyPosition)) {
+      if (meta != null) {
         await _metadataService.updateMetadata(
-          meta.copyWith(lastReadLocation: resolvedTarget),
+          meta.copyWith(
+            lastOpenedAt: DateTime.now().millisecondsSinceEpoch,
+            lastReadLocation: canMigratePersisted || canMigrateLegacyPosition
+                ? resolvedTarget
+                : meta.lastReadLocation,
+          ),
         );
       }
 

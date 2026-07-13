@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -270,6 +271,23 @@ final class _CachedSegmentManifest {
       length == stat.size && modifiedMs == stat.modified.millisecondsSinceEpoch;
 }
 
+final class _SegmentCacheFileCoordinator {
+  Future<void> tail = Future<void>.value();
+
+  Future<T> exclusive<T>(Future<T> Function() operation) {
+    final completer = Completer<T>();
+    tail = tail.then((_) async {
+      try {
+        completer.complete(await operation());
+      } catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    });
+    tail = tail.catchError((_) {});
+    return completer.future;
+  }
+}
+
 final class SegmentedDisplayCacheService {
   SegmentedDisplayCacheService({required Directory rootDirectory})
     : _rootDirectory = rootDirectory;
@@ -279,11 +297,44 @@ final class SegmentedDisplayCacheService {
   static const int _maxSegmentedDisplayCacheBytes = 40 * 1024 * 1024;
   static const int _maxSegmentFileBytes = 3 * 1024 * 1024;
   static const int _maxSegmentKeyLength = 96;
+  static final Map<String, Map<String, int>> _bookGenerationsByRoot = {};
+  static final Map<String, Set<String>> _deletingBooksByRoot = {};
+  static final Map<String, int> _globalGenerationsByRoot = {};
+  static final Set<String> _resettingRoots = {};
+  static final Map<String, _SegmentCacheFileCoordinator> _fileCoordinators = {};
 
   final Directory _rootDirectory;
   bool _initialized = false;
   Future<void> _writeQueue = Future<void>.value();
   final Map<String, _CachedSegmentManifest> _manifestCache = {};
+
+  Map<String, int> get _bookGenerations => _bookGenerationsByRoot.putIfAbsent(
+    _rootDirectory.absolute.path,
+    () => <String, int>{},
+  );
+
+  Set<String> get _deletingBooks => _deletingBooksByRoot.putIfAbsent(
+    _rootDirectory.absolute.path,
+    () => <String>{},
+  );
+
+  int _cacheGeneration(String bookId) =>
+      (_globalGenerationsByRoot[_rootDirectory.absolute.path] ?? 0) *
+          0x100000000 +
+      (_bookGenerations[bookId] ?? 0);
+
+  bool get _resetting => _resettingRoots.contains(_rootDirectory.absolute.path);
+
+  _SegmentCacheFileCoordinator get _fileCoordinator =>
+      _fileCoordinators.putIfAbsent(
+        _rootDirectory.absolute.path,
+        _SegmentCacheFileCoordinator.new,
+      );
+
+  bool _writeInvalidated(String bookId, int cacheGeneration) =>
+      _resetting ||
+      _deletingBooks.contains(bookId) ||
+      _cacheGeneration(bookId) != cacheGeneration;
 
   static Future<SegmentedDisplayCacheService> createDefault() async {
     final appDir = await getApplicationDocumentsDirectory();
@@ -616,12 +667,16 @@ final class SegmentedDisplayCacheService {
     required int generationId,
     bool Function()? shouldWrite,
   }) {
+    final cacheGeneration = _cacheGeneration(key.bookId);
     final operation = _writeQueue.then(
-      (_) => _writeSegment(
-        key: key,
-        result: result,
-        generationId: generationId,
-        shouldWrite: shouldWrite,
+      (_) => _fileCoordinator.exclusive(
+        () => _writeSegment(
+          key: key,
+          result: result,
+          generationId: generationId,
+          shouldWrite: shouldWrite,
+          cacheGeneration: cacheGeneration,
+        ),
       ),
     );
     _writeQueue = operation.catchError((_) {});
@@ -633,8 +688,10 @@ final class SegmentedDisplayCacheService {
     required DisplayRangeResult result,
     required int generationId,
     bool Function()? shouldWrite,
+    required int cacheGeneration,
   }) async {
     await ensureInitialized();
+    if (_writeInvalidated(key.bookId, cacheGeneration)) return;
     if (!result.succeeded || result.displayChunks.isEmpty) return;
     if (shouldWrite != null && !shouldWrite()) {
       _segmentCacheDiagLog('segment_cache_rejected', {
@@ -691,6 +748,7 @@ final class SegmentedDisplayCacheService {
         });
         return;
       }
+      if (_writeInvalidated(key.bookId, cacheGeneration)) return;
 
       await tmpFile.writeAsBytes(bytes, flush: true);
       final validated = _deserializeSegment(await tmpFile.readAsBytes());
@@ -706,6 +764,10 @@ final class SegmentedDisplayCacheService {
           'range': range.toString(),
           'reason': 'stale_before_rename',
         });
+        return;
+      }
+      if (_writeInvalidated(key.bookId, cacheGeneration)) {
+        await tmpFile.delete();
         return;
       }
 
@@ -743,6 +805,10 @@ final class SegmentedDisplayCacheService {
         });
         return;
       }
+      if (_writeInvalidated(key.bookId, cacheGeneration)) {
+        if (await finalFile.exists()) await finalFile.delete();
+        return;
+      }
 
       final manifestStopwatch = Stopwatch()..start();
       await _upsertSegmentRecord(key, record);
@@ -776,26 +842,53 @@ final class SegmentedDisplayCacheService {
   }
 
   Future<void> deleteForBook(String bookId) async {
-    await ensureInitialized();
-    if (!await _rootDirectory.exists()) return;
-    final deleted = <String>[];
-    await for (final entity in _rootDirectory.list()) {
-      if (entity is! Directory) continue;
-      final manifestFile = File(p.join(entity.path, 'manifest.json'));
-      if (!await manifestFile.exists()) continue;
-      try {
-        final manifest = SegmentedDisplayCacheManifest.fromJson(
-          jsonDecode(await manifestFile.readAsString()) as Map<String, dynamic>,
-        );
-        if (manifest.bookId != bookId) continue;
-        await entity.delete(recursive: true);
-        deleted.add(entity.path);
-      } catch (_) {}
+    _bookGenerations[bookId] = (_bookGenerations[bookId] ?? 0) + 1;
+    _deletingBooks.add(bookId);
+    try {
+      await _fileCoordinator.exclusive(() async {
+        await ensureInitialized();
+        if (!await _rootDirectory.exists()) return;
+        final deleted = <String>[];
+        await for (final entity in _rootDirectory.list()) {
+          if (entity is! Directory) continue;
+          final manifestFile = File(p.join(entity.path, 'manifest.json'));
+          if (!await manifestFile.exists()) continue;
+          try {
+            final manifest = SegmentedDisplayCacheManifest.fromJson(
+              jsonDecode(await manifestFile.readAsString())
+                  as Map<String, dynamic>,
+            );
+            if (manifest.bookId != bookId) continue;
+            await entity.delete(recursive: true);
+            deleted.add(entity.path);
+          } catch (_) {}
+        }
+        _segmentCacheDiagLog('segment_cache_delete_for_book', {
+          'book': bookId,
+          'deletedPaths': deleted,
+        });
+      });
+    } finally {
+      _deletingBooks.remove(bookId);
     }
-    _segmentCacheDiagLog('segment_cache_delete_for_book', {
-      'book': bookId,
-      'deletedPaths': deleted,
-    });
+  }
+
+  Future<void> clearAll() async {
+    final rootKey = _rootDirectory.absolute.path;
+    _globalGenerationsByRoot[rootKey] =
+        (_globalGenerationsByRoot[rootKey] ?? 0) + 1;
+    _resettingRoots.add(rootKey);
+    try {
+      await _fileCoordinator.exclusive(() async {
+        if (await _rootDirectory.exists()) {
+          await _rootDirectory.delete(recursive: true);
+        }
+        await _rootDirectory.create(recursive: true);
+        _manifestCache.clear();
+      });
+    } finally {
+      _resettingRoots.remove(rootKey);
+    }
   }
 
   Future<Directory> _signatureDirectory(String cacheKey) async {

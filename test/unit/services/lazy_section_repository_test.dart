@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
@@ -5,7 +6,9 @@ import 'package:archive/archive_io.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/book_chunk.dart';
 import 'package:nalori/services/lazy_section_repository.dart';
+import 'package:nalori/services/lazy_parsed_book.dart';
 import 'package:nalori/services/parsed_section_cache_service.dart';
+import 'package:nalori/services/parsed_section_retention_policy.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
@@ -71,6 +74,60 @@ void main() {
     expect(repository.retainedSpineIndices, [1]);
   });
 
+  test(
+    'two sessions join one parser invocation for the same section',
+    () async {
+      final file = File(p.join(tempDir.path, 'repo.epub'));
+      await file.writeAsBytes(_buildRepositoryFixture(), flush: true);
+      final cacheRoot = Directory(p.join(tempDir.path, 'shared_cache'));
+      final coordinator = SharedLazySectionWorkCoordinator();
+      final parserStarted = Completer<void>();
+      final parserGate = Completer<void>();
+      var parserInvocations = 0;
+
+      Future<ParsedSection> parser(LazySectionParseRequest request) async {
+        parserInvocations++;
+        if (!parserStarted.isCompleted) parserStarted.complete();
+        await parserGate.future;
+        return ParsedSection(
+          identity: request.identity,
+          chunks: const [
+            BookChunk(index: 0, type: BookChunkType.text, text: 'shared'),
+          ],
+          anchorMap: const {},
+          chapters: const [],
+          wordCount: 1,
+          textCharCount: 6,
+          resourceHrefs: const [],
+          parserVersion: request.identity.parserVersion,
+        );
+      }
+
+      final first = LazySectionRepository(
+        cache: ParsedSectionCacheService(rootDirectory: cacheRoot),
+        workCoordinator: coordinator,
+        parser: parser,
+      );
+      final second = LazySectionRepository(
+        cache: ParsedSectionCacheService(rootDirectory: cacheRoot),
+        workCoordinator: coordinator,
+        parser: parser,
+      );
+      addTearDown(first.close);
+      addTearDown(second.close);
+      await Future.wait([first.open(file), second.open(file)]);
+
+      final firstLoad = first.loadSection(1);
+      await parserStarted.future;
+      final secondLoad = second.loadSection(1);
+      parserGate.complete();
+      final results = await Future.wait([firstLoad, secondLoad]);
+
+      expect(parserInvocations, 1);
+      expect(results[0], same(results[1]));
+    },
+  );
+
   test('pinned sections are not evicted by retention pressure', () async {
     final file = File(p.join(tempDir.path, 'repo.epub'));
     await file.writeAsBytes(_buildRepositoryFixture(), flush: true);
@@ -135,6 +192,71 @@ void main() {
     expect(images, hasLength(1));
     expect(images.single.imageBytes, [137, 80, 78, 71]);
     expect(parsed.resourceHrefs, contains('../images/pic.png'));
+  });
+
+  test('close stops hydration before another section is scheduled', () async {
+    final file = File(p.join(tempDir.path, 'repo.epub'));
+    await file.writeAsBytes(_buildRepositoryFixture(), flush: true);
+    final parserStarted = Completer<void>();
+    final parserGate = Completer<void>();
+    var parserInvocations = 0;
+    final repository = LazySectionRepository(
+      cache: ParsedSectionCacheService(
+        rootDirectory: Directory(p.join(tempDir.path, 'hydration_close')),
+      ),
+      workCoordinator: SharedLazySectionWorkCoordinator(),
+      parser: (request) async {
+        parserInvocations++;
+        if (!parserStarted.isCompleted) parserStarted.complete();
+        await parserGate.future;
+        return ParsedSection(
+          identity: request.identity,
+          chunks: const [
+            BookChunk(index: 0, type: BookChunkType.text, text: 'hydrated'),
+          ],
+          anchorMap: const {},
+          chapters: const [],
+          wordCount: 1,
+          textCharCount: 8,
+          resourceHrefs: const [],
+          parserVersion: request.identity.parserVersion,
+        );
+      },
+    );
+    await repository.open(file);
+
+    final hydration = repository.hydrateParsedSectionsAround(
+      centerSpineIndex: 0,
+    );
+    await parserStarted.future;
+    final closing = repository.close();
+    parserGate.complete();
+    await Future.wait([hydration, closing]);
+
+    expect(parserInvocations, 1);
+  });
+
+  test('low storage suspends parsed hydration before parsing', () async {
+    final file = File(p.join(tempDir.path, 'repo.epub'));
+    await file.writeAsBytes(_buildRepositoryFixture(), flush: true);
+    var parserInvocations = 0;
+    final repository = LazySectionRepository(
+      cache: ParsedSectionCacheService(
+        rootDirectory: Directory(p.join(tempDir.path, 'low_storage')),
+        storagePressureProvider: () => ParsedCacheStoragePressure.low,
+      ),
+      workCoordinator: SharedLazySectionWorkCoordinator(),
+      parser: (request) async {
+        parserInvocations++;
+        throw StateError('hydration must be suspended');
+      },
+    );
+    addTearDown(repository.close);
+    await repository.open(file);
+
+    await repository.hydrateParsedSectionsAround(centerSpineIndex: 0);
+
+    expect(parserInvocations, 0);
   });
 }
 

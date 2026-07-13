@@ -31,11 +31,14 @@ void _lazySectionRepoDiagLog(String phase, Map<String, Object?> fields) {
 
 enum LazySectionWorkPriority {
   explicitNavigation(0),
-  adjacentReadiness(1),
+  visibleSection(1),
+  adjacentReadiness(2),
   boundaryPrefetch(2),
-  recentRetention(3),
+  targetPreview(3),
   parsedHydration(4),
-  layoutPagination(5);
+  recentRetention(5),
+  layoutPagination(6),
+  derivedIndexing(6);
 
   const LazySectionWorkPriority(this.rank);
 
@@ -44,26 +47,260 @@ enum LazySectionWorkPriority {
   bool outranks(LazySectionWorkPriority other) => rank < other.rank;
 }
 
+enum SharedSectionJobState { queued, launched, committing }
+
+final class SharedSectionWorkCancelled implements Exception {
+  const SharedSectionWorkCancelled(this.identity);
+  final LazySectionIdentity identity;
+
+  @override
+  String toString() =>
+      'Queued shared section work cancelled: ${identity.stableKey}';
+}
+
+final class SharedSectionWorkRequest {
+  const SharedSectionWorkRequest({
+    required this.future,
+    required this.createdJob,
+  });
+
+  final Future<ParsedSection> future;
+  final bool createdJob;
+}
+
+final class SharedLazySectionWorkCoordinator {
+  SharedLazySectionWorkCoordinator({this.maxConcurrentJobs = 2})
+    : assert(maxConcurrentJobs > 0);
+
+  static final SharedLazySectionWorkCoordinator instance =
+      SharedLazySectionWorkCoordinator();
+
+  final int maxConcurrentJobs;
+  final Map<String, _SharedSectionJob> _jobs = {};
+  final Map<String, int> _bookGenerations = {};
+  var _globalGeneration = 0;
+  var _runningJobs = 0;
+  var _drainScheduled = false;
+
+  int get activeJobCount => _jobs.length;
+
+  SharedSectionWorkRequest request({
+    required LazySectionIdentity identity,
+    required Object owner,
+    required LazySectionWorkPriority priority,
+    required Future<ParsedSection> Function() operation,
+  }) {
+    final generation = _generation(identity.bookId);
+    final key = _jobKey(identity, generation);
+    final existing = _jobs[key];
+    if (existing != null) {
+      existing.owners.add(owner);
+      if (priority.outranks(existing.priority)) {
+        existing.priority = priority;
+      }
+      _scheduleDrain();
+      return SharedSectionWorkRequest(
+        future: existing.completer.future,
+        createdJob: false,
+      );
+    }
+    final job = _SharedSectionJob(
+      key: key,
+      identity: identity,
+      generation: generation,
+      priority: priority,
+      operation: operation,
+      owners: {owner},
+    );
+    _jobs[key] = job;
+    _scheduleDrain();
+    return SharedSectionWorkRequest(
+      future: job.completer.future,
+      createdJob: true,
+    );
+  }
+
+  void releaseOwner(Object owner) {
+    final cancelled = <_SharedSectionJob>[];
+    for (final job in _jobs.values) {
+      job.owners.remove(owner);
+      if (job.owners.isEmpty && job.state == SharedSectionJobState.queued) {
+        cancelled.add(job);
+      }
+    }
+    for (final job in cancelled) {
+      if (!identical(_jobs[job.key], job)) continue;
+      _jobs.remove(job.key);
+      job.completer.completeError(SharedSectionWorkCancelled(job.identity));
+    }
+  }
+
+  void invalidateBook(String bookId) {
+    _bookGenerations[bookId] = (_bookGenerations[bookId] ?? 0) + 1;
+    final cancelled = _jobs.values
+        .where(
+          (job) =>
+              job.identity.bookId == bookId &&
+              job.state == SharedSectionJobState.queued,
+        )
+        .toList(growable: false);
+    for (final job in cancelled) {
+      _jobs.remove(job.key);
+      job.completer.completeError(SharedSectionWorkCancelled(job.identity));
+    }
+  }
+
+  void invalidateAll() {
+    _globalGeneration++;
+    final queued = _jobs.values
+        .where((job) => job.state == SharedSectionJobState.queued)
+        .toList(growable: false);
+    for (final job in queued) {
+      _jobs.remove(job.key);
+      job.completer.completeError(SharedSectionWorkCancelled(job.identity));
+    }
+  }
+
+  LazySectionWorkPriority? priorityFor(LazySectionIdentity identity) {
+    final generation = _generation(identity.bookId);
+    return _jobs[_jobKey(identity, generation)]?.priority;
+  }
+
+  SharedSectionJobState? stateFor(LazySectionIdentity identity) {
+    final generation = _generation(identity.bookId);
+    return _jobs[_jobKey(identity, generation)]?.state;
+  }
+
+  void markCommitting(LazySectionIdentity identity) {
+    final generation = _generation(identity.bookId);
+    final job = _jobs[_jobKey(identity, generation)];
+    if (job != null && job.state == SharedSectionJobState.launched) {
+      job.state = SharedSectionJobState.committing;
+    }
+  }
+
+  String _jobKey(LazySectionIdentity identity, int generation) =>
+      '$generation|${identity.stableKey}';
+
+  int _generation(String bookId) =>
+      _globalGeneration * 0x100000000 + (_bookGenerations[bookId] ?? 0);
+
+  void _scheduleDrain() {
+    if (_drainScheduled) return;
+    _drainScheduled = true;
+    scheduleMicrotask(() {
+      _drainScheduled = false;
+      _drain();
+    });
+  }
+
+  void _drain() {
+    while (_runningJobs < maxConcurrentJobs) {
+      final queued =
+          _jobs.values
+              .where((job) => job.state == SharedSectionJobState.queued)
+              .toList(growable: false)
+            ..sort((a, b) => a.priority.rank.compareTo(b.priority.rank));
+      if (queued.isEmpty) return;
+      final job = queued.first;
+      if (job.owners.isEmpty) {
+        _jobs.remove(job.key);
+        job.completer.completeError(SharedSectionWorkCancelled(job.identity));
+        continue;
+      }
+      _launch(job);
+    }
+  }
+
+  void _launch(_SharedSectionJob job) {
+    job.state = SharedSectionJobState.launched;
+    _runningJobs++;
+    unawaited(
+      job
+          .operation()
+          .then(job.completer.complete)
+          .catchError((Object error, StackTrace stackTrace) {
+            job.completer.completeError(error, stackTrace);
+          })
+          .whenComplete(() {
+            _runningJobs--;
+            if (identical(_jobs[job.key], job)) _jobs.remove(job.key);
+            _scheduleDrain();
+          }),
+    );
+  }
+}
+
+final class _SharedSectionJob {
+  _SharedSectionJob({
+    required this.key,
+    required this.identity,
+    required this.generation,
+    required this.priority,
+    required this.operation,
+    required this.owners,
+  });
+
+  final String key;
+  final LazySectionIdentity identity;
+  final int generation;
+  LazySectionWorkPriority priority;
+  final Future<ParsedSection> Function() operation;
+  final Set<Object> owners;
+  final Completer<ParsedSection> completer = Completer<ParsedSection>();
+  SharedSectionJobState state = SharedSectionJobState.queued;
+}
+
+final class LazySectionParseRequest {
+  const LazySectionParseRequest({
+    required this.identity,
+    required this.html,
+    required this.section,
+    required this.resourceBytes,
+    required this.resourceMediaTypes,
+    required this.footnoteContentById,
+  });
+
+  final LazySectionIdentity identity;
+  final String html;
+  final ChunkSection section;
+  final Map<String, Uint8List> resourceBytes;
+  final Map<String, String> resourceMediaTypes;
+  final Map<String, String> footnoteContentById;
+}
+
+typedef LazySectionParser =
+    Future<ParsedSection> Function(LazySectionParseRequest request);
+
 final class LazySectionRepository {
   LazySectionRepository({
     LazyEpubIndexService? indexService,
     ParsedSectionCacheService? cache,
+    SharedLazySectionWorkCoordinator? workCoordinator,
+    LazySectionParser? parser,
     int retainedSectionLimit = 3,
     int retainedSectionByteBudget = 6 * 1024 * 1024,
   }) : _indexService = indexService ?? LazyEpubIndexService(),
        _cache = cache ?? ParsedSectionCacheService(),
+       _workCoordinator =
+           workCoordinator ?? SharedLazySectionWorkCoordinator.instance,
+       _parser = parser ?? _defaultLazySectionParser,
        _retainedSectionLimit = retainedSectionLimit,
        _retainedSectionByteBudget = retainedSectionByteBudget;
 
   final LazyEpubIndexService _indexService;
   final ParsedSectionCacheService _cache;
+  final SharedLazySectionWorkCoordinator _workCoordinator;
+  final LazySectionParser _parser;
   final int _retainedSectionLimit;
   final int _retainedSectionByteBudget;
   final _retained = <int, ParsedSection>{};
   final _retainedCosts = <int, int>{};
   final _pinnedSpineIndices = <int>{};
-  final _inFlight = <int, _LazySectionLoadTask>{};
+  final Object _workOwner = Object();
+  final Set<Future<ParsedSection>> _ownedSharedWork = {};
   LazyEpubBookHandle? _handle;
+  String? _dependencySignature;
   int _sessionEpoch = 0;
 
   LazyEpubIndex? get index => _handle?.index;
@@ -77,6 +314,28 @@ final class LazySectionRepository {
       ..clear()
       ..addAll(spineIndices);
     _evictUntilWithinBudget();
+    _updateDiskProtection();
+  }
+
+  void recordMeaningfulRead(int spineIndex, int readAtMs) {
+    final handle = _handle;
+    if (handle == null ||
+        spineIndex < 0 ||
+        spineIndex >= handle.index.spine.length) {
+      return;
+    }
+    final adjacent = <LazySectionIdentity>[];
+    for (final candidate in [spineIndex - 1, spineIndex + 1]) {
+      if (candidate >= 0 && candidate < handle.index.spine.length) {
+        adjacent.add(_identityFor(handle.index, candidate));
+      }
+    }
+    _cache.recordMeaningfulReadProtection(
+      bookId: handle.index.bookId,
+      readAtMs: readAtMs,
+      lastVisible: _identityFor(handle.index, spineIndex),
+      adjacent: adjacent,
+    );
   }
 
   Future<LazyEpubIndex> open(File file) async {
@@ -84,6 +343,13 @@ final class LazySectionRepository {
     _sessionEpoch++;
     await _cache.cleanupTemporaryFiles();
     _handle = await _indexService.openBookIndex(file);
+    _dependencySignature = lazySectionDependencySignature(_handle!.index);
+    await _cache.registerPublication(
+      bookId: _handle!.index.bookId,
+      publicationFingerprint: _handle!.index.publicationFingerprint,
+    );
+    _updateDiskProtection();
+    await _cache.enforceBudget();
     return _handle!.index;
   }
 
@@ -103,8 +369,6 @@ final class LazySectionRepository {
     if (spineIndex < 0 || spineIndex >= handle.index.spine.length) {
       throw RangeError.index(spineIndex, handle.index.spine, 'spineIndex');
     }
-    if (pinDuringLoad) _pinnedSpineIndices.add(spineIndex);
-
     final retained = _retained.remove(spineIndex);
     if (retained != null) {
       _retained[spineIndex] = retained;
@@ -118,26 +382,10 @@ final class LazySectionRepository {
       return retained;
     }
 
-    final active = _inFlight[spineIndex];
-    if (active != null) {
-      if (priority.outranks(active.priority)) {
-        _lazySectionRepoDiagLog('hydration_task_preempted', {
-          'book': handle.index.bookId,
-          'spineIndex': spineIndex,
-          'href': handle.index.spine[spineIndex].href,
-          'fromPriority': active.priority.name,
-          'toPriority': priority.name,
-        });
-        active.priority = priority;
-      }
-      _lazySectionRepoDiagLog('duplicate_section_request_joined', {
-        'book': handle.index.bookId,
-        'spineIndex': spineIndex,
-        'href': handle.index.spine[spineIndex].href,
-        'priority': priority.name,
-      });
-      return active.future;
-    }
+    final protectDuringWork = pinDuringLoad || priority.rank <= 2;
+    final addedWorkPin =
+        protectDuringWork && _pinnedSpineIndices.add(spineIndex);
+    if (addedWorkPin) _updateDiskProtection();
 
     _lazySectionRepoDiagLog('lazy_section_request', {
       'book': handle.index.bookId,
@@ -146,45 +394,66 @@ final class LazySectionRepository {
       'priority': priority.name,
     });
 
-    final completer = Completer<ParsedSection>();
     final epoch = _sessionEpoch;
-    final task = _LazySectionLoadTask(
+    final identity = _identityFor(handle.index, spineIndex);
+    final cacheGeneration = _cache.generationForBook(identity.bookId);
+    final request = _workCoordinator.request(
+      identity: identity,
+      owner: _workOwner,
       priority: priority,
-      future: completer.future,
+      operation: () => _loadSectionUnshared(
+        handle,
+        identity,
+        priority: priority,
+        cacheGeneration: cacheGeneration,
+      ),
     );
-    _inFlight[spineIndex] = task;
-    unawaited(
-      _loadSectionUnshared(handle, spineIndex, priority: priority, epoch: epoch)
-          .then(completer.complete)
-          .catchError(completer.completeError)
-          .whenComplete(() {
-            if (identical(_inFlight[spineIndex], task)) {
-              _inFlight.remove(spineIndex);
-            }
-            if (pinDuringLoad && epoch == _sessionEpoch) {
-              _pinnedSpineIndices.remove(spineIndex);
-            }
-          }),
-    );
-    return completer.future;
+    if (!request.createdJob) {
+      _lazySectionRepoDiagLog('duplicate_section_request_joined', {
+        'book': handle.index.bookId,
+        'spineIndex': spineIndex,
+        'href': handle.index.spine[spineIndex].href,
+        'priority': priority.name,
+      });
+    } else {
+      _ownedSharedWork.add(request.future);
+      unawaited(
+        request.future.then<void>(
+          (_) {
+            _ownedSharedWork.remove(request.future);
+          },
+          onError: (_, __) {
+            _ownedSharedWork.remove(request.future);
+          },
+        ),
+      );
+    }
+    try {
+      final result = await request.future;
+      if (_canRetainResult(handle, epoch)) _retain(result);
+      return result;
+    } finally {
+      if (addedWorkPin && epoch == _sessionEpoch) {
+        _pinnedSpineIndices.remove(spineIndex);
+        _evictUntilWithinBudget();
+        _updateDiskProtection();
+      }
+    }
   }
 
   Future<ParsedSection> _loadSectionUnshared(
     LazyEpubBookHandle handle,
-    int spineIndex, {
+    LazySectionIdentity identity, {
     required LazySectionWorkPriority priority,
-    required int epoch,
+    required int cacheGeneration,
   }) async {
-    final spineItem = handle.index.spine[spineIndex];
-    final identity = LazySectionIdentity.fromIndexItem(
-      bookId: handle.index.bookId,
-      item: spineItem,
-      sourceChecksum: spineItem.sourceChecksum,
-    );
+    final spineIndex = identity.spineIndex;
 
-    final cached = await _cache.loadSection(identity);
+    final cached = await _cache.loadSection(
+      identity,
+      expectedGeneration: cacheGeneration,
+    );
     if (cached != null) {
-      if (_canRetainResult(handle, epoch)) _retain(cached);
       _lazySectionRepoDiagLog('adjacent_section_parsed_cache_hit', {
         'book': identity.bookId,
         'spineIndex': identity.spineIndex,
@@ -214,14 +483,16 @@ final class LazySectionRepository {
       sectionResource.html,
     );
     final stopwatch = Stopwatch()..start();
-    final parsed = await compute(_parseSectionPayload, (
-      identity: identity,
-      html: sectionResource.html,
-      section: section,
-      resourceBytes: resources.bytes,
-      resourceMediaTypes: resources.mediaTypes,
-      footnoteContentById: footnotes,
-    ));
+    final parsed = await _parser(
+      LazySectionParseRequest(
+        identity: identity,
+        html: sectionResource.html,
+        section: section,
+        resourceBytes: resources.bytes,
+        resourceMediaTypes: resources.mediaTypes,
+        footnoteContentById: footnotes,
+      ),
+    );
     stopwatch.stop();
     _lazySectionRepoDiagLog('lazy_section_parse_complete', {
       'book': identity.bookId,
@@ -239,8 +510,8 @@ final class LazySectionRepository {
       'elapsedMs': stopwatch.elapsedMilliseconds,
       'priority': priority.name,
     });
-    await _cache.writeSection(parsed);
-    if (_canRetainResult(handle, epoch)) _retain(parsed);
+    _workCoordinator.markCommitting(identity);
+    await _cache.writeSection(parsed, expectedGeneration: cacheGeneration);
     return parsed;
   }
 
@@ -275,14 +546,27 @@ final class LazySectionRepository {
         .toList(growable: false);
     await _cache.ensureHydrationManifest(
       bookId: handle.index.bookId,
+      publicationFingerprint: handle.index.publicationFingerprint,
       sourceChecksum: _bookSourceChecksum(handle.index),
       parserVersion: lazyParsedSectionParserVersion,
+      dependencySignature: lazySectionDependencySignature(handle.index),
       readableSpineIndexes: readable,
       skippedSpineIndexes: skipped,
     );
 
     for (final spineIndex in _hydrationOrder(readable, centerSpineIndex)) {
       if (epoch != _sessionEpoch || !identical(_handle, handle)) return;
+      if (!_cache.allowsPriority(
+        LazySectionWorkPriority.parsedHydration.rank,
+      )) {
+        _lazySectionRepoDiagLog('prefetch_paused', {
+          'book': handle.index.bookId,
+          'spineIndex': spineIndex,
+          'queuePriority': LazySectionWorkPriority.parsedHydration.name,
+          'reason': 'storage_pressure',
+        });
+        return;
+      }
       if (shouldPause?.call() ?? false) {
         _lazySectionRepoDiagLog('prefetch_paused', {
           'book': handle.index.bookId,
@@ -318,11 +602,20 @@ final class LazySectionRepository {
     _retained.clear();
     _retainedCosts.clear();
     _pinnedSpineIndices.clear();
-    _inFlight.clear();
+    _workCoordinator.releaseOwner(_workOwner);
+    _cache.clearActiveProtection(_workOwner);
     final handle = _handle;
     _handle = null;
+    _dependencySignature = null;
     if (handle != null) {
+      final work = _ownedSharedWork.toList(growable: false);
+      if (work.isNotEmpty) {
+        await Future.wait(
+          work.map((future) => future.then<void>((_) {}, onError: (_, __) {})),
+        );
+      }
       await handle.close();
+      await _cache.enforceBudget();
     }
   }
 
@@ -392,13 +685,31 @@ final class LazySectionRepository {
     }
     return handle;
   }
-}
 
-final class _LazySectionLoadTask {
-  _LazySectionLoadTask({required this.priority, required this.future});
+  LazySectionIdentity _identityFor(LazyEpubIndex index, int spineIndex) {
+    final item = index.spine[spineIndex];
+    return LazySectionIdentity.fromIndexItem(
+      bookId: index.bookId,
+      publicationFingerprint: index.publicationFingerprint,
+      item: item,
+      sourceChecksum: item.sourceChecksum,
+      dependencySignature:
+          _dependencySignature ?? lazySectionDependencySignature(index),
+    );
+  }
 
-  LazySectionWorkPriority priority;
-  final Future<ParsedSection> future;
+  void _updateDiskProtection() {
+    final handle = _handle;
+    if (handle == null) return;
+    _cache.setActiveProtection(
+      owner: _workOwner,
+      bookId: handle.index.bookId,
+      publicationFingerprint: handle.index.publicationFingerprint,
+      nearbySections: _pinnedSpineIndices
+          .where((index) => index >= 0 && index < handle.index.spine.length)
+          .map((index) => _identityFor(handle.index, index)),
+    );
+  }
 }
 
 String _bookSourceChecksum(LazyEpubIndex index) {
@@ -426,6 +737,19 @@ List<int> _hydrationOrder(List<int> readable, int centerSpineIndex) {
     }
   }
   return ordered;
+}
+
+Future<ParsedSection> _defaultLazySectionParser(
+  LazySectionParseRequest request,
+) {
+  return compute(_parseSectionPayload, (
+    identity: request.identity,
+    html: request.html,
+    section: request.section,
+    resourceBytes: request.resourceBytes,
+    resourceMediaTypes: request.resourceMediaTypes,
+    footnoteContentById: request.footnoteContentById,
+  ));
 }
 
 ParsedSection _parseSectionPayload(

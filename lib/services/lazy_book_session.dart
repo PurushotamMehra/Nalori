@@ -431,6 +431,14 @@ final class LazyBookSession {
     );
   }
 
+  void recordMeaningfulRead(StableBookLocation location, int readAtMs) {
+    if (location.bookId != index.bookId ||
+        location.publicationFingerprint != index.publicationFingerprint) {
+      return;
+    }
+    _repository.recordMeaningfulRead(location.spineIndex, readAtMs);
+  }
+
   LazyLoadedContentWindow loadedWindow({int? centerSpineIndex}) {
     final center = centerSpineIndex ?? _currentLocation?.spineIndex ?? 0;
     final sections = _loadedSections.entries.toList()

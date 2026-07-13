@@ -5,8 +5,9 @@ import '../models/bookmark.dart';
 import '../models/stable_book_location.dart';
 import 'lazy_epub_index_service.dart';
 
-const int lazyParsedSectionCacheFormatVersion = 1;
+const int lazyParsedSectionCacheFormatVersion = 2;
 const String lazyParsedSectionParserVersion = 'section_v2';
+const int lazyParsedSectionDependencySchemaVersion = 1;
 
 typedef StableContentAnchor = StableBookLocation;
 
@@ -14,50 +15,96 @@ typedef StableContentAnchor = StableBookLocation;
 class LazySectionIdentity {
   const LazySectionIdentity({
     required this.bookId,
+    required this.publicationFingerprint,
     required this.spineIndex,
     required this.href,
+    required this.normalizedHref,
     required this.fullPath,
     required this.sourceChecksum,
+    required this.parserVersion,
+    required this.dependencySignature,
+    required this.dependencySchemaVersion,
   });
 
   factory LazySectionIdentity.fromIndexItem({
     required String bookId,
+    required String publicationFingerprint,
     required LazyEpubSpineItem item,
     required String sourceChecksum,
+    required String dependencySignature,
+    String parserVersion = lazyParsedSectionParserVersion,
+    int dependencySchemaVersion = lazyParsedSectionDependencySchemaVersion,
   }) {
     return LazySectionIdentity(
       bookId: bookId,
+      publicationFingerprint: publicationFingerprint,
       spineIndex: item.index,
       href: item.href,
+      normalizedHref: item.normalizedHref,
       fullPath: item.fullPath,
       sourceChecksum: sourceChecksum,
+      parserVersion: parserVersion,
+      dependencySignature: dependencySignature,
+      dependencySchemaVersion: dependencySchemaVersion,
     );
   }
 
   final String bookId;
+  final String publicationFingerprint;
   final int spineIndex;
   final String href;
+  final String normalizedHref;
   final String fullPath;
   final String sourceChecksum;
+  final String parserVersion;
+  final String dependencySignature;
+  final int dependencySchemaVersion;
 
-  String get cacheKey =>
-      '${spineIndex}_${_safePart(href)}_${_checksumPrefix(sourceChecksum)}';
+  String get stableKey => [
+    bookId,
+    publicationFingerprint,
+    spineIndex,
+    normalizedHref,
+    fullPath,
+    sourceChecksum,
+    parserVersion,
+    dependencySchemaVersion,
+    dependencySignature,
+  ].join('|');
+
+  String get cacheKey => [
+    spineIndex,
+    _safePart(normalizedHref),
+    _checksumPrefix(sourceChecksum),
+    _checksumPrefix(publicationFingerprint),
+    _checksumPrefix(dependencySignature),
+  ].join('_');
 
   Map<String, dynamic> toJson() => {
     'bookId': bookId,
+    'publicationFingerprint': publicationFingerprint,
     'spineIndex': spineIndex,
     'href': href,
+    'normalizedHref': normalizedHref,
     'fullPath': fullPath,
     'sourceChecksum': sourceChecksum,
+    'parserVersion': parserVersion,
+    'dependencySignature': dependencySignature,
+    'dependencySchemaVersion': dependencySchemaVersion,
   };
 
   factory LazySectionIdentity.fromJson(Map<String, dynamic> json) {
     return LazySectionIdentity(
       bookId: json['bookId'] as String,
+      publicationFingerprint: json['publicationFingerprint'] as String,
       spineIndex: json['spineIndex'] as int,
       href: json['href'] as String,
+      normalizedHref: json['normalizedHref'] as String,
       fullPath: json['fullPath'] as String,
       sourceChecksum: json['sourceChecksum'] as String,
+      parserVersion: json['parserVersion'] as String,
+      dependencySignature: json['dependencySignature'] as String,
+      dependencySchemaVersion: json['dependencySchemaVersion'] as int,
     );
   }
 }
@@ -182,8 +229,10 @@ class LazyParsedBook {
             (item) => LazyBookSectionDescriptor(
               identity: LazySectionIdentity.fromIndexItem(
                 bookId: index.bookId,
+                publicationFingerprint: index.publicationFingerprint,
                 item: item,
                 sourceChecksum: item.sourceChecksum,
+                dependencySignature: lazySectionDependencySignature(index),
               ),
               mediaType: item.mediaType,
               sizeBytes: item.sizeBytes,
@@ -199,6 +248,23 @@ class LazyParsedBook {
   final String author;
   final List<LazyBookSectionDescriptor> sections;
   final List<LazyEpubChapter> chapters;
+}
+
+String lazySectionDependencySignature(LazyEpubIndex index) {
+  final manifestSignature =
+      index.manifest.values
+          .map(
+            (item) =>
+                '${item.normalizedHref}:${item.mediaType}:${item.sizeBytes ?? -1}',
+          )
+          .toList(growable: false)
+        ..sort();
+  final value = [
+    'dependency_schema_$lazyParsedSectionDependencySchemaVersion',
+    index.publicationFingerprint,
+    ...manifestSignature,
+  ].join('|');
+  return fnv1aHex(Uint8List.fromList(value.codeUnits));
 }
 
 String fnv1aHex(Uint8List bytes) {

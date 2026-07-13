@@ -176,6 +176,8 @@ class BookMetadata {
   final StableBookLocation? lastReadLocation;
   final int totalChunks;
   final int lastReadTime; // Epoch milliseconds
+  final int? lastOpenedAt;
+  final int? lastMeaningfulReadAt;
   final AppTheme? theme; // book-specific theme
   final BookReadingSummary? readingSummary;
 
@@ -205,6 +207,8 @@ class BookMetadata {
     this.lastReadLocation,
     this.totalChunks = 0,
     int? lastReadTime,
+    this.lastOpenedAt,
+    this.lastMeaningfulReadAt,
     this.theme,
     this.readingSummary,
   }) : embeddedTitle = _normalizeMetadataValue(
@@ -245,6 +249,9 @@ class BookMetadata {
         'lastReadLocation': lastReadLocation!.toJson(),
       'totalChunks': totalChunks,
       'lastReadTime': lastReadTime,
+      if (lastOpenedAt != null) 'lastOpenedAt': lastOpenedAt,
+      if (lastMeaningfulReadAt != null)
+        'lastMeaningfulReadAt': lastMeaningfulReadAt,
       'theme': theme?.name,
       'readingSummary': readingSummary?.toJson(),
     };
@@ -252,6 +259,16 @@ class BookMetadata {
 
   factory BookMetadata.fromMap(Map<String, dynamic> map) {
     final rawReadingSummary = map['readingSummary'];
+    final lastReadIndex = (map['lastReadIndex'] as num?)?.toInt() ?? 0;
+    final lastReadLocation = StableBookLocation.maybeFromJson(
+      map['lastReadLocation'],
+    );
+    final legacyLastReadTime = (map['lastReadTime'] as num?)?.toInt();
+    final migratedMeaningfulRead =
+        (map['lastMeaningfulReadAt'] as num?)?.toInt() ??
+        ((lastReadIndex > 0 || lastReadLocation != null)
+            ? legacyLastReadTime
+            : null);
     return BookMetadata(
       id: map['id'] ?? '',
       managedFilePath: map['managedFilePath'],
@@ -274,12 +291,13 @@ class BookMetadata {
       originalSourceTitle: map['originalSourceTitle'],
       originalSourceAuthor: map['originalSourceAuthor'],
       metadataConfidence: (map['metadataConfidence'] as num?)?.toDouble(),
-      lastReadIndex: (map['lastReadIndex'] as num?)?.toInt() ?? 0,
-      lastReadLocation: StableBookLocation.maybeFromJson(
-        map['lastReadLocation'],
-      ),
+      lastReadIndex: lastReadIndex,
+      lastReadLocation: lastReadLocation,
       totalChunks: (map['totalChunks'] as num?)?.toInt() ?? 0,
-      lastReadTime: (map['lastReadTime'] as num?)?.toInt(),
+      lastReadTime: legacyLastReadTime,
+      lastOpenedAt:
+          (map['lastOpenedAt'] as num?)?.toInt() ?? migratedMeaningfulRead,
+      lastMeaningfulReadAt: migratedMeaningfulRead,
       theme: map['theme'] != null
           ? AppTheme.values.firstWhere(
               (e) => e.name == map['theme'],
@@ -325,6 +343,8 @@ class BookMetadata {
     StableBookLocation? lastReadLocation,
     int? totalChunks,
     int? lastReadTime,
+    int? lastOpenedAt,
+    int? lastMeaningfulReadAt,
     AppTheme? theme,
     BookReadingSummary? readingSummary,
     bool clearTheme = false,
@@ -359,6 +379,8 @@ class BookMetadata {
       lastReadLocation: lastReadLocation ?? this.lastReadLocation,
       totalChunks: totalChunks ?? this.totalChunks,
       lastReadTime: lastReadTime ?? this.lastReadTime,
+      lastOpenedAt: lastOpenedAt ?? this.lastOpenedAt,
+      lastMeaningfulReadAt: lastMeaningfulReadAt ?? this.lastMeaningfulReadAt,
       theme: clearTheme ? null : (theme ?? this.theme),
       readingSummary: clearReadingSummary
           ? null

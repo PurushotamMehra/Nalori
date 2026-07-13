@@ -38,8 +38,10 @@ void main() {
       final parsed = parser.parseLazySection(
         identity: LazySectionIdentity.fromIndexItem(
           bookId: handle.index.bookId,
+          publicationFingerprint: handle.index.publicationFingerprint,
           item: spineItem,
           sourceChecksum: fnv1aHex(Uint8List.fromList(section.html.codeUnits)),
+          dependencySignature: lazySectionDependencySignature(handle.index),
         ),
         html: section.html,
       );
