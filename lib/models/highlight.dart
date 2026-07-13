@@ -100,6 +100,7 @@ class Highlight {
   Color get color => Color(resolvedColorValue);
 
   Highlight copyWith({
+    int? originalChunkIndex,
     int? startOffset,
     int? endOffset,
     String? text,
@@ -111,7 +112,7 @@ class Highlight {
   }) {
     return Highlight(
       id: id,
-      originalChunkIndex: originalChunkIndex,
+      originalChunkIndex: originalChunkIndex ?? this.originalChunkIndex,
       startOffset: startOffset ?? this.startOffset,
       endOffset: endOffset ?? this.endOffset,
       text: text ?? this.text,

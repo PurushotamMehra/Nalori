@@ -340,6 +340,156 @@ void main() {
       expect(initial.href, 'text/body.xhtml');
     },
   );
+
+  test('publication mismatch is rejected without loading a section', () async {
+    final session = await _openFixtureSession(
+      tempDir,
+      cacheName: 'mismatch_cache',
+    );
+    addTearDown(session.close);
+    final item = session.index.spine[2];
+
+    final resolution = await session.resolveStableLocation(
+      StableBookLocation(
+        bookId: session.index.bookId,
+        spineIndex: item.index,
+        href: item.href,
+        sourceChecksum: item.sourceChecksum,
+        publicationFingerprint: 'replaced-publication',
+        normalizedHref: item.normalizedHref,
+        sectionProgression: 0,
+      ),
+    );
+
+    expect(resolution.location, isNull);
+    expect(resolution.reason, 'publication_mismatch');
+    expect(session.loadedSpineIndices, isEmpty);
+  });
+
+  test('ranked resolver prefers anchor then source offset', () async {
+    final session = await _openFixtureSession(
+      tempDir,
+      cacheName: 'ranked_cache',
+    );
+    addTearDown(session.close);
+    final anchorTarget = session.resolveAnchor('text/s3.xhtml', 's3')!;
+
+    final anchor = await session.resolveStableLocation(anchorTarget);
+    expect(anchor.confidence, StableLocationConfidence.anchor);
+    expect(anchor.location?.spineIndex, 2);
+    expect(session.loadedSpineIndices, [2]);
+
+    final offset = await session.resolveStableLocation(
+      anchor.location!.copyWith(
+        anchorId: 'missing',
+        localChunkIndex: 1,
+        textOffset: 3,
+      ),
+    );
+    expect(offset.confidence, StableLocationConfidence.exact);
+    expect(offset.reason, 'source_offset');
+    expect(offset.location?.localChunkIndex, 1);
+
+    final parserChanged = await session.resolveStableLocation(
+      StableBookLocation(
+        bookId: session.index.bookId,
+        spineIndex: 2,
+        href: 'text/s3.xhtml',
+        sourceChecksum: session.index.spine[2].sourceChecksum,
+        publicationFingerprint: session.index.publicationFingerprint,
+        normalizedHref: 'text/s3.xhtml',
+        localChunkIndex: 0,
+        sourceParserVersion: 'older-parser',
+        contextText: 'Section 3 text.',
+      ),
+    );
+    expect(parserChanged.confidence, StableLocationConfidence.quote);
+    expect(parserChanged.location?.localChunkIndex, 1);
+  });
+
+  test(
+    'ambiguous quote remains unresolved and preserves legacy evidence',
+    () async {
+      final session = await _openFixtureSession(
+        tempDir,
+        cacheName: 'ambiguous_cache',
+      );
+      addTearDown(session.close);
+      final item = session.index.spine[1];
+      final legacy = StableBookLocation(
+        bookId: session.index.bookId,
+        spineIndex: item.index,
+        href: item.href,
+        sourceChecksum: 'old-parser-checksum',
+        publicationFingerprint: session.index.publicationFingerprint,
+        normalizedHref: item.normalizedHref,
+        contextText: 'Section 2',
+        legacyGlobalChunkIndex: 41,
+      );
+
+      final resolution = await session.resolveStableLocation(legacy);
+      expect(resolution.location, isNull);
+      expect(resolution.confidence, StableLocationConfidence.unresolved);
+      expect(legacy.legacyGlobalChunkIndex, 41);
+      expect(legacy.contextText, 'Section 2');
+    },
+  );
+
+  test(
+    'section and weighted progression resolve unloaded distant targets',
+    () async {
+      final session = await _openFixtureSession(
+        tempDir,
+        cacheName: 'progression_cache',
+      );
+      addTearDown(session.close);
+      await session.loadAround(
+        session.resolveAnchor('text/s1.xhtml', 's1')!,
+        after: 0,
+      );
+
+      final weighted = session.locationForWeightedProgression(
+        0.95,
+        legacyGlobalChunkIndex: 95,
+      );
+      final window = await session.loadAround(weighted, after: 0);
+
+      expect(session.currentLocation?.spineIndex, 2);
+      expect(session.currentLocation?.legacyGlobalChunkIndex, 95);
+      expect(session.currentLocation?.publicationProgression, closeTo(1, 0.2));
+      expect(window.sections.map((section) => section.identity.spineIndex), [
+        2,
+      ]);
+
+      final backward = await session.loadAround(
+        session.resolveAnchor('text/s1.xhtml', 's1')!,
+        after: 0,
+      );
+      expect(backward.sections.map((section) => section.identity.spineIndex), [
+        0,
+      ]);
+
+      final relative = session.resolveAnchor('../text/s2.xhtml', 's2');
+      expect(relative?.spineIndex, 1);
+    },
+  );
+}
+
+Future<LazyBookSession> _openFixtureSession(
+  Directory tempDir, {
+  required String cacheName,
+}) async {
+  final file = File(p.join(tempDir.path, '$cacheName.epub'));
+  await file.writeAsBytes(_buildSessionFixture(), flush: true);
+  final session = LazyBookSession(
+    repository: LazySectionRepository(
+      cache: ParsedSectionCacheService(
+        rootDirectory: Directory(p.join(tempDir.path, cacheName)),
+      ),
+    ),
+  );
+  await session.open(file);
+  return session;
 }
 
 List<int> _buildSessionFixture() {

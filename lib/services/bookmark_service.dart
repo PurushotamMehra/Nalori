@@ -196,6 +196,25 @@ class BookmarkService {
     return restored;
   }
 
+  Future<List<Bookmark>> migrateStableLocation(
+    Bookmark legacy,
+    StableBookLocation stableLocation,
+  ) async {
+    final list = await load();
+    final updated = [
+      for (final bookmark in list)
+        if (bookmark.stableLocation == null &&
+            bookmark.chunkIndex == legacy.chunkIndex &&
+            bookmark.originalStartOffset == legacy.originalStartOffset &&
+            bookmark.createdAt == legacy.createdAt)
+          bookmark.copyWith(stableLocation: stableLocation)
+        else
+          bookmark,
+    ];
+    await _save(updated);
+    return updated;
+  }
+
   /// Check if a specific chunk is bookmarked.
   bool isBookmarked(
     List<Bookmark> bookmarks,

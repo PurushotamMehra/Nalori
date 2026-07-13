@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nalori/models/highlight.dart';
 import 'package:nalori/services/highlight_service.dart';
+import 'package:nalori/models/stable_book_location.dart';
 
 void main() {
   late HighlightService highlightService;
@@ -204,5 +205,50 @@ void main() {
 
       expect(highlightService.getForChunk(all, 3).single.id, 'h2');
     });
+  });
+
+  test('migration preserves highlight and note legacy source fields', () async {
+    final legacy = createHighlight(
+      id: 'legacy-note',
+      originalChunkIndex: 31,
+      startOffset: 4,
+      endOffset: 12,
+      type: HighlightType.note,
+      note: 'Remember this',
+    );
+    await highlightService.add(legacy);
+    await highlightService.add(
+      createHighlight(
+        id: legacy.id,
+        originalChunkIndex: 32,
+        startOffset: 0,
+        endOffset: 5,
+        type: HighlightType.note,
+        note: 'Remember this',
+      ),
+    );
+    const location = StableBookLocation(
+      bookId: testBookId,
+      spineIndex: 3,
+      href: 'chapter-3.xhtml',
+      sourceChecksum: 'checksum',
+      publicationFingerprint: 'publication',
+      sectionProgression: 0.25,
+    );
+
+    final migrated = await highlightService.migrateStableLocation(
+      legacy,
+      location,
+    );
+
+    final migratedSegment = migrated.singleWhere(
+      (entry) => entry.originalChunkIndex == 31,
+    );
+    final unresolvedSegment = migrated.singleWhere(
+      (entry) => entry.originalChunkIndex == 32,
+    );
+    expect(migratedSegment.note, 'Remember this');
+    expect(migratedSegment.stableLocation, location);
+    expect(unresolvedSegment.stableLocation, isNull);
   });
 }

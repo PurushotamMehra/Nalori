@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart'
     show
@@ -106,6 +108,46 @@ LazySectionWorkPriority lazySectionPriorityForReaderReason(String reason) {
     return LazySectionWorkPriority.boundaryPrefetch;
   }
   return LazySectionWorkPriority.explicitNavigation;
+}
+
+@visibleForTesting
+List<Highlight> resolveReaderHighlightsForSourceWindow({
+  required List<Highlight> highlights,
+  required Map<int, StableBookLocation> locationsByChunkIndex,
+}) {
+  if (locationsByChunkIndex.isEmpty) return List<Highlight>.from(highlights);
+  final resolved = <Highlight>[];
+  for (final highlight in highlights) {
+    final stable = highlight.stableLocation;
+    if (stable == null) {
+      resolved.add(highlight);
+      continue;
+    }
+
+    int? currentIndex;
+    for (final entry in locationsByChunkIndex.entries) {
+      final current = entry.value;
+      final publicationMatches =
+          stable.publicationFingerprint == null ||
+          current.publicationFingerprint == null ||
+          stable.publicationFingerprint == current.publicationFingerprint;
+      if (publicationMatches &&
+          stable.bookId == current.bookId &&
+          stable.spineIndex == current.spineIndex &&
+          stable.localChunkIndex != null &&
+          stable.localChunkIndex == current.localChunkIndex) {
+        currentIndex = entry.key;
+        break;
+      }
+    }
+    if (currentIndex == null) continue;
+    resolved.add(
+      currentIndex == highlight.originalChunkIndex
+          ? highlight
+          : highlight.copyWith(originalChunkIndex: currentIndex),
+    );
+  }
+  return resolved;
 }
 
 typedef ProgressiveDisplayRangeGenerator =
@@ -5807,32 +5849,48 @@ class _ReaderScreenState extends State<ReaderScreen>
         session.nextReadableSpineIndex(maxLoaded) != null;
   }
 
-  Future<void> _navigateToStableLocation(StableBookLocation location) async {
-    final existingIndex = _sourceIndexForStableLocation(location);
+  Future<StableBookLocation?> _navigateToStableLocation(
+    StableBookLocation location,
+  ) async {
+    final session = _lazySession;
+    var resolvedLocation = location;
+    if (session != null) {
+      final resolution = await session.resolveStableLocation(location);
+      final resolved = resolution.location;
+      if (resolved == null) {
+        _readerDiagLog('stable_location_unresolved', {
+          ..._stableLocationDiagFields(location),
+          'reason': resolution.reason,
+        });
+        return null;
+      }
+      resolvedLocation = resolved;
+    }
+
+    final existingIndex = _sourceIndexForStableLocation(resolvedLocation);
     if (existingIndex != null) {
       unawaited(
         _navigateToSourceLocation(
           originalChunkIndex: existingIndex,
-          originalStartOffset: location.textOffset,
-          sourceText: location.contextText,
+          originalStartOffset: resolvedLocation.textOffset,
+          sourceText: resolvedLocation.contextText,
         ),
       );
-      return;
+      return resolvedLocation;
     }
 
-    final session = _lazySession;
     if (session == null) {
-      final fallback = location.legacyGlobalChunkIndex;
+      final fallback = resolvedLocation.legacyGlobalChunkIndex;
       if (fallback != null) {
         unawaited(
           _navigateToSourceLocation(
             originalChunkIndex: fallback,
-            originalStartOffset: location.textOffset,
-            sourceText: location.contextText,
+            originalStartOffset: resolvedLocation.textOffset,
+            sourceText: resolvedLocation.contextText,
           ),
         );
       }
-      return;
+      return null;
     }
 
     _readerDiagLog('lazy_reader_section_requested', {
@@ -5841,18 +5899,19 @@ class _ReaderScreenState extends State<ReaderScreen>
       'spineIndex': location.spineIndex,
       'href': location.href,
     });
-    final window = await session.loadAround(location, after: 0);
-    if (!mounted) return;
+    _commitCurrentPosition();
+    final window = await session.loadAround(resolvedLocation, after: 0);
+    if (!mounted) return null;
     _replaceLazySourceWindow(window);
-    final targetIndex = _sourceIndexForStableLocation(location);
+    final targetIndex = _sourceIndexForStableLocation(resolvedLocation);
     _targetOriginalIndex = (targetIndex ?? 0).clamp(
       0,
       math.max(0, _sourceChunks.length - 1),
     );
     _preferSourceIndexOnNextRestore = true;
-    _pendingExactStableRestore = location;
+    _pendingExactStableRestore = resolvedLocation;
     _readerDiagLog('stable_location_pending_restore_set', {
-      ..._stableLocationDiagFields(location),
+      ..._stableLocationDiagFields(resolvedLocation),
       'targetOriginalIndex': _targetOriginalIndex,
       'loadedChunks': _sourceChunks.length,
     });
@@ -5874,18 +5933,19 @@ class _ReaderScreenState extends State<ReaderScreen>
     _displayChunksComplete = false;
     _readerDiagLog('lazy_reader_target_resolved', {
       'book': widget.bookId,
-      'spineIndex': location.spineIndex,
-      'href': location.href,
+      'spineIndex': resolvedLocation.spineIndex,
+      'href': resolvedLocation.href,
       'targetOriginalIndex': _targetOriginalIndex,
       'loadedChunks': _sourceChunks.length,
     });
     setState(() {});
     unawaited(
       _completeStableLocationNavigation(
-        location: location,
+        location: resolvedLocation,
         generation: _rebuildGeneration,
       ),
     );
+    return resolvedLocation;
   }
 
   Future<void> _completeStableLocationNavigation({
@@ -5926,6 +5986,98 @@ class _ReaderScreenState extends State<ReaderScreen>
       'displayChunks': _displayChunks.length,
       'hasCompletedDisplayChunkBuild': _hasCompletedDisplayChunkBuild,
     });
+  }
+
+  Future<void> _navigateAndMigrateLegacyBookmark(Bookmark bookmark) async {
+    final session = _lazySession;
+    final metadata = _metadataService.getMetadata(widget.bookId);
+    final total = metadata?.totalChunks ?? 0;
+    if (session == null || total <= 1) {
+      await _navigateToSourceLocation(
+        originalChunkIndex: bookmark.chunkIndex,
+        originalStartOffset: bookmark.originalStartOffset,
+        sourceText: bookmark.previewText,
+      );
+      return;
+    }
+    final progression = (bookmark.chunkIndex / (total - 1)).clamp(0.0, 1.0);
+    final candidate = session
+        .locationForWeightedProgression(
+          progression,
+          legacyGlobalChunkIndex: bookmark.chunkIndex,
+        )
+        .copyWith(
+          textOffset: bookmark.originalStartOffset,
+          contextText: bookmark.previewText,
+        );
+    final resolution = await session.resolveStableLocation(candidate);
+    final resolved = resolution.location;
+    if (resolved == null) return;
+    await _navigateToStableLocation(resolved);
+    final hadQuote = bookmark.previewText?.trim().isNotEmpty == true;
+    if (hadQuote &&
+        resolution.confidence == StableLocationConfidence.progression) {
+      return;
+    }
+    final updated = await _bookmarkService.migrateStableLocation(
+      bookmark,
+      resolved,
+    );
+    if (mounted) setState(() => _bookmarks = updated);
+  }
+
+  Future<void> _navigateAndMigrateLegacyAnnotation({
+    required int originalChunkIndex,
+    int? originalStartOffset,
+    String? sourceText,
+  }) async {
+    final session = _lazySession;
+    final total = _metadataService.getMetadata(widget.bookId)?.totalChunks ?? 0;
+    if (session == null || total <= 1) {
+      await _navigateToSourceLocation(
+        originalChunkIndex: originalChunkIndex,
+        originalStartOffset: originalStartOffset,
+        sourceText: sourceText,
+      );
+      return;
+    }
+    final candidate = session
+        .locationForWeightedProgression(
+          (originalChunkIndex / (total - 1)).clamp(0.0, 1.0),
+          legacyGlobalChunkIndex: originalChunkIndex,
+        )
+        .copyWith(
+          textOffset: originalStartOffset ?? 0,
+          contextText: sourceText,
+        );
+    final resolution = await session.resolveStableLocation(candidate);
+    final resolved = resolution.location;
+    if (resolved == null) return;
+    await _navigateToStableLocation(resolved);
+    if (sourceText?.trim().isNotEmpty == true &&
+        resolution.confidence == StableLocationConfidence.progression) {
+      return;
+    }
+    for (final highlight in List<Highlight>.from(_highlights)) {
+      if (highlight.stableLocation == null &&
+          highlight.originalChunkIndex == originalChunkIndex &&
+          (originalStartOffset == null ||
+              highlight.startOffset == originalStartOffset)) {
+        _highlights = await _highlightService.migrateStableLocation(
+          highlight,
+          resolved,
+        );
+      }
+    }
+    for (final word in _dictionaryService.words) {
+      if (word.stableLocation == null &&
+          word.originalChunkIndex == originalChunkIndex &&
+          (originalStartOffset == null ||
+              word.originalStartOffset == originalStartOffset)) {
+        await _dictionaryService.migrateStableLocation(word.id, resolved);
+      }
+    }
+    if (mounted) setState(() {});
   }
 
   void _scheduleLazyAdjacentWarmup(StableBookLocation location) {
@@ -7124,10 +7276,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   }) {
     final location = _sourceLocationsByChunkIndex[originalIndex];
     if (location == null) return null;
-    return location.copyWith(
-      textOffset: textOffset,
-      legacyGlobalChunkIndex: originalIndex,
-    );
+    return location.copyWith(textOffset: textOffset);
   }
 
   int? _previousSpineIndexForOriginalIndex(int originalIndex) {
@@ -7170,6 +7319,17 @@ class _ReaderScreenState extends State<ReaderScreen>
     final chunk = _prefs!.getInt('pos_hist_${widget.bookId}_chunk');
     final display = _prefs!.getInt('pos_hist_${widget.bookId}_display');
     final label = _prefs!.getString('pos_hist_${widget.bookId}_label');
+    final stableJson = _prefs!.getString('pos_hist_${widget.bookId}_stable');
+    StableBookLocation? stableLocation;
+    if (stableJson != null) {
+      try {
+        stableLocation = StableBookLocation.maybeFromJson(
+          jsonDecode(stableJson),
+        );
+      } catch (_) {
+        // A corrupt optional stable history record must not drop legacy fields.
+      }
+    }
 
     if (chunk != null && display != null && label != null) {
       _positionStack.clear();
@@ -7177,8 +7337,9 @@ class _ReaderScreenState extends State<ReaderScreen>
         PositionHistory(
           chunkIndex: chunk,
           displayIndex: display,
-          label: _buildPositionHistoryLabel(display),
-          stableLocation: _stableLocationForOriginalIndex(chunk),
+          label: label,
+          stableLocation:
+              stableLocation ?? _stableLocationForOriginalIndex(chunk),
         ),
       );
     }
@@ -7190,6 +7351,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       await _prefs!.remove('pos_hist_${widget.bookId}_chunk');
       await _prefs!.remove('pos_hist_${widget.bookId}_display');
       await _prefs!.remove('pos_hist_${widget.bookId}_label');
+      await _prefs!.remove('pos_hist_${widget.bookId}_stable');
     } else {
       final top = _positionStack.last;
       await _prefs!.setInt('pos_hist_${widget.bookId}_chunk', top.chunkIndex);
@@ -7198,6 +7360,15 @@ class _ReaderScreenState extends State<ReaderScreen>
         top.displayIndex,
       );
       await _prefs!.setString('pos_hist_${widget.bookId}_label', top.label);
+      final stableLocation = top.stableLocation;
+      if (stableLocation == null) {
+        await _prefs!.remove('pos_hist_${widget.bookId}_stable');
+      } else {
+        await _prefs!.setString(
+          'pos_hist_${widget.bookId}_stable',
+          jsonEncode(stableLocation.toJson()),
+        );
+      }
     }
   }
 
@@ -7259,6 +7430,12 @@ class _ReaderScreenState extends State<ReaderScreen>
     final top = _positionStack.removeLast();
     _savePositionHistory();
 
+    if (_lazySession != null && top.stableLocation != null) {
+      unawaited(_navigateToStableLocation(top.stableLocation!));
+      _updatePositionHistoryNotifier();
+      return;
+    }
+
     // Jump to the saved position. Recalculate display index using original just in case font changed.
     final rebuiltDisplayTarget = _originalToDisplay[top.chunkIndex];
     if (rebuiltDisplayTarget == null) {
@@ -7282,6 +7459,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final anchor = parsed.fragment;
     final originalIndex = anchor == null ? null : _sourceAnchorMap[anchor];
     if (originalIndex != null) {
+      _commitCurrentPosition();
       unawaited(_navigateToSourceLocation(originalChunkIndex: originalIndex));
       return;
     }
@@ -7292,6 +7470,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       if (targetHref != null) {
         final target = session.resolveAnchor(targetHref, anchor);
         if (target != null) {
+          _commitCurrentPosition();
           _readerDiagLog('lazy_internal_link_target', {
             'book': widget.bookId,
             'url': url,
@@ -8161,7 +8340,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                 return;
               }
               unawaited(
-                _navigateToSourceLocation(
+                _navigateAndMigrateLegacyAnnotation(
                   originalChunkIndex: originalIndex,
                   originalStartOffset: originalStartOffset,
                   sourceText: sourceText,
@@ -8420,23 +8599,17 @@ class _ReaderScreenState extends State<ReaderScreen>
     _jumpReaderToPage(targetIndex, asPreview: true);
   }
 
-  void _commitLazyStructuralScrub(int spineIndex) {
+  void _commitLazyStructuralScrub(double progression) {
     final session = _lazySession;
     if (session == null) return;
-    final clamped = spineIndex.clamp(0, session.index.spine.length - 1).toInt();
     setState(() {
       _isScrubbing = false;
       _lazyScrubPreviewSpineIndex = null;
     });
-    final item = session.index.spine[clamped];
+    _commitCurrentPosition();
     unawaited(
       _navigateToStableLocation(
-        StableBookLocation(
-          bookId: session.index.bookId,
-          spineIndex: item.index,
-          href: item.href,
-          sourceChecksum: item.sourceChecksum,
-        ),
+        session.locationForWeightedProgression(progression),
       ),
     );
   }
@@ -8449,16 +8622,28 @@ class _ReaderScreenState extends State<ReaderScreen>
         _lazyScrubPreviewSpineIndex ??
         _currentStableLocation()?.spineIndex ??
         0;
-    final value = currentSpine.clamp(0, spineCount - 1).toDouble();
+    final currentItem =
+        session.index.spine[currentSpine.clamp(0, spineCount - 1).toInt()];
+    final totalWeight = session.index.totalReadableWeight;
+    final value = totalWeight <= 0
+        ? (spineCount <= 1 ? 0.0 : currentSpine / (spineCount - 1))
+        : (currentItem.prefixWeight / totalWeight).clamp(0.0, 1.0);
     final markRatios =
         _flatChapterInfos
             .map((chapter) => chapter.stableLocation?.spineIndex)
             .whereType<int>()
-            .map((spine) => spineCount <= 1 ? 0.0 : spine / (spineCount - 1))
+            .map((spine) {
+              if (totalWeight <= 0) {
+                return spineCount <= 1 ? 0.0 : spine / (spineCount - 1);
+              }
+              return (session.index.spine[spine].prefixWeight / totalWeight)
+                  .clamp(0.0, 1.0);
+            })
             .toSet()
             .toList()
           ..sort();
-    final currentTitle = _titleForSpineIndex(value.round());
+    final previewSpine = _lazyScrubPreviewSpineIndex ?? currentSpine;
+    final currentTitle = _titleForSpineIndex(previewSpine);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -8490,8 +8675,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               overlayColor: _settings.accentColor.withValues(alpha: 0.15),
             ),
             child: Slider(
-              max: (spineCount - 1).toDouble(),
-              divisions: spineCount > 1 ? spineCount - 1 : null,
+              divisions: 100,
               value: value,
               onChangeStart: (_) {
                 _dwellTimer?.cancel();
@@ -8502,11 +8686,13 @@ class _ReaderScreenState extends State<ReaderScreen>
                 });
               },
               onChanged: (next) {
-                final target = next.round().clamp(0, spineCount - 1).toInt();
+                final target = session
+                    .locationForWeightedProgression(next)
+                    .spineIndex;
                 if (_lazyScrubPreviewSpineIndex == target) return;
                 setState(() => _lazyScrubPreviewSpineIndex = target);
               },
-              onChangeEnd: (next) => _commitLazyStructuralScrub(next.round()),
+              onChangeEnd: _commitLazyStructuralScrub,
             ),
           ),
         ),
@@ -9171,6 +9357,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     final speedReadAllowsManualNavigation =
         !_speedReadController.isActive ||
         _settings.speedReadPageAdvanceMode == SpeedReadPageAdvanceMode.manual;
+    final renderHighlights = resolveReaderHighlightsForSourceWindow(
+      highlights: _highlights,
+      locationsByChunkIndex: _sourceLocationsByChunkIndex,
+    );
 
     final body = Stack(
       children: [
@@ -9210,7 +9400,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               onTripleTap: _onTripleTap,
               onBookmarkLongPress: _onBookmarkLongPress,
               onImageTap: _openBookImageViewer,
-              highlights: _highlights,
+              highlights: renderHighlights,
               characterNames: _buildCharacterNamesMap(),
               onHighlightCreated: _onHighlightCreated,
               onQuoteShareRequested: _onQuoteShareRequested,
@@ -9805,13 +9995,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           if (location != null) {
             unawaited(_navigateToStableLocation(location));
           } else {
-            unawaited(
-              _navigateToSourceLocation(
-                originalChunkIndex: bookmark.chunkIndex,
-                originalStartOffset: bookmark.originalStartOffset,
-                sourceText: bookmark.previewText,
-              ),
-            );
+            unawaited(_navigateAndMigrateLegacyBookmark(bookmark));
           }
         },
         bookmarks: _bookmarks,

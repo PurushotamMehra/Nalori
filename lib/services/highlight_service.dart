@@ -1,6 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/highlight.dart';
+import '../models/stable_book_location.dart';
 
 /// Persistent storage for user-created highlights.
 ///
@@ -80,6 +81,26 @@ class HighlightService {
   Future<List<Highlight>> clearAll() async {
     await _save([]);
     return [];
+  }
+
+  Future<List<Highlight>> migrateStableLocation(
+    Highlight legacy,
+    StableBookLocation stableLocation,
+  ) async {
+    final list = await load();
+    for (var i = 0; i < list.length; i++) {
+      final highlight = list[i];
+      if (highlight.id == legacy.id &&
+          highlight.originalChunkIndex == legacy.originalChunkIndex &&
+          highlight.startOffset == legacy.startOffset &&
+          highlight.endOffset == legacy.endOffset &&
+          highlight.type == legacy.type &&
+          highlight.stableLocation == null) {
+        list[i] = highlight.copyWith(stableLocation: stableLocation);
+      }
+    }
+    await _save(list);
+    return list;
   }
 
   /// Get highlights for a specific original chunk index.

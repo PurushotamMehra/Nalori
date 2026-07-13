@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 
 @immutable
 class StableBookLocation {
-  static const int currentVersion = 1;
+  static const int currentVersion = 2;
 
   const StableBookLocation({
     required this.bookId,
@@ -22,6 +22,11 @@ class StableBookLocation {
     this.readerLayoutFingerprint,
     this.previousSpineIndex,
     this.nextSpineIndex,
+    this.publicationFingerprint,
+    this.normalizedHref,
+    this.sectionProgression,
+    this.publicationProgression,
+    this.sourceParserVersion,
   });
 
   final int version;
@@ -41,6 +46,11 @@ class StableBookLocation {
   final String? readerLayoutFingerprint;
   final int? previousSpineIndex;
   final int? nextSpineIndex;
+  final String? publicationFingerprint;
+  final String? normalizedHref;
+  final double? sectionProgression;
+  final double? publicationProgression;
+  final String? sourceParserVersion;
 
   bool get hasExactLocalTarget => localChunkIndex != null || anchorId != null;
 
@@ -62,6 +72,11 @@ class StableBookLocation {
     String? readerLayoutFingerprint,
     int? previousSpineIndex,
     int? nextSpineIndex,
+    String? publicationFingerprint,
+    String? normalizedHref,
+    double? sectionProgression,
+    double? publicationProgression,
+    String? sourceParserVersion,
   }) {
     return StableBookLocation(
       version: version ?? this.version,
@@ -83,6 +98,13 @@ class StableBookLocation {
           readerLayoutFingerprint ?? this.readerLayoutFingerprint,
       previousSpineIndex: previousSpineIndex ?? this.previousSpineIndex,
       nextSpineIndex: nextSpineIndex ?? this.nextSpineIndex,
+      publicationFingerprint:
+          publicationFingerprint ?? this.publicationFingerprint,
+      normalizedHref: normalizedHref ?? this.normalizedHref,
+      sectionProgression: sectionProgression ?? this.sectionProgression,
+      publicationProgression:
+          publicationProgression ?? this.publicationProgression,
+      sourceParserVersion: sourceParserVersion ?? this.sourceParserVersion,
     );
   }
 
@@ -106,6 +128,13 @@ class StableBookLocation {
       'readerLayoutFingerprint': readerLayoutFingerprint,
     if (previousSpineIndex != null) 'previousSpineIndex': previousSpineIndex,
     if (nextSpineIndex != null) 'nextSpineIndex': nextSpineIndex,
+    if (publicationFingerprint != null)
+      'publicationFingerprint': publicationFingerprint,
+    if (normalizedHref != null) 'normalizedHref': normalizedHref,
+    if (sectionProgression != null) 'sectionProgression': sectionProgression,
+    if (publicationProgression != null)
+      'publicationProgression': publicationProgression,
+    if (sourceParserVersion != null) 'sourceParserVersion': sourceParserVersion,
   };
 
   factory StableBookLocation.fromJson(Map<String, dynamic> json) {
@@ -127,6 +156,12 @@ class StableBookLocation {
       readerLayoutFingerprint: json['readerLayoutFingerprint'] as String?,
       previousSpineIndex: (json['previousSpineIndex'] as num?)?.toInt(),
       nextSpineIndex: (json['nextSpineIndex'] as num?)?.toInt(),
+      publicationFingerprint: json['publicationFingerprint'] as String?,
+      normalizedHref: json['normalizedHref'] as String?,
+      sectionProgression: (json['sectionProgression'] as num?)?.toDouble(),
+      publicationProgression: (json['publicationProgression'] as num?)
+          ?.toDouble(),
+      sourceParserVersion: json['sourceParserVersion'] as String?,
     );
   }
 
@@ -159,11 +194,16 @@ class StableBookLocation {
         other.localDisplayIndex == localDisplayIndex &&
         other.readerLayoutFingerprint == readerLayoutFingerprint &&
         other.previousSpineIndex == previousSpineIndex &&
-        other.nextSpineIndex == nextSpineIndex;
+        other.nextSpineIndex == nextSpineIndex &&
+        other.publicationFingerprint == publicationFingerprint &&
+        other.normalizedHref == normalizedHref &&
+        other.sectionProgression == sectionProgression &&
+        other.publicationProgression == publicationProgression &&
+        other.sourceParserVersion == sourceParserVersion;
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     version,
     bookId,
     spineIndex,
@@ -181,5 +221,10 @@ class StableBookLocation {
     readerLayoutFingerprint,
     previousSpineIndex,
     nextSpineIndex,
-  );
+    publicationFingerprint,
+    normalizedHref,
+    sectionProgression,
+    publicationProgression,
+    sourceParserVersion,
+  ]);
 }

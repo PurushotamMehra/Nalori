@@ -2,9 +2,9 @@
 
 ## Overall Status
 
-- Overall state: Phase 2 complete / later phases not started
-- Current phase: Phase 3 (not started)
-- Last updated: 2026-07-11
+- Overall state: Phase 3 complete / later phases not started
+- Current phase: Phase 4 (not started)
+- Last updated: 2026-07-12
 - Source plan: `docs/lazy_random_access_reader_plan.md`
 - Evidence:
   - `docs/epub_parsing_system_audit.md`
@@ -36,7 +36,7 @@ These are current defaults that may be adjusted through measured profiling; they
 |---|---|---|---|---|---|
 | Phase 1 — Stop avoidable legacy work safely | Complete | 2026-07-11 | 2026-07-11 | Yes | Explicit legacy and Book Memory preparation retained; normal refresh no longer queues whole books. |
 | Phase 2 — Persistent structural index | Complete | 2026-07-11 | 2026-07-11 | Yes | Existing `LazyEpubIndex` is persisted and reused after validity checks. |
-| Phase 3 — Stable random-access navigation | Not started | — | — | No | Depends on persistent publication identity. |
+| Phase 3 — Stable random-access navigation | Complete | 2026-07-12 | 2026-07-12 | Yes | All reader destinations resolve through publication-aware stable source targets and direct section loading. |
 | Phase 4 — Shared section work and cache retention | Not started | — | — | No | Depends on canonical section identity. |
 | Phase 5 — ReaderScreen and Card Mode responsiveness | Not started | — | — | No | Depends on stable navigation and bounded source ownership. |
 | Phase 6 — Search and Book Memory migration | Not started | — | — | No | Depends on stable destinations and section validity. |
@@ -74,12 +74,38 @@ Phase 2 persists the existing `LazyEpubIndex` in schema-versioned JSON under the
 
 On a valid reopen, the service opens the live archive only to obtain resource references, then reuses the persisted manifest/spine/TOC map without calling the structural index builder. A changed fingerprint, file evidence, schema version, missing/corrupt JSON, or unsupported record causes a safe rebuild and replacement. Storage is deliberately opportunistic: an unavailable persistence directory does not prevent the existing lazy-open path from functioning.
 
+Phase 3 upgrades `StableBookLocation` to schema v2 with publication fingerprint, normalized href, section and weighted-publication progression, and parsed-source version evidence. `LazyBookSession.resolveStableLocation` now returns explicit confidence and reason data and applies the canonical ranked order: publication/section identity, anchor or stable source identity, source offset, unique quote plus surrounding context, in-section progression, weighted publication progression, then legacy local indexes only as migration hints. Logical-book or publication mismatches are rejected before section parsing. Ambiguous quote-only targets remain unresolved.
+
+`ReaderOpenService`, `BookLoadingScreen`, and `ReaderScreen` now use this resolver for last-read restore, chapters, internal links, bookmarks, highlights, notes, saved words, history Back, and weighted percentage jumps. A target resolver loads the requested XHTML section directly; distant and backward navigation does not parse intermediate sections. Relative cross-section links are normalized against the current section. Internal-link navigation records a stable return point, so footnote return and Back survive lazy-window replacement. Stable history JSON is additive to the existing legacy SharedPreferences fields.
+
+Successful legacy last-read, bookmark, highlight/note, and saved-word resolution persists the stable replacement while preserving original indexes, offsets, text, and other legacy fields. Ambiguous quote recovery is navigable only when a lower-confidence progression exists, but is not automatically persisted as an exact migration. Same-filename publication replacement rejects the stale fingerprint and starts from the new publication's meaningful initial target without reusing the old legacy percentage.
+
+The post-Phase 3 annotation smoke-test regression is fixed at the render boundary. Persisted annotations deliberately retain legacy `originalChunkIndex`, but `_ReaderPageView` previously filtered and mapped every decoration only through that field. Lazy target-window replacement reindexes source chunks, so a correctly resolved stable annotation could disappear or decorate an unrelated equal-offset range until a later card/layout rebuild. ReaderScreen now projects stable annotation identity (`bookId`, publication when available, spine index, and local chunk index) onto the active source-window index before building cards. The projection is ephemeral: persisted annotations and display/source caches are unchanged, existing display chunks are redecorated without XHTML parsing or pagination, and one migrated record produces one visual record.
+
+## Phase 3 Checklist
+
+- [x] Extend stable locations with publication, normalized section, source-parser, section-progression, and weighted-publication evidence.
+- [x] Implement ranked, publication-aware resolution with explicit confidence and reason.
+- [x] Reject logical-book and publication-fingerprint mismatches before target loading.
+- [x] Integrate the resolver into ReaderScreen stable navigation.
+- [x] Restore and persist stable last-read positions automatically.
+- [x] Navigate chapters, anchors, internal cross-section links, bookmarks, highlights, notes, and saved words through stable targets.
+- [x] Persist successful legacy migrations while retaining legacy fields.
+- [x] Preserve unresolved and ambiguous legacy evidence.
+- [x] Persist stable Back/history state and record stable footnote return points.
+- [x] Use Phase 2 structural weights for percentage jumps.
+- [x] Verify direct backward and distant unloaded-section navigation.
+- [x] Cover parser-version/chunk-count fallback and same-filename replacement safety.
+- [x] Run focused Phase 3 and affected lazy-reader regression tests.
+- [x] Run `flutter analyze` and `git diff --check`.
+
 ## Current Codebase Risks
 
 - `CachedBook` remains required by the explicit legacy reader path and by temporary Book Memory compatibility; Phase 6/7 own their replacement and retirement.
 - Phase 1 preparation identity is intentionally filesystem-based (book ID, size, and modification time) plus cache/parser contract fields. A stronger publication fingerprint belongs to Phase 2.
 - Book deletion now clears Phase 1 whole-cache/preparation metadata and the Phase 2 structural index; coordinated parsed-section/display cleanup remains a later-phase boundary.
 - Phase 2 structural validity hashes the complete EPUB bytes. This is stronger than timestamps and catches same-name/same-size replacement, but does not remove the current archive-open cost; further open-path optimization belongs to later profiling work.
+- Phase 5 must remove the remaining render-time fallback from annotations without a stable location to legacy/global/window-relative `Highlight.originalChunkIndex`. Such records can still collide with a current lazy-window index. Character-name rendering has two layers: literal whole-name matching is source-text safe, while the direct stored occurrence range uses this legacy index and can color an unrelated same-length range. Phase 5 acceptance must make all direct decoration ranges section-aware across append, prepend, replacement, split, and merge; Phase 6 still owns Book Memory occurrence-index migration.
 
 ## Decisions and Deviations Log
 
@@ -90,6 +116,10 @@ On a valid reopen, the service opens the live archive only to obtain resource re
 | 2026-07-11 | 1 | No automatic lazy-to-legacy fallback was added. | Canonical plan explicitly excludes route-selection/fallback expansion in this phase. | Existing lazy-reader policy remains unchanged. |
 | 2026-07-11 | 2 | Persist `LazyEpubIndex` directly, with `LazyEpubIndexStore` as a storage adapter. | Canonical plan requires extending the current model and keeping the live archive separate. | No parallel structural model or reader route was introduced. |
 | 2026-07-11 | 2 | Treat unavailable persistence as a cache miss rather than failing a lazy open. | Existing host-side lazy tests do not initialize path-provider storage; lazy opening must retain its previous fallback behavior. | Valid production storage reuses records; storage failure safely rebuilds in memory. |
+| 2026-07-12 | 3 | Persist parser-version evidence in stable source locations in addition to the planned publication/section fields. | XHTML checksums do not change when parser chunk boundaries change. | Local chunk indexes are exact only for the same parsed-source version; quote/progression recovery handles parser changes. |
+| 2026-07-12 | 3 | Do not persist ambiguous quote recovery when navigation falls through to weighted progression. | The plan requires unresolved or ambiguous legacy evidence to remain available. | Users can still navigate approximately, but the legacy record is retained until a unique recovery succeeds. |
+| 2026-07-12 | 3 | Keep existing ReaderScreen destination entry points and route them through the session resolver. | ReaderScreen already had lazy chapter, link, annotation, and window-replacement plumbing. | Phase 3 remains an incremental migration rather than a reader rewrite; Phase 4 was not started. |
+| 2026-07-12 | 3 | Project stable annotation records onto current lazy-window indexes only at render time. | Navigation used stable identity, but ReadingCard filtering still used retained legacy `originalChunkIndex`; typography changes rebuilt cards and masked the stale projection. | Visible/nearby cards redecorate immediately after annotation changes, migration, navigation, and window replacement without reparsing or repagination. |
 
 ## Files Changed by Phase
 
@@ -118,6 +148,27 @@ On a valid reopen, the service opens the live archive only to obtain resource re
 - `test/unit/services/lazy_epub_index_service_test.dart`
 - `test/unit/services/lazy_section_parser_equivalence_test.dart`
 
+### Phase 3
+
+- `docs/lazy_random_access_reader_progress.md`
+- `lib/models/stable_book_location.dart`
+- `lib/models/highlight.dart`
+- `lib/screens/book_loading_screen.dart`
+- `lib/screens/reader_screen.dart`
+- `lib/services/bookmark_service.dart`
+- `lib/services/dictionary_service.dart`
+- `lib/services/highlight_service.dart`
+- `lib/services/lazy_book_session.dart`
+- `lib/services/reader_open_service.dart`
+- `test/unit/models/stable_book_location_test.dart`
+- `test/unit/screens/reader_annotation_projection_test.dart`
+- `test/unit/services/bookmark_service_test.dart`
+- `test/unit/services/dictionary_service_test.dart`
+- `test/unit/services/highlight_service_test.dart`
+- `test/unit/services/lazy_book_session_test.dart`
+- `test/unit/services/reader_open_service_test.dart`
+- `test/widgets/reading_card_table_test.dart`
+
 ## Tests and Verification by Phase
 
 ### Phase 1
@@ -136,12 +187,22 @@ Focused coverage proves stored/oversized outcomes, repeated oversized avoidance,
 - `flutter analyze` — no issues found.
 - `git diff --check` — passed.
 
+### Phase 3
+
+- Focused stable-location/session/fixture/model/service and ReaderScreen-adjacent tests — passed.
+- Affected lazy-reader regression suite (13 test files) — 93 passed.
+- Reader-open legacy migration and replacement-safety tests — 2 passed.
+- Focused saved-word migration test — 1 passed.
+- Annotation projection, highlight service, source-range, ReaderScreen-adjacent, ReadingCard/deck/speed-read/note, and lazy navigation regression tests — 97 passed.
+- `flutter analyze` — no issues found.
+- `git diff --check` — passed.
+
 Focused coverage proves structural serialization/round trip, valid persisted reopen without rebuilding, same-name replacement fingerprint invalidation, incompatible schema recovery, corrupt-record recovery, normalized chapter/spine mappings, linear/non-linear weights, deletion cleanup, and direct lazy section-loading regressions.
 
 ## Known Blockers
 
-No Phase 2 blockers. Legacy `CachedBook` remains intentionally in use by the explicit legacy reader and temporary Book Memory compatibility path until Phase 6/7.
+No Phase 3 blocker. Legacy `CachedBook` remains intentionally in use by the explicit legacy reader and temporary Book Memory compatibility path until Phase 6/7. Phase 5 owns removal of the remaining legacy-index decoration fallback documented above.
 
 ## Next Exact Step
 
-Begin Phase 3 only after separately approving stable random-access navigation scope.
+Keep Phase 3 unstaged/uncommitted until review of the focused annotation fix; do not begin Phase 4 without separate approval.

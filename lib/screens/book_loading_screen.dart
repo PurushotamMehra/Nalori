@@ -121,19 +121,10 @@ class _BookLoadingScreenState extends State<BookLoadingScreen>
       bookId,
     );
     final useLazyReader = await _shouldUseLazyReader(bookId);
-    final requiresLegacyPositionRestore =
-        useLazyReader &&
-        meta != null &&
-        meta.lastReadLocation == null &&
-        meta.lastReadIndex > 0;
     _lazyReaderOpenDiagLog('reader_open_route', {
       'book': bookId,
-      'route': useLazyReader && !requiresLegacyPositionRestore
-          ? 'lazy'
-          : 'legacy',
-      'reason': requiresLegacyPositionRestore
-          ? 'legacy_saved_position_requires_migration'
-          : useLazyReader
+      'route': useLazyReader ? 'lazy' : 'legacy',
+      'reason': useLazyReader
           ? 'lazy_reader_enabled'
           : 'lazy_reader_disabled_or_not_allowed',
       'lazyDisabledForBook': lazyDisabledForBook,
@@ -145,7 +136,7 @@ class _BookLoadingScreenState extends State<BookLoadingScreen>
       'lastReadIndex': meta?.lastReadIndex,
       'hasStableLastReadLocation': meta?.lastReadLocation != null,
     });
-    if (!useLazyReader || requiresLegacyPositionRestore) {
+    if (!useLazyReader) {
       await _loadLegacy(bookId, metadataService);
       return;
     }

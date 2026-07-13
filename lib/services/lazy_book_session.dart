@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 import '../models/book_chunk.dart';
 import '../models/bookmark.dart';
 import '../models/stable_book_location.dart';
@@ -28,6 +30,22 @@ final class LazyLoadedContentWindow {
   final Map<int, StableBookLocation> locationsByChunkIndex;
   final bool hasContentBefore;
   final bool hasContentAfter;
+}
+
+enum StableLocationConfidence {
+  exact,
+  anchor,
+  quote,
+  progression,
+  legacy,
+  unresolved,
+}
+
+final class StableLocationResolution {
+  const StableLocationResolution(this.location, this.confidence, this.reason);
+  final StableBookLocation? location;
+  final StableLocationConfidence confidence;
+  final String reason;
 }
 
 final class LazyBookSession {
@@ -76,6 +94,10 @@ final class LazyBookSession {
       spineIndex: firstReadable.index,
       href: firstReadable.href,
       sourceChecksum: firstReadable.sourceChecksum,
+      publicationFingerprint: index.publicationFingerprint,
+      normalizedHref: firstReadable.normalizedHref,
+      sectionProgression: 0,
+      publicationProgression: _weightedProgression(firstReadable, 0),
     );
   }
 
@@ -84,11 +106,19 @@ final class LazyBookSession {
     int before = 0,
     int after = 1,
   }) async {
-    _currentLocation = location;
-    _updatePinnedSections(targetSpineIndex: location.spineIndex);
-    await loadSection(location.spineIndex);
+    final resolution = await resolveStableLocation(location);
+    final resolvedLocation = resolution.location;
+    if (resolvedLocation == null) {
+      throw StateError(
+        'Stable location could not be resolved: ${resolution.reason}',
+      );
+    }
+    _currentLocation = resolvedLocation;
+    _releaseDistantSections();
+    _updatePinnedSections(targetSpineIndex: resolvedLocation.spineIndex);
+    await loadSection(resolvedLocation.spineIndex);
     final previousIndexes = <int>[];
-    var previous = location.spineIndex;
+    var previous = resolvedLocation.spineIndex;
     for (var i = 0; i < before; i++) {
       final resolved = previousReadableSpineIndex(previous);
       if (resolved == null) break;
@@ -96,7 +126,7 @@ final class LazyBookSession {
       previous = resolved;
     }
     final nextIndexes = <int>[];
-    var next = location.spineIndex;
+    var next = resolvedLocation.spineIndex;
     for (var i = 0; i < after; i++) {
       final resolved = nextReadableSpineIndex(next);
       if (resolved == null) break;
@@ -104,8 +134,8 @@ final class LazyBookSession {
       next = resolved;
     }
 
-    final currentSection = _loadedSections[location.spineIndex];
-    final localChunkIndex = location.localChunkIndex ?? 0;
+    final currentSection = _loadedSections[resolvedLocation.spineIndex];
+    final localChunkIndex = resolvedLocation.localChunkIndex ?? 0;
     final currentChunkCount = currentSection?.chunks.length ?? 0;
     final sectionProgress = currentChunkCount <= 1
         ? 0.0
@@ -116,13 +146,174 @@ final class LazyBookSession {
     for (final spineIndex in adjacentIndexes) {
       await loadSection(spineIndex);
     }
-    return loadedWindow(centerSpineIndex: location.spineIndex);
+    return loadedWindow(centerSpineIndex: resolvedLocation.spineIndex);
+  }
+
+  Future<StableLocationResolution> resolveStableLocation(
+    StableBookLocation location,
+  ) async {
+    if (location.bookId != index.bookId) {
+      return const StableLocationResolution(
+        null,
+        StableLocationConfidence.unresolved,
+        'book_mismatch',
+      );
+    }
+    if (location.publicationFingerprint != null &&
+        location.publicationFingerprint != index.publicationFingerprint) {
+      return const StableLocationResolution(
+        null,
+        StableLocationConfidence.unresolved,
+        'publication_mismatch',
+      );
+    }
+    var spineIndex = index.spineIndexForHref(
+      location.normalizedHref ?? location.href,
+    );
+    if (spineIndex == null && location.sourceChecksum != 'unknown') {
+      final checksumMatches = index.spine
+          .where((item) => item.sourceChecksum == location.sourceChecksum)
+          .toList(growable: false);
+      if (checksumMatches.length == 1) {
+        spineIndex = checksumMatches.single.index;
+      }
+    }
+    if (spineIndex == null && location.publicationProgression != null) {
+      spineIndex = _spineIndexForWeightedProgression(
+        location.publicationProgression!,
+      );
+    }
+    if (spineIndex == null &&
+        location.publicationFingerprint == null &&
+        location.spineIndex >= 0 &&
+        location.spineIndex < index.spine.length) {
+      spineIndex = location.spineIndex;
+    }
+    if (spineIndex == null) {
+      return const StableLocationResolution(
+        null,
+        StableLocationConfidence.unresolved,
+        'missing_spine',
+      );
+    }
+    final item = index.spine[spineIndex];
+    final section = await loadSection(spineIndex, preserveDistantTarget: true);
+    int? local;
+    var confidence = StableLocationConfidence.unresolved;
+    var reason = 'unresolved';
+    final stableSourceId = location.anchorId ?? location.internalSegmentId;
+    final anchor = stableSourceId == null
+        ? null
+        : _anchorChunkIndex(section, stableSourceId);
+    if (anchor != null) {
+      local = anchor;
+      confidence = StableLocationConfidence.anchor;
+      reason = location.anchorId != null ? 'anchor' : 'stable_source_identity';
+    } else if (_validLocalChunk(section, location.localChunkIndex) &&
+        item.sourceChecksum == location.sourceChecksum &&
+        location.sourceParserVersion == section.parserVersion) {
+      local = location.localChunkIndex;
+      confidence = StableLocationConfidence.exact;
+      reason = location.textOffset > 0 ? 'source_offset' : 'exact_section';
+    } else {
+      final quote = _uniqueQuoteMatch(section, location);
+      if (quote != null) {
+        local = quote;
+        confidence = StableLocationConfidence.quote;
+        reason = 'unique_quote_context';
+      } else if (location.sectionProgression != null &&
+          section.chunks.isNotEmpty) {
+        local = _localChunkForProgression(
+          section,
+          location.sectionProgression!,
+        );
+        confidence = StableLocationConfidence.progression;
+        reason = 'section_progression';
+      } else if (location.publicationProgression != null &&
+          section.chunks.isNotEmpty) {
+        local = _localChunkForProgression(
+          section,
+          _sectionProgressionForWeightedProgression(
+            item,
+            location.publicationProgression!,
+          ),
+        );
+        confidence = StableLocationConfidence.progression;
+        reason = 'weighted_publication_progression';
+      } else if (_validLocalChunk(section, location.localChunkIndex) &&
+          location.publicationFingerprint == null) {
+        local = location.localChunkIndex;
+        confidence = StableLocationConfidence.legacy;
+        reason = 'legacy_local_index_hint';
+      }
+    }
+    if (local == null) {
+      return const StableLocationResolution(
+        null,
+        StableLocationConfidence.unresolved,
+        'ambiguous_or_missing_local_target',
+      );
+    }
+    final sectionProgression = section.chunks.length <= 1
+        ? 0.0
+        : local / (section.chunks.length - 1);
+    return StableLocationResolution(
+      StableBookLocation(
+        bookId: index.bookId,
+        spineIndex: item.index,
+        href: item.href,
+        sourceChecksum: item.sourceChecksum,
+        publicationFingerprint: index.publicationFingerprint,
+        normalizedHref: item.normalizedHref,
+        internalSegmentId: location.internalSegmentId,
+        anchorId: location.anchorId,
+        localChunkIndex: local,
+        textOffset: location.textOffset,
+        contextBefore: location.contextBefore,
+        contextText: location.contextText,
+        contextAfter: location.contextAfter,
+        legacyGlobalChunkIndex: location.legacyGlobalChunkIndex,
+        localDisplayIndex: location.localDisplayIndex,
+        readerLayoutFingerprint: location.readerLayoutFingerprint,
+        previousSpineIndex: location.previousSpineIndex,
+        nextSpineIndex: location.nextSpineIndex,
+        sectionProgression: sectionProgression,
+        publicationProgression: _weightedProgression(item, sectionProgression),
+        sourceParserVersion: section.parserVersion,
+      ),
+      confidence,
+      reason,
+    );
+  }
+
+  StableBookLocation locationForWeightedProgression(
+    double progression, {
+    int? legacyGlobalChunkIndex,
+  }) {
+    final spineIndex = _spineIndexForWeightedProgression(progression);
+    final item = index.spine[spineIndex];
+    final sectionProgression = _sectionProgressionForWeightedProgression(
+      item,
+      progression,
+    );
+    return StableBookLocation(
+      bookId: index.bookId,
+      spineIndex: item.index,
+      href: item.href,
+      sourceChecksum: item.sourceChecksum,
+      publicationFingerprint: index.publicationFingerprint,
+      normalizedHref: item.normalizedHref,
+      sectionProgression: sectionProgression,
+      publicationProgression: progression.clamp(0.0, 1.0),
+      legacyGlobalChunkIndex: legacyGlobalChunkIndex,
+    );
   }
 
   Future<ParsedSection> loadSection(
     int spineIndex, {
     LazySectionWorkPriority priority =
         LazySectionWorkPriority.explicitNavigation,
+    bool preserveDistantTarget = false,
   }) async {
     final existing = _loadedSections[spineIndex];
     if (existing != null) return existing;
@@ -132,7 +323,7 @@ final class LazyBookSession {
       pinDuringLoad: priority == LazySectionWorkPriority.explicitNavigation,
     );
     _loadedSections[spineIndex] = section;
-    _releaseDistantSections();
+    if (!preserveDistantTarget) _releaseDistantSections();
     _updatePinnedSections();
     return section;
   }
@@ -147,6 +338,13 @@ final class LazyBookSession {
       spineIndex: section.identity.spineIndex,
       href: section.identity.href,
       sourceChecksum: section.identity.sourceChecksum,
+      publicationFingerprint: index.publicationFingerprint,
+      normalizedHref: index.spine[section.identity.spineIndex].normalizedHref,
+      sectionProgression: 0,
+      publicationProgression: _weightedProgression(
+        index.spine[section.identity.spineIndex],
+        0,
+      ),
     );
     _releaseDistantSections();
     _updatePinnedSections();
@@ -163,6 +361,13 @@ final class LazyBookSession {
       spineIndex: section.identity.spineIndex,
       href: section.identity.href,
       sourceChecksum: section.identity.sourceChecksum,
+      publicationFingerprint: index.publicationFingerprint,
+      normalizedHref: index.spine[section.identity.spineIndex].normalizedHref,
+      sectionProgression: 0,
+      publicationProgression: _weightedProgression(
+        index.spine[section.identity.spineIndex],
+        0,
+      ),
     );
     _releaseDistantSections();
     _updatePinnedSections();
@@ -249,8 +454,20 @@ final class LazyBookSession {
           spineIndex: section.identity.spineIndex,
           href: section.identity.href,
           sourceChecksum: section.identity.sourceChecksum,
+          publicationFingerprint: index.publicationFingerprint,
+          normalizedHref:
+              index.spine[section.identity.spineIndex].normalizedHref,
           localChunkIndex: chunk.index,
-          legacyGlobalChunkIndex: nextChunkIndex,
+          sectionProgression: section.chunks.length <= 1
+              ? 0
+              : chunk.index / (section.chunks.length - 1),
+          publicationProgression: _weightedProgression(
+            index.spine[section.identity.spineIndex],
+            section.chunks.length <= 1
+                ? 0
+                : chunk.index / (section.chunks.length - 1),
+          ),
+          sourceParserVersion: section.parserVersion,
           contextText: chunk.text,
         );
         final text = chunk.text;
@@ -335,7 +552,11 @@ final class LazyBookSession {
       spineIndex: spineItem.index,
       href: spineItem.href,
       sourceChecksum: spineItem.sourceChecksum,
+      publicationFingerprint: index.publicationFingerprint,
+      normalizedHref: spineItem.normalizedHref,
       anchorId: chapter.anchor,
+      sectionProgression: 0,
+      publicationProgression: _weightedProgression(spineItem, 0),
     );
   }
 
@@ -347,7 +568,11 @@ final class LazyBookSession {
       spineIndex: spineItem.index,
       href: spineItem.href,
       sourceChecksum: spineItem.sourceChecksum,
+      publicationFingerprint: index.publicationFingerprint,
+      normalizedHref: spineItem.normalizedHref,
       anchorId: fragment,
+      sectionProgression: 0,
+      publicationProgression: _weightedProgression(spineItem, 0),
     );
   }
 
@@ -361,15 +586,110 @@ final class LazyBookSession {
 
   bool _isLocationCompatible(StableBookLocation location) {
     if (location.bookId != index.bookId) return false;
+    if (location.publicationFingerprint != null &&
+        location.publicationFingerprint != index.publicationFingerprint) {
+      return false;
+    }
     if (location.spineIndex < 0 || location.spineIndex >= index.spine.length) {
       return false;
     }
     final spineItem = index.spine[location.spineIndex];
-    return spineItem.href == location.href;
+    return index.spineIndexForHref(location.normalizedHref ?? location.href) ==
+            spineItem.index ||
+        (location.sourceChecksum != 'unknown' &&
+            spineItem.sourceChecksum == location.sourceChecksum);
+  }
+
+  bool _validLocalChunk(ParsedSection section, int? index) =>
+      index != null && index >= 0 && index < section.chunks.length;
+
+  int? _anchorChunkIndex(ParsedSection section, String anchor) {
+    final decoded = Uri.decodeComponent(anchor);
+    return section.anchorMap[anchor] ??
+        section.anchorMap[decoded] ??
+        section.anchorMap['#$anchor'] ??
+        section.anchorMap['#$decoded'];
+  }
+
+  int? _uniqueQuoteMatch(ParsedSection section, StableBookLocation location) {
+    final quote = location.contextText?.trim();
+    if (quote == null || quote.isEmpty) return null;
+    final matches = <int>[];
+    for (var i = 0; i < section.chunks.length; i++) {
+      final text = section.chunks[i].text ?? '';
+      if (!text.contains(quote)) continue;
+      final before = location.contextBefore?.trim();
+      if (before != null && before.isNotEmpty) {
+        final previous = i == 0 ? '' : section.chunks[i - 1].text ?? '';
+        if (!previous.endsWith(before) && !text.contains(before)) continue;
+      }
+      final after = location.contextAfter?.trim();
+      if (after != null && after.isNotEmpty) {
+        final next = i + 1 >= section.chunks.length
+            ? ''
+            : section.chunks[i + 1].text ?? '';
+        if (!next.startsWith(after) && !text.contains(after)) continue;
+      }
+      matches.add(i);
+    }
+    return matches.length == 1 ? matches.single : null;
+  }
+
+  int _localChunkForProgression(ParsedSection section, double progression) {
+    if (section.chunks.length <= 1) return 0;
+    return (progression.clamp(0.0, 1.0) * (section.chunks.length - 1)).round();
+  }
+
+  int _spineIndexForWeightedProgression(double progression) {
+    final readable = index.spine.where((item) => item.isLinear).toList();
+    if (readable.isEmpty) return 0;
+    final total = index.totalReadableWeight;
+    if (total <= 0) {
+      final position = (progression.clamp(0.0, 1.0) * (readable.length - 1))
+          .round();
+      return readable[position].index;
+    }
+    final target = progression.clamp(0.0, 1.0) * total;
+    for (final item in readable) {
+      if (target < item.prefixWeight + item.structuralWeight) {
+        return item.index;
+      }
+    }
+    return readable.last.index;
+  }
+
+  double _sectionProgressionForWeightedProgression(
+    LazyEpubSpineItem item,
+    double progression,
+  ) {
+    if (item.structuralWeight <= 0 || index.totalReadableWeight <= 0) return 0;
+    final target = progression.clamp(0.0, 1.0) * index.totalReadableWeight;
+    return ((target - item.prefixWeight) / item.structuralWeight).clamp(
+      0.0,
+      1.0,
+    );
+  }
+
+  double _weightedProgression(
+    LazyEpubSpineItem item,
+    double sectionProgression,
+  ) {
+    if (index.totalReadableWeight <= 0) return 0;
+    return (item.prefixWeight +
+            item.structuralWeight * sectionProgression.clamp(0.0, 1.0)) /
+        index.totalReadableWeight;
   }
 
   LazyEpubSpineItem? _spineItemForHref(String href) {
-    final mappedIndex = index.spineIndexForHref(href);
+    var mappedIndex = index.spineIndexForHref(href);
+    if (mappedIndex == null && _currentLocation != null) {
+      final baseHref =
+          _currentLocation!.normalizedHref ?? _currentLocation!.href;
+      final relative = p.posix.normalize(
+        p.posix.join(p.posix.dirname(baseHref), href),
+      );
+      mappedIndex = index.spineIndexForHref(relative);
+    }
     if (mappedIndex != null &&
         mappedIndex >= 0 &&
         mappedIndex < index.spine.length) {

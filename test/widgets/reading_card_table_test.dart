@@ -203,6 +203,66 @@ PUT /v1/businesses/{:id} | Update details of a business''';
     expect(_hasHighlightedText(tester, 'First paragraph.'), isFalse);
   });
 
+  testWidgets('ReadingCard redecorates existing text when highlights change', (
+    tester,
+  ) async {
+    const text = 'Existing display text receives a highlight.';
+    final start = text.indexOf('display text');
+    final end = start + 'display text'.length;
+
+    await _pumpReadingCard(tester, text);
+    expect(_hasHighlightedText(tester, 'display text'), isFalse);
+
+    await _pumpReadingCard(
+      tester,
+      text,
+      highlights: [
+        Highlight(
+          id: 'new-highlight',
+          originalChunkIndex: 0,
+          startOffset: start,
+          endOffset: end,
+          text: text.substring(start, end),
+          createdAt: DateTime(2026, 7, 12),
+        ),
+      ],
+    );
+    await tester.pump();
+
+    expect(_hasHighlightedText(tester, 'display text'), isTrue);
+  });
+
+  testWidgets('ReadingCard does not color an unrelated same-length range', (
+    tester,
+  ) async {
+    const text = 'McNeish watches, and waits.';
+    const color = Color(0xFF00897B);
+
+    await _pumpReadingCard(
+      tester,
+      text,
+      highlights: [
+        Highlight(
+          id: 'mcneish',
+          originalChunkIndex: 0,
+          startOffset: 0,
+          endOffset: 7,
+          text: 'McNeish',
+          colorValue: color.toARGB32(),
+          type: HighlightType.character,
+          createdAt: DateTime(2026, 7, 12),
+        ),
+      ],
+      characterNames: const {'McNeish': color},
+    );
+
+    expect(_spanForText(tester, 'McNeish').style?.color, color);
+    final unrelated = _allTextSpans(
+      tester,
+    ).firstWhere((span) => span.text?.contains('es, and') == true);
+    expect(unrelated.style?.color, isNot(color));
+  });
+
   testWidgets('ReadingCard paints note blocks inside split paragraphs', (
     tester,
   ) async {
@@ -481,6 +541,7 @@ Future<void> _pumpReadingCard(
   String text, {
   ReadingSettings settings = const ReadingSettings(),
   List<Highlight> highlights = const [],
+  Map<String, Color> characterNames = const {},
   bool isActivePage = true,
   void Function(Offset? globalPosition)? onTapOutside,
 }) async {
@@ -494,6 +555,7 @@ Future<void> _pumpReadingCard(
             chunk: BookChunk(index: 0, type: BookChunkType.text, text: text),
             settings: settings,
             highlights: highlights,
+            characterNames: characterNames,
             isActivePage: isActivePage,
             onTapOutside: onTapOutside,
           ),
@@ -501,6 +563,21 @@ Future<void> _pumpReadingCard(
       ),
     ),
   );
+}
+
+Iterable<TextSpan> _allTextSpans(WidgetTester tester) {
+  return tester
+      .widgetList<SelectableText>(find.byType(SelectableText))
+      .expand((widget) sync* {
+        final span = widget.textSpan;
+        if (span != null) yield* _flattenTextSpans(span);
+      })
+      .followedBy(
+        tester.widgetList<Text>(find.byType(Text)).expand((widget) sync* {
+          final span = widget.textSpan;
+          if (span != null) yield* _flattenTextSpans(span);
+        }),
+      );
 }
 
 List<Padding> _paragraphPaddings(WidgetTester tester, double verticalPadding) {

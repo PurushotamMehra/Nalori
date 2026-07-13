@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nalori/services/bookmark_service.dart';
 import 'package:nalori/models/bookmark.dart';
+import 'package:nalori/models/stable_book_location.dart';
 
 void main() {
   late BookmarkService bookmarkService;
@@ -258,5 +259,36 @@ void main() {
         expect(result, false);
       });
     });
+
+    test(
+      'successful migration adds stable target without dropping legacy fields',
+      () async {
+        final createdAt = DateTime(2026, 7, 12);
+        final legacy = Bookmark(
+          chunkIndex: 42,
+          originalStartOffset: 7,
+          name: 'Legacy',
+          createdAt: createdAt,
+        );
+        await bookmarkService.restoreAll([legacy]);
+        const location = StableBookLocation(
+          bookId: testBookId,
+          spineIndex: 2,
+          href: 'chapter.xhtml',
+          sourceChecksum: 'checksum',
+          publicationFingerprint: 'publication',
+          sectionProgression: 0.5,
+        );
+
+        final migrated = await bookmarkService.migrateStableLocation(
+          legacy,
+          location,
+        );
+
+        expect(migrated.single.chunkIndex, 42);
+        expect(migrated.single.originalStartOffset, 7);
+        expect(migrated.single.stableLocation, location);
+      },
+    );
   });
 }

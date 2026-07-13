@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nalori/services/dictionary_service.dart';
+import 'package:nalori/models/stable_book_location.dart';
 
 void main() {
   late DictionaryService dictionaryService;
@@ -98,6 +99,33 @@ void main() {
 
         expect(dictionaryService.words, isEmpty);
       });
+    });
+
+    test('migration preserves saved-word legacy source fields', () async {
+      await dictionaryService.saveWord(
+        'anchor',
+        'A stable reference',
+        originalChunkIndex: 17,
+        originalStartOffset: 3,
+        originalEndOffset: 9,
+      );
+      final word = dictionaryService.words.single;
+      const location = StableBookLocation(
+        bookId: testBookId,
+        spineIndex: 2,
+        href: 'chapter.xhtml',
+        sourceChecksum: 'checksum',
+        publicationFingerprint: 'publication',
+        sectionProgression: 0.4,
+      );
+
+      await dictionaryService.migrateStableLocation(word.id, location);
+      final migrated = dictionaryService.words.single;
+
+      expect(migrated.originalChunkIndex, 17);
+      expect(migrated.originalStartOffset, 3);
+      expect(migrated.originalEndOffset, 9);
+      expect(migrated.stableLocation, location);
     });
 
     group('isWordSaved', () {

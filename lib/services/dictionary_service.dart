@@ -118,6 +118,19 @@ class DictionaryService {
     await _saveWords();
   }
 
+  Future<void> migrateStableLocation(
+    String id,
+    StableBookLocation stableLocation,
+  ) async {
+    for (var i = 0; i < _words.length; i++) {
+      final word = _words[i];
+      if (word.id == id && word.stableLocation == null) {
+        _words[i] = word.copyWith(stableLocation: stableLocation);
+      }
+    }
+    await _saveWords();
+  }
+
   bool isWordSaved(String word) {
     return _words.any((w) => w.word.toLowerCase() == word.trim().toLowerCase());
   }

@@ -21,6 +21,11 @@ void main() {
     readerLayoutFingerprint: 'layout-v1',
     previousSpineIndex: 2,
     nextSpineIndex: 4,
+    publicationFingerprint: 'publication-v2',
+    normalizedHref: 'text/chapter.xhtml',
+    sectionProgression: 0.4,
+    publicationProgression: 0.6,
+    sourceParserVersion: 'lazy-section-v1',
   );
 
   test('stable book location round trips through JSON', () {

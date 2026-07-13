@@ -117,12 +117,24 @@ final class ReaderOpenService {
         'elapsedMs': stopwatch.elapsedMilliseconds,
       });
 
-      final targetLocation = _resolveInitialLocation(
-        session: session,
-        requestedLocation: requestedLocation ?? meta?.lastReadLocation,
-        legacyLastReadIndex: legacyLastReadIndex ?? meta?.lastReadIndex,
-        totalChunks: meta?.totalChunks,
-      );
+      final persistedLocation = requestedLocation ?? meta?.lastReadLocation;
+      StableLocationResolution? persistedResolution;
+      if (persistedLocation != null) {
+        persistedResolution = await session.resolveStableLocation(
+          persistedLocation,
+        );
+      }
+      final canMigratePersisted = persistedResolution?.location != null;
+      final targetLocation =
+          persistedResolution?.location ??
+          (persistedLocation == null
+              ? _resolveInitialLocation(
+                  session: session,
+                  legacyLastReadIndex:
+                      legacyLastReadIndex ?? meta?.lastReadIndex,
+                  totalChunks: meta?.totalChunks,
+                )
+              : session.initialLocation());
       _readerOpenDiagLog('lazy_reader_target_resolved', {
         'book': bookId,
         'caller': caller,
@@ -137,6 +149,18 @@ final class ReaderOpenService {
 
       final window = await session.loadAround(targetLocation, after: 0);
       _throwIfCancelled(operation);
+      final resolvedTarget = session.currentLocation ?? targetLocation;
+
+      final legacyIndex = legacyLastReadIndex ?? meta?.lastReadIndex ?? 0;
+      final canMigrateLegacyPosition =
+          persistedLocation == null &&
+          legacyIndex > 0 &&
+          (meta?.totalChunks ?? 0) > 1;
+      if (meta != null && (canMigratePersisted || canMigrateLegacyPosition)) {
+        await _metadataService.updateMetadata(
+          meta.copyWith(lastReadLocation: resolvedTarget),
+        );
+      }
 
       _readerOpenDiagLog('lazy_reader_section_ready', {
         'book': bookId,
@@ -167,7 +191,7 @@ final class ReaderOpenService {
         bookId: bookId,
         title: index.title,
         session: session,
-        targetLocation: targetLocation,
+        targetLocation: resolvedTarget,
         window: window,
         metadata: meta,
         elapsedMs: stopwatch.elapsedMilliseconds,
@@ -217,28 +241,15 @@ final class ReaderOpenService {
 
   StableBookLocation _resolveInitialLocation({
     required LazyBookSession session,
-    StableBookLocation? requestedLocation,
     int? legacyLastReadIndex,
     int? totalChunks,
   }) {
-    if (requestedLocation != null) {
-      return session.initialLocation(requested: requestedLocation);
-    }
-
     final legacyIndex = legacyLastReadIndex ?? 0;
     final chunkCount = totalChunks ?? 0;
     if (legacyIndex > 0 && chunkCount > 1 && session.index.spine.isNotEmpty) {
       final progress = (legacyIndex / (chunkCount - 1)).clamp(0.0, 1.0);
-      final spineIndex = (progress * (session.index.spine.length - 1))
-          .round()
-          .clamp(0, session.index.spine.length - 1)
-          .toInt();
-      final spine = session.index.spine[spineIndex];
-      return StableBookLocation(
-        bookId: session.index.bookId,
-        spineIndex: spine.index,
-        href: spine.href,
-        sourceChecksum: spine.sourceChecksum,
+      return session.locationForWeightedProgression(
+        progress,
         legacyGlobalChunkIndex: legacyIndex,
       );
     }
