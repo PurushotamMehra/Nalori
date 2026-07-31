@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nalori/models/book_chunk.dart';
 import 'package:nalori/models/reading_settings.dart';
 import 'package:nalori/screens/reader_screen.dart';
+import 'package:nalori/services/progressive_display_state.dart';
 import 'package:nalori/utils/final_layout_paragraphs.dart';
 
 void main() {
@@ -337,11 +339,202 @@ void main() {
 
       expect(readerSettingsRequireDisplayChunkRebuild(old, updated), isTrue);
     });
+
+    test('covers every persisted layout-affecting reader setting', () {
+      const baseline = ReadingSettings();
+      final variants = <ReadingSettings>[
+        baseline.copyWith(fontSize: ReaderFontSize.l),
+        baseline.copyWith(fontFamily: ReaderFontFamily.literata),
+        baseline.copyWith(fontWeight: ReaderFontWeight.bold),
+        baseline.copyWith(contentDensity: ContentDensity.high),
+        baseline.copyWith(lineHeight: 1.6),
+        baseline.copyWith(paragraphSpacing: 1.4),
+        baseline.copyWith(sideMargin: 40),
+        baseline.copyWith(enableCardDepth: false),
+      ];
+
+      expect(
+        variants.every(
+          (updated) =>
+              readerSettingsRequireDisplayChunkRebuild(baseline, updated),
+        ),
+        isTrue,
+      );
+    });
+
+    test('lazy replacement starts with only the target source chunk', () {
+      expect(
+        readerFirstVisibleSourceRange(
+          targetOriginalIndex: 50,
+          sourceChunkCount: 200,
+          lazy: true,
+          nearbyRange: const SourceChunkRange(42, 90),
+        ).toString(),
+        '[50,51)',
+      );
+      expect(
+        readerFirstVisibleSourceRange(
+          targetOriginalIndex: 50,
+          sourceChunkCount: 200,
+          lazy: false,
+          nearbyRange: const SourceChunkRange(42, 90),
+        ).toString(),
+        '[42,90)',
+      );
+    });
   });
 
   group('dialogue layout', () {
     test('quote decoration does not shrink measured text width', () {
       expect(kReaderDialogueTextInset, 0);
     });
+  });
+
+  group('reader preparing-state publication policy', () {
+    test('pending navigation keeps a published readable card visible', () {
+      expect(
+        readerShouldShowFullPreparingPages(
+          hasPublishedReadableContent: true,
+          hasDisplayChunks: true,
+          hasSourceChunks: true,
+          isPreparing: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('true initial opening may show full preparing state', () {
+      expect(
+        readerShouldShowFullPreparingPages(
+          hasPublishedReadableContent: false,
+          hasDisplayChunks: false,
+          hasSourceChunks: true,
+          isPreparing: true,
+        ),
+        isTrue,
+      );
+    });
+
+    test('routine successful preparation never shows floating status', () {
+      expect(readerShouldShowPreparationStatus(failure: null), isFalse);
+      expect(
+        readerShouldSurfacePreparationFailure('lazy_forward_boundary'),
+        isFalse,
+      );
+      expect(
+        readerShouldSurfacePreparationFailure('lazy_backward_boundary'),
+        isFalse,
+      );
+      expect(readerShouldSurfacePreparationFailure('settings_reflow'), isFalse);
+    });
+
+    test('explicit navigation failures remain actionable', () {
+      expect(
+        readerShouldShowPreparationStatus(
+          failure: StateError('destination unavailable'),
+        ),
+        isTrue,
+      );
+      expect(
+        readerShouldSurfacePreparationFailure(
+          'previous_page_at_loaded_window_boundary',
+        ),
+        isTrue,
+      );
+      expect(
+        readerShouldSurfacePreparationFailure('source_anchor_navigation'),
+        isTrue,
+      );
+    });
+  });
+
+  test(
+    'exact source offset restores the same text after card boundaries change',
+    () {
+      const originalChunk = 7;
+      const savedOffset = 420;
+      const oldLayout = [
+        BookChunk(
+          index: 0,
+          type: BookChunkType.text,
+          text: 'old',
+          sourceRanges: [
+            ChunkSourceRange(
+              originalChunkIndex: originalChunk,
+              originalStartOffset: 300,
+              originalEndOffset: 500,
+              displayStartOffset: 0,
+              displayEndOffset: 3,
+            ),
+          ],
+        ),
+      ];
+      const newLayout = [
+        BookChunk(
+          index: 0,
+          type: BookChunkType.text,
+          text: 'first',
+          sourceRanges: [
+            ChunkSourceRange(
+              originalChunkIndex: originalChunk,
+              originalStartOffset: 0,
+              originalEndOffset: 350,
+              displayStartOffset: 0,
+              displayEndOffset: 5,
+            ),
+          ],
+        ),
+        BookChunk(
+          index: 1,
+          type: BookChunkType.text,
+          text: 'second',
+          sourceRanges: [
+            ChunkSourceRange(
+              originalChunkIndex: originalChunk,
+              originalStartOffset: 350,
+              originalEndOffset: 700,
+              displayStartOffset: 0,
+              displayEndOffset: 6,
+            ),
+          ],
+        ),
+      ];
+
+      expect(
+        readerDisplayIndexContainingSourceOffset(
+          displayChunks: oldLayout,
+          originalChunkIndex: originalChunk,
+          textOffset: savedOffset,
+        ),
+        0,
+      );
+      expect(
+        readerDisplayIndexContainingSourceOffset(
+          displayChunks: newLayout,
+          originalChunkIndex: originalChunk,
+          textOffset: savedOffset,
+        ),
+        1,
+      );
+    },
+  );
+
+  test('chapter-total work never falls back to whole-book pagination', () {
+    expect(
+      readerShouldBackgroundPaginateChapter(
+        hasStructuralChapterBoundary: false,
+        startsAtPublicationStart: true,
+        spansAllReadableSections: true,
+      ),
+      isFalse,
+    );
+    expect(
+      readerShouldBackgroundPaginateChapter(
+        hasStructuralChapterBoundary: true,
+        startsAtPublicationStart: true,
+        spansAllReadableSections: false,
+      ),
+      isTrue,
+    );
   });
 }

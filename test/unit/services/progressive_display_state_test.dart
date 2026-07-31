@@ -317,4 +317,106 @@ void main() {
     expect(state.shouldRequestBackward(currentDisplayIndex: 4), isFalse);
     expect(state.shouldRequestBackward(currentDisplayIndex: 1), isTrue);
   });
+
+  test('eviction remap preserves stable card text and source boundaries', () {
+    const currentText = 'Current card stays exactly split here';
+    final snapshot = remapPreparedDisplaySnapshot(
+      displayChunks: [
+        chunk(0, 'evicted'),
+        const BookChunk(
+          index: 1,
+          type: BookChunkType.text,
+          text: currentText,
+          sourceRanges: [
+            ChunkSourceRange(
+              originalChunkIndex: 1,
+              originalStartOffset: 40,
+              originalEndOffset: 77,
+              displayStartOffset: 0,
+              displayEndOffset: 37,
+            ),
+          ],
+        ),
+        chunk(2, 'next retained card'),
+      ],
+      displayToOriginal: const [
+        [0],
+        [1],
+        [2],
+      ],
+      oldStableKeysBySourceIndex: const {0: 'A0', 1: 'B0', 2: 'B1'},
+      newSourceIndexByStableKey: const {'B0': 0, 'B1': 1, 'C0': 2},
+      preparedOldSourceIndexes: const [0, 1, 2],
+      anchorStableKey: 'B0',
+    );
+
+    expect(snapshot, isNotNull);
+    expect(snapshot!.sourceRange.toString(), '[0,2)');
+    expect(snapshot.displayChunks.map((entry) => entry.text), [
+      currentText,
+      'next retained card',
+    ]);
+    final currentRange = snapshot.displayChunks.first.sourceRanges!.single;
+    expect(currentRange.originalChunkIndex, 0);
+    expect(currentRange.originalStartOffset, 40);
+    expect(currentRange.originalEndOffset, 77);
+    expect(snapshot.anchorDisplayIndex, 0);
+    expect(snapshot.originalToDisplay, {0: 0, 1: 1});
+  });
+
+  test('eviction remap cannot retain stale or gapped display cards', () {
+    final snapshot = remapPreparedDisplaySnapshot(
+      displayChunks: [
+        chunk(0, 'retained'),
+        chunk(1, 'gap'),
+        chunk(2, 'anchor'),
+      ],
+      displayToOriginal: const [
+        [0],
+        [1],
+        [2],
+      ],
+      oldStableKeysBySourceIndex: const {0: 'B0', 1: 'X0', 2: 'B2'},
+      newSourceIndexByStableKey: const {'B0': 4, 'B2': 6},
+      preparedOldSourceIndexes: const [0, 1, 2],
+      anchorStableKey: 'B2',
+    );
+
+    expect(snapshot, isNotNull);
+    expect(snapshot!.sourceRange.toString(), '[6,7)');
+    expect(snapshot.displayChunks.single.text, 'anchor');
+    expect(snapshot.displayToOriginal, const [
+      [6],
+    ]);
+  });
+
+  test('repeated window remaps do not duplicate skip or reorder text', () {
+    final first = remapPreparedDisplaySnapshot(
+      displayChunks: [chunk(0, 'B0'), chunk(1, 'B1')],
+      displayToOriginal: const [
+        [0],
+        [1],
+      ],
+      oldStableKeysBySourceIndex: const {0: 'B0', 1: 'B1'},
+      newSourceIndexByStableKey: const {'B0': 2, 'B1': 3},
+      preparedOldSourceIndexes: const [0, 1],
+      anchorStableKey: 'B0',
+    );
+    final second = remapPreparedDisplaySnapshot(
+      displayChunks: first!.displayChunks,
+      displayToOriginal: first.displayToOriginal,
+      oldStableKeysBySourceIndex: const {2: 'B0', 3: 'B1'},
+      newSourceIndexByStableKey: const {'B0': 1, 'B1': 2},
+      preparedOldSourceIndexes: const [2, 3],
+      anchorStableKey: 'B0',
+    );
+
+    expect(second, isNotNull);
+    expect(second!.displayChunks.map((entry) => entry.text), ['B0', 'B1']);
+    expect(second.displayToOriginal, const [
+      [1],
+      [2],
+    ]);
+    expect(second.originalToDisplay, {1: 0, 2: 1});
+  });
 }

@@ -9,8 +9,10 @@ void main() {
     int initialIndex = 0,
     Axis axis = Axis.vertical,
     bool selectableText = false,
+    bool canRequestPrevious = false,
     ReadingCardDeckController? controller,
     ValueChanged<int>? onChanged,
+    VoidCallback? onPreviousBoundaryRequested,
   }) {
     var currentIndex = initialIndex;
     return MaterialApp(
@@ -23,8 +25,10 @@ void main() {
               currentIndex: currentIndex,
               itemCount: itemCount,
               canSwipe: canSwipe,
+              canRequestPrevious: canRequestPrevious,
               axis: axis,
               controller: controller,
+              onPreviousBoundaryRequested: onPreviousBoundaryRequested,
               onIndexChanged: (index) {
                 setState(() => currentIndex = index);
                 onChanged?.call(index);
@@ -63,6 +67,18 @@ void main() {
     expect(find.text('Card 1'), findsWidgets);
   });
 
+  testWidgets('idle deck builds only current and two forward depth cards', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildHarness(itemCount: 8, initialIndex: 3));
+
+    expect(find.text('Card 2'), findsNothing);
+    expect(find.text('Card 3'), findsOneWidget);
+    expect(find.text('Card 4'), findsOneWidget);
+    expect(find.text('Card 5'), findsOneWidget);
+    expect(find.text('Card 6'), findsNothing);
+  });
+
   testWidgets('swipe down changes to the previous card', (tester) async {
     var latest = 0;
     await tester.pumpWidget(
@@ -77,6 +93,31 @@ void main() {
     expect(latest, 0);
     expect(find.text('Card 0'), findsWidgets);
   });
+
+  testWidgets(
+    'index zero can request and retry a structural previous destination',
+    (tester) async {
+      var requests = 0;
+      await tester.pumpWidget(
+        buildHarness(
+          itemCount: 1,
+          canRequestPrevious: true,
+          onPreviousBoundaryRequested: () => requests++,
+        ),
+      );
+
+      await tester.drag(find.byType(ReadingCardDeck), const Offset(0, 240));
+      await tester.pumpAndSettle();
+
+      expect(requests, 1);
+      expect(find.text('Card 0'), findsOneWidget);
+
+      await tester.drag(find.byType(ReadingCardDeck), const Offset(0, 240));
+      await tester.pumpAndSettle();
+
+      expect(requests, 2);
+    },
+  );
 
   testWidgets('controller animates vertical next card before committing', (
     tester,

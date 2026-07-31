@@ -56,6 +56,24 @@ void main() {
       );
     });
 
+    test('resolved anchor refines structural chapter progression', () {
+      final targets = ChapterNavigationService.buildTargets(
+        chapters: [_chapter('Chapter 2', 'body.xhtml', 'ch2')],
+        anchorMap: const {'ch2': 4},
+        locationsByChunkIndex: {
+          4: _location(
+            anchor: 'ch2',
+            localChunkIndex: 4,
+            sectionProgression: 0.4,
+            publicationProgression: 0.55,
+          ),
+        },
+      );
+
+      expect(targets.single.stableLocation.sectionProgression, 0.4);
+      expect(targets.single.stableLocation.publicationProgression, 0.55);
+    });
+
     test('previous from chapter start is strictly earlier', () {
       final targets = ChapterNavigationService.buildTargets(
         chapters: [
@@ -333,6 +351,8 @@ StableBookLocation _location({
   String? anchor,
   int spineIndex = 0,
   int? localChunkIndex,
+  double? sectionProgression,
+  double? publicationProgression,
 }) {
   return StableBookLocation(
     bookId: 'book.epub',
@@ -341,5 +361,7 @@ StableBookLocation _location({
     sourceChecksum: 'checksum-$spineIndex',
     anchorId: anchor,
     localChunkIndex: localChunkIndex,
+    sectionProgression: sectionProgression,
+    publicationProgression: publicationProgression,
   );
 }

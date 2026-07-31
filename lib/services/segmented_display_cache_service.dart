@@ -9,11 +9,41 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/book_chunk.dart';
 import 'book_cache_service.dart';
+import 'chapter_card_layout_service.dart';
 import 'display_generation_coordinator.dart';
 import 'progressive_display_state.dart';
 
 const bool _segmentCacheDiagEnabled = bool.fromEnvironment('NALORI_EPUB_DIAG');
 const String _segmentCacheDiagPrefix = 'NALORI_EPUB_DIAG';
+
+enum DisplayCacheStoragePressure { normal, low, critical }
+
+@immutable
+final class SegmentedDisplayCachePolicy {
+  const SegmentedDisplayCachePolicy({
+    this.byteBudget = 48 * 1024 * 1024,
+    this.lowStorageBudgetFactor = 0.5,
+    this.criticalStorageBudgetFactor = 0.25,
+  }) : assert(byteBudget >= 0),
+       assert(lowStorageBudgetFactor >= 0 && lowStorageBudgetFactor <= 1),
+       assert(
+         criticalStorageBudgetFactor >= 0 &&
+             criticalStorageBudgetFactor <= lowStorageBudgetFactor,
+       );
+
+  final int byteBudget;
+  final double lowStorageBudgetFactor;
+  final double criticalStorageBudgetFactor;
+
+  int effectiveByteBudget(DisplayCacheStoragePressure pressure) {
+    final factor = switch (pressure) {
+      DisplayCacheStoragePressure.normal => 1.0,
+      DisplayCacheStoragePressure.low => lowStorageBudgetFactor,
+      DisplayCacheStoragePressure.critical => criticalStorageBudgetFactor,
+    };
+    return (byteBudget * factor).floor();
+  }
+}
 
 int _segmentCacheDiagRssBytes() {
   try {
@@ -71,6 +101,7 @@ final class DisplaySegmentRecord {
     required this.generationId,
     required this.createdAtMs,
     required this.updatedAtMs,
+    this.lastAccessedAtMs,
     required this.status,
     required this.fileSizeBytes,
   });
@@ -87,6 +118,7 @@ final class DisplaySegmentRecord {
   final int generationId;
   final int createdAtMs;
   final int updatedAtMs;
+  final int? lastAccessedAtMs;
   final String status;
   final int fileSizeBytes;
 
@@ -95,6 +127,26 @@ final class DisplaySegmentRecord {
 
   bool containsSource(int sourceIndex) =>
       sourceIndex >= sourceStart && sourceIndex < sourceEndExclusive;
+
+  DisplaySegmentRecord copyWith({int? updatedAtMs, int? lastAccessedAtMs}) {
+    return DisplaySegmentRecord(
+      sourceStart: sourceStart,
+      sourceEndExclusive: sourceEndExclusive,
+      actualSourceStart: actualSourceStart,
+      actualSourceEndExclusive: actualSourceEndExclusive,
+      fileName: fileName,
+      displayChunkCount: displayChunkCount,
+      displayToOriginalCount: displayToOriginalCount,
+      originalToDisplayCount: originalToDisplayCount,
+      checksum: checksum,
+      generationId: generationId,
+      createdAtMs: createdAtMs,
+      updatedAtMs: updatedAtMs ?? this.updatedAtMs,
+      lastAccessedAtMs: lastAccessedAtMs ?? this.lastAccessedAtMs,
+      status: status,
+      fileSizeBytes: fileSizeBytes,
+    );
+  }
 
   Map<String, dynamic> toJson() => {
     'sourceStart': sourceStart,
@@ -109,6 +161,7 @@ final class DisplaySegmentRecord {
     'generationId': generationId,
     'createdAtMs': createdAtMs,
     'updatedAtMs': updatedAtMs,
+    'lastAccessedAtMs': lastAccessedAtMs ?? updatedAtMs,
     'status': status,
     'fileSizeBytes': fileSizeBytes,
   };
@@ -127,6 +180,8 @@ final class DisplaySegmentRecord {
       generationId: json['generationId'] as int,
       createdAtMs: json['createdAtMs'] as int,
       updatedAtMs: json['updatedAtMs'] as int,
+      lastAccessedAtMs:
+          json['lastAccessedAtMs'] as int? ?? json['updatedAtMs'] as int,
       status: json['status'] as String,
       fileSizeBytes: json['fileSizeBytes'] as int,
     );
@@ -289,12 +344,20 @@ final class _SegmentCacheFileCoordinator {
 }
 
 final class SegmentedDisplayCacheService {
-  SegmentedDisplayCacheService({required Directory rootDirectory})
-    : _rootDirectory = rootDirectory;
+  SegmentedDisplayCacheService({
+    required Directory rootDirectory,
+    SegmentedDisplayCachePolicy policy = const SegmentedDisplayCachePolicy(),
+    DisplayCacheStoragePressure Function()? storagePressureProvider,
+    int Function()? clock,
+  }) : _rootDirectory = rootDirectory,
+       _policy = policy,
+       _storagePressureProvider =
+           storagePressureProvider ??
+           (() => DisplayCacheStoragePressure.normal),
+       _clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch);
 
-  static const int segmentedDisplayCacheFormatVersion = 1;
+  static const int segmentedDisplayCacheFormatVersion = 2;
   static const String segmentStatusReady = 'ready';
-  static const int _maxSegmentedDisplayCacheBytes = 40 * 1024 * 1024;
   static const int _maxSegmentFileBytes = 3 * 1024 * 1024;
   static const int _maxSegmentKeyLength = 96;
   static final Map<String, Map<String, int>> _bookGenerationsByRoot = {};
@@ -304,6 +367,14 @@ final class SegmentedDisplayCacheService {
   static final Map<String, _SegmentCacheFileCoordinator> _fileCoordinators = {};
 
   final Directory _rootDirectory;
+  final SegmentedDisplayCachePolicy _policy;
+  final DisplayCacheStoragePressure Function() _storagePressureProvider;
+  final int Function() _clock;
+  final Map<String, String> _activeLayoutIdentityByBook = <String, String>{};
+  final Map<String, List<SourceChunkRange>> _activeRangesByCacheKey =
+      <String, List<SourceChunkRange>>{};
+  final Map<String, List<SourceChunkRange>> _recentRangesByCacheKey =
+      <String, List<SourceChunkRange>>{};
   bool _initialized = false;
   Future<void> _writeQueue = Future<void>.value();
   final Map<String, _CachedSegmentManifest> _manifestCache = {};
@@ -374,6 +445,57 @@ final class SegmentedDisplayCacheService {
     }
   }
 
+  int get configuredByteBudget => _policy.byteBudget;
+
+  int get effectiveByteBudget =>
+      _policy.effectiveByteBudget(_storagePressureProvider());
+
+  String layoutIdentityForKey(SegmentedDisplayCacheKey key) => [
+    key.signature.layoutSignature,
+    key.signature.settingsSignature,
+    key.signature.viewportSignature,
+    key.signature.parsedContentVersion,
+    key.parserVersion,
+  ].join('|');
+
+  void protectActiveRanges({
+    required String bookId,
+    required String cacheKey,
+    required String layoutIdentity,
+    required Iterable<SourceChunkRange> ranges,
+  }) {
+    _activeLayoutIdentityByBook[bookId] = layoutIdentity;
+    _activeRangesByCacheKey[cacheKey] = List<SourceChunkRange>.from(ranges);
+  }
+
+  void protectRecentRanges({
+    required String cacheKey,
+    required Iterable<SourceChunkRange> ranges,
+  }) {
+    _recentRangesByCacheKey[cacheKey] = List<SourceChunkRange>.from(ranges);
+  }
+
+  void clearRangeProtection({String? bookId, String? cacheKey}) {
+    if (bookId != null) _activeLayoutIdentityByBook.remove(bookId);
+    if (cacheKey != null) {
+      _activeRangesByCacheKey.remove(cacheKey);
+      _recentRangesByCacheKey.remove(cacheKey);
+    }
+  }
+
+  Future<int> payloadBytesOnDisk() async {
+    if (!await _rootDirectory.exists()) return 0;
+    var total = 0;
+    await for (final entity in _rootDirectory.list(recursive: true)) {
+      if (entity is File && !entity.path.endsWith('.tmp')) {
+        total += await entity.length();
+      }
+    }
+    return total;
+  }
+
+  Future<void> enforceBudget() => _fileCoordinator.exclusive(_evictUntilFits);
+
   Future<SegmentedDisplayCacheManifest?> loadManifest(
     SegmentedDisplayCacheKey key,
   ) async {
@@ -423,6 +545,7 @@ final class SegmentedDisplayCacheService {
           'cacheKey': key.cacheKey,
           'reason': 'incompatible_manifest',
         });
+        await _deleteSignatureDirectory(key.cacheKey);
         return null;
       }
       final normalized = await _validatedManifest(key, manifest);
@@ -557,6 +680,7 @@ final class SegmentedDisplayCacheService {
         await _removeSegmentRecord(key, record, 'metadata_mismatch');
         return null;
       }
+      final touched = await _touchSegment(key, record);
       stopwatch.stop();
       _segmentCacheDiagLog('segment_cache_range_loaded', {
         'book': key.bookId,
@@ -569,7 +693,7 @@ final class SegmentedDisplayCacheService {
         'path': file.path,
       });
       return CachedDisplaySegment(
-        record: record,
+        record: touched,
         displayChunks: decoded.displayChunks,
         displayToOriginal: decoded.displayToOriginal,
         originalToDisplay: decoded.originalToDisplay,
@@ -615,6 +739,50 @@ final class SegmentedDisplayCacheService {
       });
     }
     return segment;
+  }
+
+  Future<ChapterCardLayout?> loadChapterCardLayout({
+    required SegmentedDisplayCacheKey key,
+    required ChapterCardLayoutKey layoutKey,
+  }) async {
+    final manifest = await loadManifest(key);
+    if (manifest == null || !manifest.complete) return null;
+    final file = File(
+      p.join(
+        _rootDirectory.path,
+        _safeKey(key.cacheKey),
+        'chapter_layout.json',
+      ),
+    );
+    if (!await file.exists()) return null;
+    try {
+      final decoded = ChapterCardLayout.fromJson(
+        jsonDecode(await file.readAsString()) as Map<String, dynamic>,
+      );
+      return decoded.key == layoutKey && decoded.pages.isNotEmpty
+          ? decoded
+          : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<ChapterCardLayout?> loadChapterCardLayoutRecord(
+    ChapterCardLayoutKey layoutKey,
+  ) async {
+    await ensureInitialized();
+    final file = _chapterLayoutRecordFile(layoutKey.cacheKey);
+    if (!await file.exists()) return null;
+    try {
+      final decoded = ChapterCardLayout.fromJson(
+        jsonDecode(await file.readAsString()) as Map<String, dynamic>,
+      );
+      if (decoded.key != layoutKey || decoded.pages.isEmpty) return null;
+      await file.setLastModified(DateTime.fromMillisecondsSinceEpoch(_clock()));
+      return decoded;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<bool> corruptSegmentAroundSourceForDiagnostics({
@@ -681,6 +849,62 @@ final class SegmentedDisplayCacheService {
     );
     _writeQueue = operation.catchError((_) {});
     return operation;
+  }
+
+  Future<void> writeChapterCardLayout({
+    required SegmentedDisplayCacheKey key,
+    required DisplayRangeResult result,
+    required int generationId,
+    required ChapterCardLayout layout,
+    required bool Function() shouldWrite,
+  }) async {
+    await writeSegment(
+      key: key,
+      result: result,
+      generationId: generationId,
+      shouldWrite: shouldWrite,
+    );
+    if (!shouldWrite()) return;
+    await _fileCoordinator.exclusive(() async {
+      if (!shouldWrite()) return;
+      final manifest = await loadManifest(key);
+      if (manifest == null || !manifest.complete) return;
+      final dir = await _signatureDirectory(key.cacheKey);
+      final temp = File(p.join(dir.path, 'chapter_layout.json.tmp'));
+      final file = File(p.join(dir.path, 'chapter_layout.json'));
+      await temp.writeAsString(jsonEncode(layout.toJson()), flush: true);
+      if (!shouldWrite()) {
+        if (await temp.exists()) await temp.delete();
+        return;
+      }
+      if (await file.exists()) await file.delete();
+      await temp.rename(file.path);
+    });
+    await enforceBudget();
+  }
+
+  Future<void> writeChapterCardLayoutRecord({
+    required ChapterCardLayout layout,
+    required bool Function() shouldWrite,
+  }) async {
+    if (!shouldWrite()) return;
+    await _fileCoordinator.exclusive(() async {
+      if (!shouldWrite()) return;
+      final directory = Directory(
+        p.join(_rootDirectory.path, 'chapter_layout_records'),
+      );
+      if (!await directory.exists()) await directory.create(recursive: true);
+      final file = _chapterLayoutRecordFile(layout.key.cacheKey);
+      final temp = File('${file.path}.tmp');
+      await temp.writeAsString(jsonEncode(layout.toJson()), flush: true);
+      if (!shouldWrite()) {
+        if (await temp.exists()) await temp.delete();
+        return;
+      }
+      if (await file.exists()) await file.delete();
+      await temp.rename(file.path);
+    });
+    await enforceBudget();
   }
 
   Future<void> _writeSegment({
@@ -777,7 +1001,7 @@ final class SegmentedDisplayCacheService {
       await tmpFile.rename(finalFile.path);
 
       final checksum = _checksum(bytes);
-      final now = DateTime.now().millisecondsSinceEpoch;
+      final now = _clock();
       final record = DisplaySegmentRecord(
         sourceStart: range.start,
         sourceEndExclusive: range.endExclusive,
@@ -791,6 +1015,7 @@ final class SegmentedDisplayCacheService {
         generationId: generationId,
         createdAtMs: now,
         updatedAtMs: now,
+        lastAccessedAtMs: now,
         status: segmentStatusReady,
         fileSizeBytes: bytes.length,
       );
@@ -813,7 +1038,7 @@ final class SegmentedDisplayCacheService {
       final manifestStopwatch = Stopwatch()..start();
       await _upsertSegmentRecord(key, record);
       manifestStopwatch.stop();
-      await _evictUntilFits(excludeCacheKey: key.cacheKey);
+      await _evictUntilFits();
       stopwatch.stop();
       _segmentCacheDiagLog('segment_cache_write_end', {
         'book': key.bookId,
@@ -863,6 +1088,20 @@ final class SegmentedDisplayCacheService {
             deleted.add(entity.path);
           } catch (_) {}
         }
+        final layoutDirectory = Directory(
+          p.join(_rootDirectory.path, 'chapter_layout_records'),
+        );
+        if (await layoutDirectory.exists()) {
+          await for (final entity in layoutDirectory.list()) {
+            if (entity is! File || !entity.path.endsWith('.json')) continue;
+            try {
+              final layout = ChapterCardLayout.fromJson(
+                jsonDecode(await entity.readAsString()) as Map<String, dynamic>,
+              );
+              if (layout.key.bookId == bookId) await entity.delete();
+            } catch (_) {}
+          }
+        }
         _segmentCacheDiagLog('segment_cache_delete_for_book', {
           'book': bookId,
           'deletedPaths': deleted,
@@ -870,6 +1109,7 @@ final class SegmentedDisplayCacheService {
       });
     } finally {
       _deletingBooks.remove(bookId);
+      _activeLayoutIdentityByBook.remove(bookId);
     }
   }
 
@@ -885,6 +1125,9 @@ final class SegmentedDisplayCacheService {
         }
         await _rootDirectory.create(recursive: true);
         _manifestCache.clear();
+        _activeLayoutIdentityByBook.clear();
+        _activeRangesByCacheKey.clear();
+        _recentRangesByCacheKey.clear();
       });
     } finally {
       _resettingRoots.remove(rootKey);
@@ -909,12 +1152,22 @@ final class SegmentedDisplayCacheService {
     return File(p.join(_rootDirectory.path, _safeKey(cacheKey), fileName));
   }
 
+  File _chapterLayoutRecordFile(String layoutCacheKey) {
+    return File(
+      p.join(
+        _rootDirectory.path,
+        'chapter_layout_records',
+        '${_safeKey(layoutCacheKey)}.json',
+      ),
+    );
+  }
+
   Future<void> _upsertSegmentRecord(
     SegmentedDisplayCacheKey key,
     DisplaySegmentRecord record,
   ) async {
     final existing = await loadManifest(key);
-    final now = DateTime.now().millisecondsSinceEpoch;
+    final now = _clock();
     final records =
         (existing?.segments ?? const <DisplaySegmentRecord>[])
             .where(
@@ -975,7 +1228,7 @@ final class SegmentedDisplayCacheService {
         sourceChunkCount: manifest.sourceChunkCount,
         complete: false,
         createdAtMs: manifest.createdAtMs,
-        updatedAtMs: DateTime.now().millisecondsSinceEpoch,
+        updatedAtMs: _clock(),
         segments: records,
       ),
     );
@@ -985,6 +1238,46 @@ final class SegmentedDisplayCacheService {
       'sourceStart': record.sourceStart,
       'sourceEndExclusive': record.sourceEndExclusive,
       'reason': reason,
+    });
+  }
+
+  Future<DisplaySegmentRecord> _touchSegment(
+    SegmentedDisplayCacheKey key,
+    DisplaySegmentRecord record,
+  ) {
+    return _fileCoordinator.exclusive(() async {
+      final manifest = await loadManifest(key);
+      if (manifest == null) return record;
+      final now = _clock();
+      final touched = record.copyWith(lastAccessedAtMs: now);
+      final records = manifest.segments
+          .map(
+            (segment) =>
+                segment.sourceStart == record.sourceStart &&
+                    segment.sourceEndExclusive == record.sourceEndExclusive
+                ? touched
+                : segment,
+          )
+          .toList(growable: false);
+      await _saveManifest(
+        key.cacheKey,
+        SegmentedDisplayCacheManifest(
+          version: manifest.version,
+          bookId: manifest.bookId,
+          cacheKey: manifest.cacheKey,
+          parsedContentVersion: manifest.parsedContentVersion,
+          parserVersion: manifest.parserVersion,
+          displayLayoutVersion: manifest.displayLayoutVersion,
+          settingsSignature: manifest.settingsSignature,
+          viewportSignature: manifest.viewportSignature,
+          sourceChunkCount: manifest.sourceChunkCount,
+          complete: manifest.complete,
+          createdAtMs: manifest.createdAtMs,
+          updatedAtMs: manifest.updatedAtMs,
+          segments: records,
+        ),
+      );
+      return touched;
     });
   }
 
@@ -1058,38 +1351,184 @@ final class SegmentedDisplayCacheService {
     });
   }
 
-  Future<void> _evictUntilFits({required String excludeCacheKey}) async {
-    var total = 0;
-    final signatures = <({Directory dir, int size, int accessed})>[];
+  Future<void> _evictUntilFits() async {
     if (!await _rootDirectory.exists()) return;
+    var total = await payloadBytesOnDisk();
+    final budget = effectiveByteBudget;
+    if (total <= budget) return;
+
+    final layoutDirectory = Directory(
+      p.join(_rootDirectory.path, 'chapter_layout_records'),
+    );
+    if (await layoutDirectory.exists()) {
+      final records = <File>[];
+      await for (final entity in layoutDirectory.list()) {
+        if (entity is File && entity.path.endsWith('.json')) {
+          records.add(entity);
+        }
+      }
+      records.sort((left, right) {
+        final leftTime = left.lastModifiedSync().millisecondsSinceEpoch;
+        final rightTime = right.lastModifiedSync().millisecondsSinceEpoch;
+        return leftTime.compareTo(rightTime);
+      });
+      for (final record in records) {
+        if (total <= budget) break;
+        total -= await record.length();
+        await record.delete();
+      }
+    }
+    if (total <= budget) return;
+
+    final pressure = _storagePressureProvider();
+    final manifests = <String, SegmentedDisplayCacheManifest>{};
+    final directories = <String, Directory>{};
+    final candidates =
+        <
+          ({
+            String cacheKey,
+            DisplaySegmentRecord record,
+            bool obsolete,
+            bool protected,
+            int lastAccessed,
+          })
+        >[];
+
     await for (final entity in _rootDirectory.list()) {
       if (entity is! Directory) continue;
-      var size = 0;
-      var accessed = 0;
-      await for (final child in entity.list(recursive: true)) {
-        if (child is File) size += await child.length();
-      }
       final manifestFile = File(p.join(entity.path, 'manifest.json'));
-      if (await manifestFile.exists()) {
-        try {
-          final manifest = SegmentedDisplayCacheManifest.fromJson(
-            jsonDecode(await manifestFile.readAsString())
-                as Map<String, dynamic>,
-          );
-          accessed = manifest.updatedAtMs;
-        } catch (_) {}
+      if (!await manifestFile.exists()) {
+        await entity.delete(recursive: true);
+        continue;
       }
-      total += size;
-      signatures.add((dir: entity, size: size, accessed: accessed));
+      SegmentedDisplayCacheManifest manifest;
+      try {
+        manifest = SegmentedDisplayCacheManifest.fromJson(
+          jsonDecode(await manifestFile.readAsString()) as Map<String, dynamic>,
+        );
+      } catch (_) {
+        await entity.delete(recursive: true);
+        continue;
+      }
+      manifests[manifest.cacheKey] = manifest;
+      directories[manifest.cacheKey] = entity;
+      final activeLayout = _activeLayoutIdentityByBook[manifest.bookId];
+      final manifestLayout = _layoutIdentityForManifest(manifest);
+      final obsolete = activeLayout != null && activeLayout != manifestLayout;
+      for (final record in manifest.segments) {
+        final activeProtected = _rangeIsProtected(
+          manifest.cacheKey,
+          record.sourceRange,
+          _activeRangesByCacheKey,
+        );
+        final recentProtected =
+            pressure == DisplayCacheStoragePressure.normal &&
+            _rangeIsProtected(
+              manifest.cacheKey,
+              record.sourceRange,
+              _recentRangesByCacheKey,
+            );
+        candidates.add((
+          cacheKey: manifest.cacheKey,
+          record: record,
+          obsolete: obsolete,
+          protected: activeProtected || recentProtected,
+          lastAccessed: record.lastAccessedAtMs ?? record.updatedAtMs,
+        ));
+      }
     }
-    if (total <= _maxSegmentedDisplayCacheBytes) return;
-    signatures.sort((a, b) => a.accessed.compareTo(b.accessed));
-    for (final signature in signatures) {
-      if (total <= _maxSegmentedDisplayCacheBytes) break;
-      if (p.basename(signature.dir.path) == _safeKey(excludeCacheKey)) continue;
-      await signature.dir.delete(recursive: true);
-      total -= signature.size;
+
+    candidates.sort((a, b) {
+      if (a.protected != b.protected) return a.protected ? 1 : -1;
+      if (a.obsolete != b.obsolete) return a.obsolete ? -1 : 1;
+      return a.lastAccessed.compareTo(b.lastAccessed);
+    });
+
+    for (final candidate in candidates) {
+      if (total <= budget) break;
+      if (candidate.protected) continue;
+      final manifest = manifests[candidate.cacheKey];
+      final dir = directories[candidate.cacheKey];
+      if (manifest == null || dir == null) continue;
+      final stillPresent = manifest.segments.any(
+        (record) =>
+            record.sourceStart == candidate.record.sourceStart &&
+            record.sourceEndExclusive == candidate.record.sourceEndExclusive,
+      );
+      if (!stillPresent) continue;
+      final file = _segmentFile(candidate.cacheKey, candidate.record.fileName);
+      if (await file.exists()) await file.delete();
+      final remaining = manifest.segments
+          .where(
+            (record) =>
+                record.sourceStart != candidate.record.sourceStart ||
+                record.sourceEndExclusive !=
+                    candidate.record.sourceEndExclusive,
+          )
+          .toList(growable: false);
+      if (remaining.isEmpty &&
+          (candidate.obsolete ||
+              candidate.cacheKey.contains('_chapter_layout_'))) {
+        await _deleteSignatureDirectory(candidate.cacheKey);
+        manifests.remove(candidate.cacheKey);
+        directories.remove(candidate.cacheKey);
+      } else {
+        final updated = SegmentedDisplayCacheManifest(
+          version: manifest.version,
+          bookId: manifest.bookId,
+          cacheKey: manifest.cacheKey,
+          parsedContentVersion: manifest.parsedContentVersion,
+          parserVersion: manifest.parserVersion,
+          displayLayoutVersion: manifest.displayLayoutVersion,
+          settingsSignature: manifest.settingsSignature,
+          viewportSignature: manifest.viewportSignature,
+          sourceChunkCount: manifest.sourceChunkCount,
+          complete: false,
+          createdAtMs: manifest.createdAtMs,
+          updatedAtMs: _clock(),
+          segments: remaining,
+        );
+        manifests[candidate.cacheKey] = updated;
+        await _saveManifest(candidate.cacheKey, updated);
+      }
+      total = await payloadBytesOnDisk();
     }
+
+    _segmentCacheDiagLog('segment_cache_budget_enforced', {
+      'configuredBudget': configuredByteBudget,
+      'effectiveBudget': budget,
+      'pressure': pressure.name,
+      'bytesAfter': total,
+    });
+  }
+
+  bool _rangeIsProtected(
+    String cacheKey,
+    SourceChunkRange candidate,
+    Map<String, List<SourceChunkRange>> protections,
+  ) {
+    return protections[cacheKey]?.any(
+          (range) =>
+              candidate.start < range.endExclusive &&
+              candidate.endExclusive > range.start,
+        ) ??
+        false;
+  }
+
+  String _layoutIdentityForManifest(SegmentedDisplayCacheManifest manifest) {
+    return [
+      manifest.displayLayoutVersion,
+      manifest.settingsSignature,
+      manifest.viewportSignature,
+      manifest.parsedContentVersion,
+      manifest.parserVersion,
+    ].join('|');
+  }
+
+  Future<void> _deleteSignatureDirectory(String cacheKey) async {
+    final dir = Directory(p.join(_rootDirectory.path, _safeKey(cacheKey)));
+    if (await dir.exists()) await dir.delete(recursive: true);
+    _manifestCache.remove(cacheKey);
   }
 
   bool _isManifestCompatible(

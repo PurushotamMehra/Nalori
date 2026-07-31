@@ -109,7 +109,18 @@ class ChapterNavigationService {
           textOffset: location.textOffset,
           stableLocation: resolvedLocalChunkIndex == null
               ? location
-              : location.copyWith(localChunkIndex: resolvedLocalChunkIndex),
+              : location.copyWith(
+                  localChunkIndex: resolvedLocalChunkIndex,
+                  sectionProgression:
+                      anchorLocation?.sectionProgression ??
+                      location.sectionProgression,
+                  publicationProgression:
+                      anchorLocation?.publicationProgression ??
+                      location.publicationProgression,
+                  sourceParserVersion:
+                      anchorLocation?.sourceParserVersion ??
+                      location.sourceParserVersion,
+                ),
           isSelectable: isSelectable,
           isStructuralParent: isStructuralParent,
           duplicateGroupId: duplicateGroupId,

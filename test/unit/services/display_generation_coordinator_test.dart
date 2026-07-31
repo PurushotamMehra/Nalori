@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/services/display_generation_coordinator.dart';
 
@@ -94,5 +96,61 @@ void main() {
     expect(first.token.state, DisplayGenerationState.complete);
     expect(coordinator.activeToken, isNull);
     expect(coordinator.canPublish(first.token), isFalse);
+  });
+
+  test('pending navigation preserves the last published readable snapshot', () {
+    final coordinator = ReaderNavigationPublicationCoordinator<String>();
+    coordinator.markReadablePublished();
+
+    final pending = coordinator.begin('target-b');
+
+    expect(coordinator.hasPublishedReadableContent, isTrue);
+    expect(coordinator.publishedGeneration, 0);
+    expect(coordinator.pending, same(pending));
+  });
+
+  test('barrier-controlled A B C navigation publishes only latest C', () async {
+    final coordinator = ReaderNavigationPublicationCoordinator<String>();
+    coordinator.markReadablePublished();
+    final barriers = {
+      for (final target in ['A', 'B', 'C']) target: Completer<void>(),
+    };
+    final published = <String>[];
+
+    Future<void> prepareAndPublish(String target) async {
+      final token = coordinator.begin(target);
+      await barriers[target]!.future;
+      if (!coordinator.isLatest(token)) return;
+      published.add(target);
+      coordinator.markReadablePublished(token);
+    }
+
+    final a = prepareAndPublish('A');
+    final b = prepareAndPublish('B');
+    final c = prepareAndPublish('C');
+    barriers['B']!.complete();
+    barriers['A']!.complete();
+    await Future.wait([a, b]);
+    expect(published, isEmpty);
+    expect(coordinator.hasPublishedReadableContent, isTrue);
+
+    barriers['C']!.complete();
+    await c;
+    expect(published, ['C']);
+    expect(coordinator.pending, isNull);
+  });
+
+  test('stale completion or latest failure never clears old publication', () {
+    final coordinator = ReaderNavigationPublicationCoordinator<String>();
+    coordinator.markReadablePublished();
+    final a = coordinator.begin('A');
+    final c = coordinator.begin('C');
+
+    coordinator.markReadablePublished(a);
+    coordinator.fail(c);
+
+    expect(coordinator.hasPublishedReadableContent, isTrue);
+    expect(coordinator.publishedGeneration, 0);
+    expect(coordinator.pending, isNull);
   });
 }

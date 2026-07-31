@@ -145,4 +145,63 @@ void main() {
       isNot('McNeish'),
     );
   });
+
+  test(
+    'legacy same-length span is not projected onto unrelated window text',
+    () {
+      final legacy = Highlight(
+        id: 'legacy',
+        originalChunkIndex: 0,
+        startOffset: 0,
+        endOffset: 7,
+        text: 'McNeish',
+        colorValue: Colors.teal.toARGB32(),
+        type: HighlightType.character,
+        createdAt: DateTime(2026, 7, 13),
+      );
+      const unrelated = BookChunk(
+        index: 0,
+        type: BookChunkType.text,
+        text: 'Another unrelated paragraph.',
+      );
+
+      final resolved = resolveReaderHighlightsForSourceWindow(
+        highlights: [legacy],
+        locationsByChunkIndex: currentTargetWindow,
+        sourceChunks: const [unrelated],
+      );
+
+      expect(resolved, isEmpty);
+    },
+  );
+
+  test(
+    'legacy annotation remains visible when exact source evidence matches',
+    () {
+      final legacy = Highlight(
+        id: 'legacy-match',
+        originalChunkIndex: 0,
+        startOffset: 0,
+        endOffset: 7,
+        text: 'McNeish',
+        colorValue: Colors.teal.toARGB32(),
+        type: HighlightType.highlight,
+        createdAt: DateTime(2026, 7, 13),
+      );
+
+      final resolved = resolveReaderHighlightsForSourceWindow(
+        highlights: [legacy],
+        locationsByChunkIndex: currentTargetWindow,
+        sourceChunks: const [
+          BookChunk(
+            index: 0,
+            type: BookChunkType.text,
+            text: 'McNeish watches.',
+          ),
+        ],
+      );
+
+      expect(resolved.single.id, 'legacy-match');
+    },
+  );
 }

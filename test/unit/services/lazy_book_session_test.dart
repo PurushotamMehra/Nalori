@@ -267,6 +267,33 @@ void main() {
     expect(session.nextReadableSpineIndex(2), isNull);
   });
 
+  test(
+    'resolved empty trailing sections do not block readable completion',
+    () async {
+      final file = File(p.join(tempDir.path, 'trailing_empty.epub'));
+      await file.writeAsBytes(
+        _buildSessionFixture(emptySections: const {3}),
+        flush: true,
+      );
+      final session = LazyBookSession(
+        repository: LazySectionRepository(
+          cache: ParsedSectionCacheService(
+            rootDirectory: Directory(p.join(tempDir.path, 'empty_cache')),
+          ),
+        ),
+      );
+      addTearDown(session.close);
+
+      await session.open(file);
+      final second = session.resolveAnchor('text/s2.xhtml', 's2')!;
+      await session.loadAround(second, after: 0);
+
+      expect(session.nextReadableSpineIndex(1), 2);
+      expect(await session.loadNextReadableSectionAfter(1), isNull);
+      expect(session.nextReadableSpineIndex(1), isNull);
+    },
+  );
+
   test('adjacent readable loading skips unusable spine items', () async {
     final file = File(p.join(tempDir.path, 'non_linear.epub'));
     await file.writeAsBytes(_buildNonLinearFixture(), flush: true);
@@ -389,6 +416,19 @@ void main() {
     expect(offset.confidence, StableLocationConfidence.exact);
     expect(offset.reason, 'source_offset');
     expect(offset.location?.localChunkIndex, 1);
+    final laterOffset = await session.resolveStableLocation(
+      anchor.location!.copyWith(
+        anchorId: 'missing',
+        localChunkIndex: 1,
+        textOffset: 8,
+      ),
+    );
+    expect(laterOffset.location?.localChunkIndex, 1);
+    expect(laterOffset.location?.textOffset, 8);
+    expect(
+      laterOffset.location!.publicationProgression!,
+      greaterThan(offset.location!.publicationProgression!),
+    );
 
     final parserChanged = await session.resolveStableLocation(
       StableBookLocation(
@@ -473,6 +513,118 @@ void main() {
       expect(relative?.spineIndex, 1);
     },
   );
+
+  test(
+    'section chunk locations retain weighted progression when integrated',
+    () async {
+      final session = await _openFixtureSession(
+        tempDir,
+        cacheName: 'integrated_progress_cache',
+      );
+      addTearDown(session.close);
+      final window = await session.loadAround(
+        session.resolveAnchor('text/s2.xhtml', 's2')!,
+        after: 0,
+      );
+      final section = window.sections.single;
+      final locations = [
+        for (var i = 0; i < section.chunks.length; i++)
+          session.locationForSectionChunk(section, i),
+      ];
+
+      expect(
+        locations.every((location) => location.publicationProgression != null),
+        isTrue,
+      );
+      expect(
+        locations.map((location) => location.publicationProgression!),
+        orderedEquals(
+          locations.map((location) => location.publicationProgression!).toList()
+            ..sort(),
+        ),
+      );
+    },
+  );
+
+  test(
+    'superseded navigation preparation cannot replace current location',
+    () async {
+      final session = await _openFixtureSession(
+        tempDir,
+        cacheName: 'superseded_navigation_cache',
+      );
+      addTearDown(session.close);
+      final initial = session.resolveAnchor('text/s1.xhtml', 's1')!;
+      await session.loadAround(initial, after: 0);
+
+      final preparation = await session.prepareNavigation(
+        session.resolveAnchor('text/s3.xhtml', 's3')!,
+        canCommit: () => false,
+      );
+
+      expect(preparation.superseded, isTrue);
+      expect(preparation.window, isNull);
+      expect(session.currentLocation?.spineIndex, 0);
+      expect(session.loadedSpineIndices.length, lessThanOrEqualTo(3));
+    },
+  );
+
+  test(
+    'sequential reading keeps section ownership bounded and stable',
+    () async {
+      final file = File(p.join(tempDir.path, 'long_session.epub'));
+      await file.writeAsBytes(
+        _buildSessionFixture(sectionCount: 9),
+        flush: true,
+      );
+      final session = LazyBookSession(
+        nearbySectionCount: 1,
+        repository: LazySectionRepository(
+          cache: ParsedSectionCacheService(
+            rootDirectory: Directory(p.join(tempDir.path, 'long_cache')),
+          ),
+        ),
+      );
+      addTearDown(session.close);
+      await session.open(file);
+
+      for (var spineIndex = 0; spineIndex < 9; spineIndex++) {
+        final target = session.resolveAnchor(
+          'text/s${spineIndex + 1}.xhtml',
+          's${spineIndex + 1}',
+        )!;
+        final window = await session.loadAround(target, before: 1, after: 1);
+        expect(session.loadedSpineIndices.length, lessThanOrEqualTo(3));
+        expect(window.sections.length, lessThanOrEqualTo(3));
+        expect(
+          window.sourceIdentitiesByChunkIndex.values.every(
+            (identity) =>
+                identity.section.publicationFingerprint ==
+                    session.index.publicationFingerprint &&
+                identity.section.normalizedHref.isNotEmpty &&
+                identity.section.fullPath.isNotEmpty &&
+                identity.section.sourceChecksum.isNotEmpty,
+          ),
+          isTrue,
+        );
+        for (final entry in window.sourceIdentitiesByChunkIndex.entries) {
+          expect(window.chunkIndexBySourceIdentity[entry.value], entry.key);
+        }
+        expect(session.currentLocation?.spineIndex, spineIndex);
+      }
+
+      expect(session.loadedSpineIndices, isNot(contains(0)));
+      final reloaded = await session.loadAround(
+        session.resolveAnchor('text/s1.xhtml', 's1')!,
+        after: 0,
+      );
+      expect(reloaded.sections.single.identity.spineIndex, 0);
+      expect(
+        reloaded.chunks.map((chunk) => chunk.text).join(),
+        contains('Section 1'),
+      );
+    },
+  );
 }
 
 Future<LazyBookSession> _openFixtureSession(
@@ -492,7 +644,24 @@ Future<LazyBookSession> _openFixtureSession(
   return session;
 }
 
-List<int> _buildSessionFixture() {
+List<int> _buildSessionFixture({
+  int sectionCount = 3,
+  Set<int> emptySections = const {},
+}) {
+  final manifestItems = List.generate(
+    sectionCount,
+    (index) =>
+        '<item id="s${index + 1}" href="text/s${index + 1}.xhtml" media-type="application/xhtml+xml"/>',
+  ).join('\n    ');
+  final spineItems = List.generate(
+    sectionCount,
+    (index) => '<itemref idref="s${index + 1}"/>',
+  ).join('\n    ');
+  final navPoints = List.generate(
+    sectionCount,
+    (index) =>
+        '<navPoint id="nav${index + 1}" playOrder="${index + 1}"><navLabel><text>${index + 1}</text></navLabel><content src="text/s${index + 1}.xhtml#s${index + 1}"/></navPoint>',
+  ).join('\n    ');
   final archive = Archive()
     ..addFile(
       ArchiveFile.string(
@@ -518,14 +687,10 @@ List<int> _buildSessionFixture() {
   </metadata>
   <manifest>
     <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
-    <item id="s1" href="text/s1.xhtml" media-type="application/xhtml+xml"/>
-    <item id="s2" href="text/s2.xhtml" media-type="application/xhtml+xml"/>
-    <item id="s3" href="text/s3.xhtml" media-type="application/xhtml+xml"/>
+    $manifestItems
   </manifest>
   <spine toc="ncx">
-    <itemref idref="s1"/>
-    <itemref idref="s2"/>
-    <itemref idref="s3"/>
+    $spineItems
   </spine>
 </package>''',
       ),
@@ -538,22 +703,23 @@ List<int> _buildSessionFixture() {
   <head><meta name="dtb:uid" content="session-fixture"/></head>
   <docTitle><text>Session Fixture</text></docTitle>
   <navMap>
-    <navPoint id="nav1" playOrder="1"><navLabel><text>One</text></navLabel><content src="text/s1.xhtml#s1"/></navPoint>
-    <navPoint id="nav2" playOrder="2"><navLabel><text>Two</text></navLabel><content src="text/s2.xhtml#s2"/></navPoint>
-    <navPoint id="nav3" playOrder="3"><navLabel><text>Three</text></navLabel><content src="text/s3.xhtml#s3"/></navPoint>
+    $navPoints
   </navMap>
 </ncx>''',
       ),
     );
 
-  for (var i = 1; i <= 3; i++) {
+  for (var i = 1; i <= sectionCount; i++) {
+    final body = emptySections.contains(i)
+        ? ''
+        : '<h1 id="s$i">Section $i</h1><p>Section $i text.</p>';
     archive.addFile(
       ArchiveFile.string(
         'OEBPS/text/s$i.xhtml',
         '''<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml">
   <head><title>$i</title></head>
-  <body><h1 id="s$i">Section $i</h1><p>Section $i text.</p></body>
+  <body>$body</body>
 </html>''',
       ),
     );

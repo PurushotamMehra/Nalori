@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'lazy_parsed_book.dart';
 import 'parsed_section_retention_policy.dart';
+import 'segmented_display_cache_service.dart';
 
 const bool _parsedSectionDiagEnabled = bool.fromEnvironment('NALORI_EPUB_DIAG');
 const String _parsedSectionDiagPrefix = 'NALORI_EPUB_DIAG';
@@ -409,6 +410,7 @@ final class ParsedSectionCacheService {
     ParsedSectionRetentionRegistry? retentionRegistry,
     ParsedCacheClock? clock,
     Duration accessUpdateInterval = const Duration(minutes: 5),
+    Future<void> Function()? evictDisplayDerivativesBeforeSource,
   }) : _rootDirectory = rootDirectory,
        _policy = policy,
        _storagePressureProvider =
@@ -416,7 +418,10 @@ final class ParsedSectionCacheService {
        _retentionRegistry =
            retentionRegistry ?? ParsedSectionRetentionRegistry.instance,
        _clock = clock ?? DateTime.now,
-       _accessUpdateInterval = accessUpdateInterval;
+       _accessUpdateInterval = accessUpdateInterval,
+       _evictDisplayDerivativesBeforeSource =
+           evictDisplayDerivativesBeforeSource ??
+           (rootDirectory == null ? _enforceDefaultDisplayBudget : null);
 
   static const String directoryName = 'parsed_sections';
   static final Map<String, _ParsedCacheFileCoordinator> _coordinators = {};
@@ -427,10 +432,16 @@ final class ParsedSectionCacheService {
   final ParsedSectionRetentionRegistry _retentionRegistry;
   final ParsedCacheClock _clock;
   final Duration _accessUpdateInterval;
+  final Future<void> Function()? _evictDisplayDerivativesBeforeSource;
   final Map<String, _CachedParsedSectionManifest> _manifestCache = {};
 
   static ParsedCacheStoragePressure _defaultStoragePressure() =>
       ParsedCacheStoragePressure.normal;
+
+  static Future<void> _enforceDefaultDisplayBudget() async {
+    final displayCache = await SegmentedDisplayCacheService.createDefault();
+    await displayCache.enforceBudget();
+  }
 
   String get _scopeKey =>
       _rootDirectory?.absolute.path ?? '__default_parsed_section_cache__';
@@ -1144,6 +1155,10 @@ final class ParsedSectionCacheService {
         }
         manifests[manifest.bookId] = manifest;
       }
+    }
+
+    if (usage > budget) {
+      await _evictDisplayDerivativesBeforeSource?.call();
     }
 
     candidates.sort((a, b) {

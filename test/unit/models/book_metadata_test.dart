@@ -3,6 +3,8 @@ import 'package:nalori/models/book_chunk.dart';
 import 'package:nalori/models/book_metadata.dart';
 import 'package:nalori/models/bookmark.dart';
 import 'package:nalori/models/reading_settings.dart';
+import 'package:nalori/models/stable_book_location.dart';
+import 'package:nalori/services/book_metadata_service.dart';
 
 void main() {
   group('BookMetadata', () {
@@ -49,6 +51,62 @@ void main() {
 
       expect(restored.lastOpenedAt, 100);
       expect(restored.lastMeaningfulReadAt, 200);
+    });
+
+    test(
+      'stable structural progress is canonical over legacy chunk fields',
+      () {
+        final metadata = BookMetadata(
+          id: 'book.epub',
+          title: 'Book',
+          author: 'Author',
+          lastReadIndex: 10,
+          totalChunks: 101,
+          lastReadLocation: const StableBookLocation(
+            bookId: 'book.epub',
+            spineIndex: 8,
+            href: 'chapter-8.xhtml',
+            sourceChecksum: 'checksum',
+            publicationProgression: 0.8,
+          ),
+        );
+
+        final restored = BookMetadata.fromMap(metadata.toMap());
+
+        expect(restored.readingProgress, 0.8);
+        expect(restored.hasMeaningfulReadingProgress, isTrue);
+      },
+    );
+
+    test('legacy progress remains a compatibility fallback', () {
+      final metadata = BookMetadata(
+        id: 'legacy.epub',
+        title: 'Legacy',
+        author: 'Author',
+        lastReadIndex: 25,
+        totalChunks: 101,
+      );
+
+      expect(metadata.readingProgress, 0.25);
+    });
+
+    test('terminal stable progress is exposed as exact completion', () {
+      final metadata = BookMetadata(
+        id: 'book.epub',
+        title: 'Book',
+        author: 'Author',
+        lastReadIndex: 4,
+        totalChunks: 100,
+        lastReadLocation: const StableBookLocation(
+          bookId: 'book.epub',
+          spineIndex: 8,
+          href: 'final.xhtml',
+          sourceChecksum: 'checksum',
+          publicationProgression: 1,
+        ),
+      );
+
+      expect(metadata.readingProgress, 1);
     });
 
     test('legacy progress migrates to meaningful recency only when proven', () {
@@ -202,6 +260,62 @@ void main() {
       expect(summary.totalContentWords, 5);
       expect(summary.remainingWordsAfter(1), 2);
       expect(summary.chapterNumberFor(3), 2);
+    });
+
+    test('older delayed metadata cannot replace a newer reading revision', () {
+      const newerLocation = StableBookLocation(
+        bookId: 'book.epub',
+        spineIndex: 3,
+        href: 'chapter-3.xhtml',
+        sourceChecksum: 'newer',
+        localChunkIndex: 2,
+        textOffset: 450,
+        publicationProgression: 0.7,
+      );
+      const olderLocation = StableBookLocation(
+        bookId: 'book.epub',
+        spineIndex: 1,
+        href: 'chapter-1.xhtml',
+        sourceChecksum: 'older',
+        localChunkIndex: 0,
+        textOffset: 10,
+        publicationProgression: 0.1,
+      );
+      final current = BookMetadata(
+        id: 'book.epub',
+        title: 'Book',
+        author: 'Author',
+        lastReadLocation: newerLocation,
+        lastReadRevision: 200,
+        lastReadTime: 200,
+      );
+      final delayed = current.copyWith(
+        lastReadLocation: olderLocation,
+        lastReadRevision: 100,
+        lastReadTime: 100,
+      );
+
+      final merged = preserveNewerReadingPosition(
+        candidate: delayed,
+        current: current,
+      );
+
+      expect(merged.lastReadRevision, 200);
+      expect(merged.lastReadLocation, newerLocation);
+      expect(merged.readingProgress, 0.7);
+    });
+
+    test('reading revision survives metadata serialization', () {
+      final metadata = BookMetadata(
+        id: 'book.epub',
+        title: 'Book',
+        author: 'Author',
+        lastReadRevision: 987654,
+      );
+
+      final restored = BookMetadata.fromMap(metadata.toMap());
+
+      expect(restored.lastReadRevision, 987654);
     });
   });
 }

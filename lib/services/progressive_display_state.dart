@@ -108,6 +108,148 @@ final class PreparedDisplayRange {
   }
 }
 
+final class RemappedPreparedDisplaySnapshot {
+  const RemappedPreparedDisplaySnapshot({
+    required this.sourceRange,
+    required this.displayChunks,
+    required this.displayToOriginal,
+    required this.originalToDisplay,
+    required this.anchorDisplayIndex,
+  });
+
+  final SourceChunkRange sourceRange;
+  final List<BookChunk> displayChunks;
+  final List<List<int>> displayToOriginal;
+  final Map<int, int> originalToDisplay;
+  final int anchorDisplayIndex;
+}
+
+/// Remaps an already-published, layout-identical display run onto a replaced
+/// lazy source window by stable source identity. Only the contiguous prepared
+/// run containing [anchorStableKey] is retained, so no evicted source or hidden
+/// gap can be published as ready.
+RemappedPreparedDisplaySnapshot? remapPreparedDisplaySnapshot({
+  required List<BookChunk> displayChunks,
+  required List<List<int>> displayToOriginal,
+  required Map<int, String> oldStableKeysBySourceIndex,
+  required Map<String, int> newSourceIndexByStableKey,
+  required Iterable<int> preparedOldSourceIndexes,
+  required String anchorStableKey,
+}) {
+  final anchorSourceIndex = newSourceIndexByStableKey[anchorStableKey];
+  if (anchorSourceIndex == null) return null;
+
+  final preparedNewIndexes = <int>{};
+  for (final oldIndex in preparedOldSourceIndexes) {
+    final stableKey = oldStableKeysBySourceIndex[oldIndex];
+    final newIndex = stableKey == null
+        ? null
+        : newSourceIndexByStableKey[stableKey];
+    if (newIndex != null) preparedNewIndexes.add(newIndex);
+  }
+  if (!preparedNewIndexes.contains(anchorSourceIndex)) return null;
+
+  var runStart = anchorSourceIndex;
+  var runEnd = anchorSourceIndex;
+  while (preparedNewIndexes.contains(runStart - 1)) {
+    runStart--;
+  }
+  while (preparedNewIndexes.contains(runEnd + 1)) {
+    runEnd++;
+  }
+
+  final retainedChunks = <BookChunk>[];
+  final retainedMappings = <List<int>>[];
+  final reverse = <int, int>{};
+  int? anchorDisplayIndex;
+
+  for (
+    var displayIndex = 0;
+    displayIndex < displayChunks.length;
+    displayIndex++
+  ) {
+    if (displayIndex >= displayToOriginal.length) break;
+    final originals = displayToOriginal[displayIndex];
+    if (originals.isEmpty) continue;
+    final remappedOriginals = <int>[];
+    var intersectsRetainedRun = false;
+    var canRetain = true;
+    for (final oldIndex in originals) {
+      final stableKey = oldStableKeysBySourceIndex[oldIndex];
+      final newIndex = stableKey == null
+          ? null
+          : newSourceIndexByStableKey[stableKey];
+      if (newIndex != null && newIndex >= runStart && newIndex <= runEnd) {
+        intersectsRetainedRun = true;
+      } else {
+        canRetain = false;
+      }
+      if (newIndex != null && !remappedOriginals.contains(newIndex)) {
+        remappedOriginals.add(newIndex);
+      }
+    }
+    if (!intersectsRetainedRun) continue;
+    if (!canRetain) return null;
+
+    final remappedChunk = _remapDisplayChunkSourceIndexes(
+      displayChunks[displayIndex],
+      oldStableKeysBySourceIndex: oldStableKeysBySourceIndex,
+      newSourceIndexByStableKey: newSourceIndexByStableKey,
+      fallbackIndex: remappedOriginals.first,
+    );
+    if (remappedChunk == null) return null;
+
+    final nextDisplayIndex = retainedChunks.length;
+    retainedChunks.add(remappedChunk);
+    retainedMappings.add(remappedOriginals);
+    for (final sourceIndex in remappedOriginals) {
+      reverse[sourceIndex] = nextDisplayIndex;
+    }
+    if (remappedOriginals.contains(anchorSourceIndex)) {
+      anchorDisplayIndex ??= nextDisplayIndex;
+    }
+  }
+
+  if (retainedChunks.isEmpty || anchorDisplayIndex == null) return null;
+  return RemappedPreparedDisplaySnapshot(
+    sourceRange: SourceChunkRange(runStart, runEnd + 1),
+    displayChunks: retainedChunks,
+    displayToOriginal: retainedMappings,
+    originalToDisplay: reverse,
+    anchorDisplayIndex: anchorDisplayIndex,
+  );
+}
+
+BookChunk? _remapDisplayChunkSourceIndexes(
+  BookChunk chunk, {
+  required Map<int, String> oldStableKeysBySourceIndex,
+  required Map<String, int> newSourceIndexByStableKey,
+  required int fallbackIndex,
+}) {
+  final ranges = chunk.sourceRanges;
+  if (ranges == null || ranges.isEmpty) {
+    return chunk.copyWith(index: fallbackIndex);
+  }
+  final remapped = <ChunkSourceRange>[];
+  for (final range in ranges) {
+    final stableKey = oldStableKeysBySourceIndex[range.originalChunkIndex];
+    final newIndex = stableKey == null
+        ? null
+        : newSourceIndexByStableKey[stableKey];
+    if (newIndex == null) return null;
+    remapped.add(
+      ChunkSourceRange(
+        originalChunkIndex: newIndex,
+        originalStartOffset: range.originalStartOffset,
+        originalEndOffset: range.originalEndOffset,
+        displayStartOffset: range.displayStartOffset,
+        displayEndOffset: range.displayEndOffset,
+      ),
+    );
+  }
+  return chunk.copyWith(index: fallbackIndex, sourceRanges: remapped);
+}
+
 final class ProgressiveDisplayState {
   ProgressiveDisplayState({
     required this.signature,

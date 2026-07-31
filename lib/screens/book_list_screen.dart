@@ -195,12 +195,8 @@ class _BookListScreenState extends State<BookListScreen> {
         books.sort((a, b) {
           final metaA = _metadataService.getMetadata(p.basename(a.path));
           final metaB = _metadataService.getMetadata(p.basename(b.path));
-          final progA = (metaA != null && metaA.totalChunks > 1)
-              ? metaA.lastReadIndex / (metaA.totalChunks - 1)
-              : (metaA?.totalChunks == 1 ? 1.0 : 0.0);
-          final progB = (metaB != null && metaB.totalChunks > 1)
-              ? metaB.lastReadIndex / (metaB.totalChunks - 1)
-              : (metaB?.totalChunks == 1 ? 1.0 : 0.0);
+          final progA = metaA?.readingProgress ?? 0.0;
+          final progB = metaB?.readingProgress ?? 0.0;
           return progB.compareTo(progA); // highest progress first
         });
     }
@@ -997,9 +993,7 @@ class _BookListScreenState extends State<BookListScreen> {
     final metadata = _metadataService.getMetadata(bookId);
     final title = metadata?.title ?? bookTitle;
     final author = metadata?.author ?? 'Unknown Author';
-    final progress = (metadata != null && metadata.totalChunks > 1)
-        ? (metadata.lastReadIndex / (metadata.totalChunks - 1)).clamp(0.0, 1.0)
-        : (metadata?.totalChunks == 1 ? 1.0 : 0.0);
+    final progress = metadata?.readingProgress ?? 0.0;
     final subtitle = _buildBookOptionsHeaderSubtitle(metadata, progress);
 
     showModalBottomSheet(
@@ -1263,7 +1257,7 @@ class _BookListScreenState extends State<BookListScreen> {
     );
     final parts = <String>[];
 
-    if (metadata.lastReadIndex > 0) {
+    if (metadata.hasMeaningfulReadingProgress) {
       parts.add('$progressPercent% complete');
       if (chapterNumber != null) {
         parts.add('Chapter $chapterNumber');
@@ -2682,7 +2676,7 @@ class _BookListScreenState extends State<BookListScreen> {
     if (books.isEmpty) return null;
     final readBooks = books.where((file) {
       final metadata = _metadataService.getMetadata(p.basename(file.path));
-      return metadata != null && metadata.lastReadIndex > 0;
+      return metadata?.hasMeaningfulReadingProgress ?? false;
     }).toList();
     final candidates = [...(readBooks.isEmpty ? books : readBooks)];
     candidates.sort((a, b) {
@@ -2703,15 +2697,13 @@ class _BookListScreenState extends State<BookListScreen> {
     final coverPath = metadata?.coverImagePath;
     final hasCover =
         coverPath != null && (_coverExistsByBookId[bookId] ?? false);
-    final progress = (metadata != null && metadata.totalChunks > 1)
-        ? (metadata.lastReadIndex / (metadata.totalChunks - 1)).clamp(0.0, 1.0)
-        : (metadata?.totalChunks == 1 ? 1.0 : 0.0);
+    final progress = metadata?.readingProgress ?? 0.0;
     final progressPercent = (progress * 100).toInt();
 
     String? timeAgo;
-    if (metadata != null && metadata.lastReadIndex > 0) {
+    if (metadata?.hasMeaningfulReadingProgress ?? false) {
       final lastReadDate = DateTime.fromMillisecondsSinceEpoch(
-        metadata.lastReadTime,
+        metadata!.lastReadTime,
       );
       final daysSince = DateTime.now().difference(lastReadDate).inDays;
       if (daysSince == 0) {
@@ -3561,7 +3553,7 @@ class _BookListScreenState extends State<BookListScreen> {
     BookMetadata? metadata,
   ) {
     final futureKey =
-        '$bookId:${metadata?.lastReadIndex ?? 0}:${metadata?.totalChunks ?? 0}';
+        '$bookId:${metadata?.readingProgress ?? 0}:${metadata?.lastReadIndex ?? 0}:${metadata?.totalChunks ?? 0}';
     return _bookCardSummaryFutures.putIfAbsent(
       futureKey,
       () => _loadBookCardReadingSummary(bookId, metadata),

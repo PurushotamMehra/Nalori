@@ -84,13 +84,11 @@ class _HomeScreenState extends State<HomeScreen>
             );
           }
           // Calculate progress to determine if book is basically finished
-          final progress = meta.totalChunks > 1
-              ? meta.lastReadIndex / (meta.totalChunks - 1)
-              : 0.0;
+          final progress = meta.readingProgress;
 
           // Only show resume if user has actually started reading (index > 0)
           // AND hasn't finished the book yet (progress < 99%)
-          if (meta.lastReadIndex > 0 && progress < 0.99) {
+          if (meta.hasMeaningfulReadingProgress && progress < 0.99) {
             lastRead = meta.managedFilePath == match.path
                 ? meta
                 : meta.copyWith(managedFilePath: match.path);
@@ -223,9 +221,7 @@ class _HomeScreenState extends State<HomeScreen>
     final meta = _lastBook!;
     final coverPath = meta.coverImagePath;
     final hasCover = coverPath != null && _lastBookHasCover;
-    final progress = meta.totalChunks > 0
-        ? (meta.lastReadIndex / meta.totalChunks).clamp(0.0, 1.0)
-        : 0.0;
+    final progress = meta.readingProgress;
     final progressPercent = (progress * 100).toInt();
     final coverPalette = hasCover ? _lastBookCoverPalette : null;
     final colors = coverPalette == null

@@ -9,6 +9,7 @@ import 'chapter_navigation_service.dart';
 import 'lazy_epub_index_service.dart';
 import 'lazy_parsed_book.dart';
 import 'lazy_section_repository.dart';
+import 'reader_structural_progress_service.dart';
 
 final class LazyLoadedContentWindow {
   const LazyLoadedContentWindow({
@@ -18,6 +19,8 @@ final class LazyLoadedContentWindow {
     required this.chapters,
     required this.searchIndex,
     required this.locationsByChunkIndex,
+    required this.sourceIdentitiesByChunkIndex,
+    required this.chunkIndexBySourceIdentity,
     required this.hasContentBefore,
     required this.hasContentAfter,
   });
@@ -28,6 +31,8 @@ final class LazyLoadedContentWindow {
   final List<ChapterInfo> chapters;
   final Map<String, List<int>> searchIndex;
   final Map<int, StableBookLocation> locationsByChunkIndex;
+  final Map<int, LazySourceChunkIdentity> sourceIdentitiesByChunkIndex;
+  final Map<LazySourceChunkIdentity, int> chunkIndexBySourceIdentity;
   final bool hasContentBefore;
   final bool hasContentAfter;
 }
@@ -48,11 +53,28 @@ final class StableLocationResolution {
   final String reason;
 }
 
+final class LazyNavigationPreparation {
+  const LazyNavigationPreparation({
+    required this.resolution,
+    required this.window,
+    required this.superseded,
+  });
+
+  final StableLocationResolution resolution;
+  final LazyLoadedContentWindow? window;
+  final bool superseded;
+}
+
 final class LazyBookSession {
-  LazyBookSession({LazySectionRepository? repository})
-    : _repository = repository ?? LazySectionRepository();
+  LazyBookSession({
+    LazySectionRepository? repository,
+    int nearbySectionCount = 1,
+  }) : assert(nearbySectionCount >= 0),
+       _nearbySectionCount = nearbySectionCount,
+       _repository = repository ?? LazySectionRepository();
 
   final LazySectionRepository _repository;
+  final int _nearbySectionCount;
   final Map<int, ParsedSection> _loadedSections = {};
   LazyEpubIndex? _index;
   StableBookLocation? _currentLocation;
@@ -68,6 +90,8 @@ final class LazyBookSession {
   StableBookLocation? get currentLocation => _currentLocation;
   Iterable<int> get loadedSpineIndices => _loadedSections.keys;
   int get retainedSectionCount => _repository.retainedSectionCount;
+  int get nearbySectionCount => _nearbySectionCount;
+  int get maxLoadedSectionCount => 1 + (_nearbySectionCount * 2);
 
   Future<LazyEpubIndex> open(File file) async {
     _loadedSections.clear();
@@ -147,6 +171,58 @@ final class LazyBookSession {
       await loadSection(spineIndex);
     }
     return loadedWindow(centerSpineIndex: resolvedLocation.spineIndex);
+  }
+
+  /// Resolves and parses a navigation target without publishing it as the
+  /// session's current location unless the caller still owns the latest
+  /// navigation generation.
+  Future<LazyNavigationPreparation> prepareNavigation(
+    StableBookLocation location, {
+    required bool Function() canCommit,
+  }) async {
+    final resolution = await resolveStableLocation(location);
+    final resolvedLocation = resolution.location;
+    if (resolvedLocation == null) {
+      return LazyNavigationPreparation(
+        resolution: resolution,
+        window: null,
+        superseded: false,
+      );
+    }
+    if (!canCommit()) {
+      _releaseDistantSections();
+      _updatePinnedSections();
+      return LazyNavigationPreparation(
+        resolution: resolution,
+        window: null,
+        superseded: true,
+      );
+    }
+
+    if (!_loadedSections.containsKey(resolvedLocation.spineIndex)) {
+      await loadSection(
+        resolvedLocation.spineIndex,
+        preserveDistantTarget: true,
+      );
+      if (!canCommit()) {
+        _releaseDistantSections();
+        _updatePinnedSections();
+        return LazyNavigationPreparation(
+          resolution: resolution,
+          window: null,
+          superseded: true,
+        );
+      }
+    }
+
+    _currentLocation = resolvedLocation;
+    _releaseDistantSections();
+    _updatePinnedSections(targetSpineIndex: resolvedLocation.spineIndex);
+    return LazyNavigationPreparation(
+      resolution: resolution,
+      window: loadedWindow(centerSpineIndex: resolvedLocation.spineIndex),
+      superseded: false,
+    );
   }
 
   Future<StableLocationResolution> resolveStableLocation(
@@ -254,9 +330,22 @@ final class LazyBookSession {
         'ambiguous_or_missing_local_target',
       );
     }
-    final sectionProgression = section.chunks.length <= 1
-        ? 0.0
-        : local / (section.chunks.length - 1);
+    final sourceTextLength = section.chunks[local].text?.length ?? 0;
+    final refined = refineSourceLocation(
+      StableBookLocation(
+        bookId: index.bookId,
+        spineIndex: item.index,
+        href: item.href,
+        sourceChecksum: item.sourceChecksum,
+        publicationFingerprint: index.publicationFingerprint,
+        normalizedHref: item.normalizedHref,
+        localChunkIndex: local,
+        sourceParserVersion: section.parserVersion,
+      ),
+      sourceChunkCount: section.chunks.length,
+      sourceTextLength: sourceTextLength,
+      textOffset: location.textOffset,
+    );
     return StableLocationResolution(
       StableBookLocation(
         bookId: index.bookId,
@@ -277,8 +366,8 @@ final class LazyBookSession {
         readerLayoutFingerprint: location.readerLayoutFingerprint,
         previousSpineIndex: location.previousSpineIndex,
         nextSpineIndex: location.nextSpineIndex,
-        sectionProgression: sectionProgression,
-        publicationProgression: _weightedProgression(item, sectionProgression),
+        sectionProgression: refined.sectionProgression,
+        publicationProgression: refined.publicationProgression,
         sourceParserVersion: section.parserVersion,
       ),
       confidence,
@@ -326,6 +415,67 @@ final class LazyBookSession {
     if (!preserveDistantTarget) _releaseDistantSections();
     _updatePinnedSections();
     return section;
+  }
+
+  void updateCurrentLocation(StableBookLocation location) {
+    if (!_isLocationCompatible(location)) return;
+    _currentLocation = location;
+    _releaseDistantSections();
+    _updatePinnedSections();
+  }
+
+  StableBookLocation locationForSectionChunk(
+    ParsedSection section,
+    int localChunkIndex,
+  ) {
+    final clampedLocal = section.chunks.isEmpty
+        ? 0
+        : localChunkIndex.clamp(0, section.chunks.length - 1);
+    final base = StableBookLocation(
+      bookId: section.identity.bookId,
+      spineIndex: section.identity.spineIndex,
+      href: section.identity.href,
+      sourceChecksum: section.identity.sourceChecksum,
+      publicationFingerprint: section.identity.publicationFingerprint,
+      normalizedHref: section.identity.normalizedHref,
+      localChunkIndex: clampedLocal,
+      sourceParserVersion: section.parserVersion,
+      contextText: section.chunks.isEmpty
+          ? null
+          : section.chunks[clampedLocal].text,
+    );
+    return refineSourceLocation(
+      base,
+      sourceChunkCount: section.chunks.length,
+      sourceTextLength: section.chunks.isEmpty
+          ? 0
+          : (section.chunks[clampedLocal].text?.length ?? 0),
+      textOffset: 0,
+    );
+  }
+
+  StableBookLocation refineSourceLocation(
+    StableBookLocation base, {
+    required int sourceChunkCount,
+    required int sourceTextLength,
+    required int textOffset,
+  }) {
+    final item = index.spine[base.spineIndex];
+    final total = index.totalReadableWeight;
+    final publicationSectionStart = total <= 0
+        ? 0.0
+        : item.prefixWeight / total;
+    final publicationSectionEnd = total <= 0
+        ? 0.0
+        : (item.prefixWeight + item.structuralWeight) / total;
+    return ReaderStructuralProgressService.refineSourceOffset(
+      base: base,
+      sourceChunkCount: sourceChunkCount,
+      sourceTextLength: sourceTextLength,
+      textOffset: textOffset,
+      publicationSectionStart: publicationSectionStart,
+      publicationSectionEnd: publicationSectionEnd,
+    );
   }
 
   Future<ParsedSection?> loadNextSection() async {
@@ -376,14 +526,14 @@ final class LazyBookSession {
 
   int? previousReadableSpineIndex(int beforeSpineIndex) {
     for (var i = beforeSpineIndex - 1; i >= 0; i--) {
-      if (index.spine[i].isLinear) return i;
+      if (index.spine[i].isLinear && !_isKnownEmptySection(i)) return i;
     }
     return null;
   }
 
   int? nextReadableSpineIndex(int afterSpineIndex) {
     for (var i = afterSpineIndex + 1; i < index.spine.length; i++) {
-      if (index.spine[i].isLinear) return i;
+      if (index.spine[i].isLinear && !_isKnownEmptySection(i)) return i;
     }
     return null;
   }
@@ -396,7 +546,7 @@ final class LazyBookSession {
     var candidate = previousReadableSpineIndex(beforeSpineIndex);
     while (candidate != null) {
       final section = await loadSection(candidate, priority: priority);
-      if (section.chunks.isNotEmpty) return section;
+      if (_sectionHasReadableContent(section)) return section;
       candidate = previousReadableSpineIndex(candidate);
     }
     return null;
@@ -410,7 +560,7 @@ final class LazyBookSession {
     var candidate = nextReadableSpineIndex(afterSpineIndex);
     while (candidate != null) {
       final section = await loadSection(candidate, priority: priority);
-      if (section.chunks.isNotEmpty) return section;
+      if (_sectionHasReadableContent(section)) return section;
       candidate = nextReadableSpineIndex(candidate);
     }
     return null;
@@ -448,6 +598,8 @@ final class LazyBookSession {
     final anchors = <String, int>{};
     final searchIndex = <String, List<int>>{};
     final locations = <int, StableBookLocation>{};
+    final sourceIdentities = <int, LazySourceChunkIdentity>{};
+    final indexesBySourceIdentity = <LazySourceChunkIdentity, int>{};
     var nextChunkIndex = 0;
     for (final section in parsedSections) {
       final sectionStart = nextChunkIndex;
@@ -457,26 +609,15 @@ final class LazyBookSession {
       for (final chunk in section.chunks) {
         final reindexed = chunk.copyWith(index: nextChunkIndex);
         chunks.add(reindexed);
-        locations[nextChunkIndex] = StableBookLocation(
-          bookId: section.identity.bookId,
-          spineIndex: section.identity.spineIndex,
-          href: section.identity.href,
-          sourceChecksum: section.identity.sourceChecksum,
-          publicationFingerprint: index.publicationFingerprint,
-          normalizedHref:
-              index.spine[section.identity.spineIndex].normalizedHref,
+        final sourceIdentity = LazySourceChunkIdentity(
+          section: section.identity,
           localChunkIndex: chunk.index,
-          sectionProgression: section.chunks.length <= 1
-              ? 0
-              : chunk.index / (section.chunks.length - 1),
-          publicationProgression: _weightedProgression(
-            index.spine[section.identity.spineIndex],
-            section.chunks.length <= 1
-                ? 0
-                : chunk.index / (section.chunks.length - 1),
-          ),
-          sourceParserVersion: section.parserVersion,
-          contextText: chunk.text,
+        );
+        sourceIdentities[nextChunkIndex] = sourceIdentity;
+        indexesBySourceIdentity[sourceIdentity] = nextChunkIndex;
+        locations[nextChunkIndex] = locationForSectionChunk(
+          section,
+          chunk.index,
         );
         final text = chunk.text;
         if (text != null) {
@@ -500,6 +641,8 @@ final class LazyBookSession {
       chapters: _chaptersForLoadedWindow(),
       searchIndex: searchIndex,
       locationsByChunkIndex: locations,
+      sourceIdentitiesByChunkIndex: sourceIdentities,
+      chunkIndexBySourceIdentity: indexesBySourceIdentity,
       hasContentBefore: previousReadableSpineIndex(minLoaded) != null,
       hasContentAfter: nextReadableSpineIndex(maxLoaded) != null,
     );
@@ -611,6 +754,19 @@ final class LazyBookSession {
   bool _validLocalChunk(ParsedSection section, int? index) =>
       index != null && index >= 0 && index < section.chunks.length;
 
+  bool _isKnownEmptySection(int spineIndex) {
+    final section = _loadedSections[spineIndex];
+    return section != null && !_sectionHasReadableContent(section);
+  }
+
+  bool _sectionHasReadableContent(ParsedSection section) {
+    return section.chunks.any(
+      (chunk) =>
+          chunk.type != BookChunkType.text ||
+          (chunk.text?.trim().isNotEmpty ?? false),
+    );
+  }
+
   int? _anchorChunkIndex(ParsedSection section, String anchor) {
     final decoded = Uri.decodeComponent(anchor);
     return section.anchorMap[anchor] ??
@@ -645,7 +801,10 @@ final class LazyBookSession {
 
   int _localChunkForProgression(ParsedSection section, double progression) {
     if (section.chunks.length <= 1) return 0;
-    return (progression.clamp(0.0, 1.0) * (section.chunks.length - 1)).round();
+    return (progression.clamp(0.0, 1.0) * section.chunks.length).floor().clamp(
+      0,
+      section.chunks.length - 1,
+    );
   }
 
   int _spineIndexForWeightedProgression(double progression) {
@@ -732,8 +891,18 @@ final class LazyBookSession {
   void _releaseDistantSections() {
     final current = _currentLocation?.spineIndex;
     if (current == null) return;
+    final readable = index.spine
+        .where((item) => item.isLinear)
+        .map((item) => item.index)
+        .toList(growable: false);
+    final currentOrder = readable.indexOf(current);
+    if (currentOrder < 0) {
+      _loadedSections.removeWhere((spineIndex, _) => spineIndex != current);
+      return;
+    }
     _loadedSections.removeWhere((spineIndex, _) {
-      return (spineIndex - current).abs() > 1;
+      final order = readable.indexOf(spineIndex);
+      return order < 0 || (order - currentOrder).abs() > _nearbySectionCount;
     });
   }
 
@@ -742,11 +911,25 @@ final class LazyBookSession {
     final pins = <int>{
       if (current != null) current,
       if (targetSpineIndex != null) targetSpineIndex,
-      if (current != null) ...[
-        if (previousReadableSpineIndex(current) case final previous?) previous,
-        if (nextReadableSpineIndex(current) case final next?) next,
-      ],
+      if (current != null) ...[..._nearbyReadableSpineIndexes(current)],
     };
     _repository.pinSections(pins);
+  }
+
+  Iterable<int> _nearbyReadableSpineIndexes(int center) sync* {
+    var previous = center;
+    var next = center;
+    for (var distance = 0; distance < _nearbySectionCount; distance++) {
+      final previousIndex = previousReadableSpineIndex(previous);
+      if (previousIndex != null) {
+        yield previousIndex;
+        previous = previousIndex;
+      }
+      final nextIndex = nextReadableSpineIndex(next);
+      if (nextIndex != null) {
+        yield nextIndex;
+        next = nextIndex;
+      }
+    }
   }
 }

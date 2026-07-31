@@ -169,3 +169,51 @@ class DisplayGenerationCoordinator {
     _active = null;
   }
 }
+
+class ReaderNavigationToken<T> {
+  const ReaderNavigationToken._({required this.id, required this.target});
+
+  final int id;
+  final T target;
+}
+
+/// Owns pending-versus-published navigation generations independently from
+/// layout/display generation. Starting or failing a newer target never clears
+/// the last readable publication; only the latest target may replace it.
+class ReaderNavigationPublicationCoordinator<T> {
+  int _nextId = 0;
+  int _latestId = 0;
+  int? _publishedId;
+  ReaderNavigationToken<T>? _pending;
+
+  ReaderNavigationToken<T>? get pending => _pending;
+  int? get publishedGeneration => _publishedId;
+  bool get hasPublishedReadableContent => _publishedId != null;
+
+  ReaderNavigationToken<T> begin(T target) {
+    final token = ReaderNavigationToken<T>._(id: ++_nextId, target: target);
+    _latestId = token.id;
+    _pending = token;
+    return token;
+  }
+
+  bool isLatest(ReaderNavigationToken<T> token) => token.id == _latestId;
+
+  void markReadablePublished([ReaderNavigationToken<T>? token]) {
+    if (token != null && !isLatest(token)) return;
+    _publishedId = token?.id ?? _publishedId ?? 0;
+    if (token != null && identical(_pending, token)) {
+      _pending = null;
+    }
+  }
+
+  void fail(ReaderNavigationToken<T> token) {
+    if (!isLatest(token)) return;
+    if (identical(_pending, token)) _pending = null;
+  }
+
+  void cancelPending() {
+    _latestId = ++_nextId;
+    _pending = null;
+  }
+}

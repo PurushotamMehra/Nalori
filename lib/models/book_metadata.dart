@@ -176,10 +176,28 @@ class BookMetadata {
   final StableBookLocation? lastReadLocation;
   final int totalChunks;
   final int lastReadTime; // Epoch milliseconds
+  final int lastReadRevision;
   final int? lastOpenedAt;
   final int? lastMeaningfulReadAt;
   final AppTheme? theme; // book-specific theme
   final BookReadingSummary? readingSummary;
+
+  /// Canonical persisted reading progress. Stable publication progression is
+  /// authoritative for the lazy reader; legacy chunk fields remain a fallback
+  /// for unmigrated eager-reader records only.
+  double get readingProgress {
+    final structural = lastReadLocation?.publicationProgression;
+    if (structural != null && structural.isFinite) {
+      return structural.clamp(0.0, 1.0).toDouble();
+    }
+    if (totalChunks > 1) {
+      return (lastReadIndex / (totalChunks - 1)).clamp(0.0, 1.0).toDouble();
+    }
+    return totalChunks == 1 && lastReadIndex > 0 ? 1.0 : 0.0;
+  }
+
+  bool get hasMeaningfulReadingProgress =>
+      readingProgress > 0 || lastReadLocation != null || lastReadIndex > 0;
 
   BookMetadata({
     required this.id,
@@ -207,6 +225,7 @@ class BookMetadata {
     this.lastReadLocation,
     this.totalChunks = 0,
     int? lastReadTime,
+    this.lastReadRevision = 0,
     this.lastOpenedAt,
     this.lastMeaningfulReadAt,
     this.theme,
@@ -249,6 +268,7 @@ class BookMetadata {
         'lastReadLocation': lastReadLocation!.toJson(),
       'totalChunks': totalChunks,
       'lastReadTime': lastReadTime,
+      'lastReadRevision': lastReadRevision,
       if (lastOpenedAt != null) 'lastOpenedAt': lastOpenedAt,
       if (lastMeaningfulReadAt != null)
         'lastMeaningfulReadAt': lastMeaningfulReadAt,
@@ -295,6 +315,7 @@ class BookMetadata {
       lastReadLocation: lastReadLocation,
       totalChunks: (map['totalChunks'] as num?)?.toInt() ?? 0,
       lastReadTime: legacyLastReadTime,
+      lastReadRevision: (map['lastReadRevision'] as num?)?.toInt() ?? 0,
       lastOpenedAt:
           (map['lastOpenedAt'] as num?)?.toInt() ?? migratedMeaningfulRead,
       lastMeaningfulReadAt: migratedMeaningfulRead,
@@ -343,6 +364,7 @@ class BookMetadata {
     StableBookLocation? lastReadLocation,
     int? totalChunks,
     int? lastReadTime,
+    int? lastReadRevision,
     int? lastOpenedAt,
     int? lastMeaningfulReadAt,
     AppTheme? theme,
@@ -379,6 +401,7 @@ class BookMetadata {
       lastReadLocation: lastReadLocation ?? this.lastReadLocation,
       totalChunks: totalChunks ?? this.totalChunks,
       lastReadTime: lastReadTime ?? this.lastReadTime,
+      lastReadRevision: lastReadRevision ?? this.lastReadRevision,
       lastOpenedAt: lastOpenedAt ?? this.lastOpenedAt,
       lastMeaningfulReadAt: lastMeaningfulReadAt ?? this.lastMeaningfulReadAt,
       theme: clearTheme ? null : (theme ?? this.theme),

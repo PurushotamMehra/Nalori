@@ -11,6 +11,25 @@ import 'lazy_epub_index_service.dart';
 import 'open_library_metadata_service.dart';
 import 'parsed_section_retention_policy.dart';
 
+@visibleForTesting
+BookMetadata preserveNewerReadingPosition({
+  required BookMetadata candidate,
+  required BookMetadata? current,
+}) {
+  if (current == null ||
+      current.lastReadRevision <= candidate.lastReadRevision) {
+    return candidate;
+  }
+  return candidate.copyWith(
+    lastReadIndex: current.lastReadIndex,
+    lastReadLocation: current.lastReadLocation,
+    totalChunks: current.totalChunks,
+    lastReadTime: current.lastReadTime,
+    lastReadRevision: current.lastReadRevision,
+    lastMeaningfulReadAt: current.lastMeaningfulReadAt,
+  );
+}
+
 /// Service managing persistent metadata for all imported books.
 /// Creates a cached JSON registry and extracts cover images.
 class BookMetadataService {
@@ -29,6 +48,7 @@ class BookMetadataService {
   final OpenLibraryMetadataService _openLibrary = OpenLibraryMetadataService();
   Map<String, BookMetadata> _cache = {};
   bool _initialized = false;
+  Future<void> _saveTail = Future<void>.value();
 
   /// Ensure metadata registry is loaded into memory
   Future<void> init() async {
@@ -66,8 +86,13 @@ class BookMetadataService {
 
   /// Update metadata for a book inside the cache (e.g. updating progress)
   Future<void> updateMetadata(BookMetadata metadata) async {
-    _cache[metadata.id] = _withEmbeddedFallbacks(metadata);
-    final meaningfulReadAt = metadata.lastMeaningfulReadAt;
+    final current = _cache[metadata.id];
+    final ordered = preserveNewerReadingPosition(
+      candidate: metadata,
+      current: current,
+    );
+    _cache[metadata.id] = _withEmbeddedFallbacks(ordered);
+    final meaningfulReadAt = ordered.lastMeaningfulReadAt;
     if (meaningfulReadAt != null) {
       ParsedSectionRetentionRegistry.instance.recordMeaningfulRead(
         bookId: metadata.id,
@@ -650,7 +675,13 @@ class BookMetadataService {
     return _extensionForCoverFile(path);
   }
 
-  Future<void> _save() async {
+  Future<void> _save() {
+    final operation = _saveTail.then((_) => _writeCurrentSnapshot());
+    _saveTail = operation.catchError((_) {});
+    return operation;
+  }
+
+  Future<void> _writeCurrentSnapshot() async {
     final file = await _getMetadataFile();
     final data = _cache.map((key, value) => MapEntry(key, value.toMap()));
     await file.writeAsString(json.encode(data));

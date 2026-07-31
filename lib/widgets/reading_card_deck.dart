@@ -33,9 +33,11 @@ class ReadingCardDeck extends StatefulWidget {
   final int itemCount;
   final bool canSwipe;
   final bool cacheCardWidgetsDuringDrag;
+  final bool canRequestPrevious;
   final Axis axis;
   final ReadingCardDeckController? controller;
   final ValueChanged<int> onIndexChanged;
+  final VoidCallback? onPreviousBoundaryRequested;
   final ReadingDeckCardBuilder cardBuilder;
 
   const ReadingCardDeck({
@@ -46,8 +48,10 @@ class ReadingCardDeck extends StatefulWidget {
     required this.cardBuilder,
     this.canSwipe = true,
     this.cacheCardWidgetsDuringDrag = false,
+    this.canRequestPrevious = false,
     this.axis = Axis.vertical,
     this.controller,
+    this.onPreviousBoundaryRequested,
   });
 
   @override
@@ -102,6 +106,7 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
         oldWidget.canSwipe != widget.canSwipe ||
         oldWidget.cacheCardWidgetsDuringDrag !=
             widget.cacheCardWidgetsDuringDrag ||
+        oldWidget.canRequestPrevious != widget.canRequestPrevious ||
         oldWidget.axis != widget.axis ||
         oldWidget.cardBuilder != widget.cardBuilder) {
       _cardWidgetCache.clear();
@@ -128,12 +133,13 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
   }
 
   bool get _hasPrevious => widget.currentIndex > 0;
+  bool get _canMovePrevious => _hasPrevious || widget.canRequestPrevious;
   bool get _hasNext => widget.currentIndex < widget.itemCount - 1;
   double get _touchSlop => 32.0;
 
   double _resistedOffset(double proposed) {
     if (proposed < 0 && !_hasNext) return proposed * 0.28;
-    if (proposed > 0 && !_hasPrevious) return proposed * 0.28;
+    if (proposed > 0 && !_canMovePrevious) return proposed * 0.28;
     return proposed;
   }
 
@@ -158,7 +164,9 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
 
   void _handlePointerDown(PointerDownEvent event) {
     if (!mounted || _isDisposed) return;
-    if (!widget.canSwipe || widget.itemCount <= 1 || _activePointer != null) {
+    if (!widget.canSwipe ||
+        (widget.itemCount <= 1 && !widget.canRequestPrevious) ||
+        _activePointer != null) {
       return;
     }
 
@@ -177,7 +185,10 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
 
   void _handlePointerMove(PointerMoveEvent event) {
     if (!mounted || _isDisposed) return;
-    if (!widget.canSwipe || widget.itemCount <= 1) return;
+    if (!widget.canSwipe ||
+        (widget.itemCount <= 1 && !widget.canRequestPrevious)) {
+      return;
+    }
     if (event.pointer != _activePointer) return;
 
     _velocityTracker?.addPosition(event.timeStamp, event.position);
@@ -238,7 +249,8 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
 
   void _handleDragEnd(double primaryVelocity) {
     if (!mounted || _isDisposed) return;
-    if (!widget.canSwipe || widget.itemCount <= 1) {
+    if (!widget.canSwipe ||
+        (widget.itemCount <= 1 && !widget.canRequestPrevious)) {
       _animateDragTo(0, const Duration(milliseconds: 180), Curves.easeOutCubic);
       return;
     }
@@ -252,14 +264,23 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
             primaryVelocity <= -_flingVelocityThreshold);
     final wantsPrevious =
         _dragOffset > 0 &&
-        _hasPrevious &&
+        _canMovePrevious &&
         (progress >= _completionThreshold ||
             primaryVelocity >= _flingVelocityThreshold);
 
     if (wantsNext) {
       _completeTo(widget.currentIndex + 1, -safeExtent);
     } else if (wantsPrevious) {
-      _completeTo(widget.currentIndex - 1, safeExtent);
+      if (_hasPrevious) {
+        _completeTo(widget.currentIndex - 1, safeExtent);
+      } else {
+        _animateDragTo(
+          0,
+          const Duration(milliseconds: 180),
+          Curves.easeOutCubic,
+          onComplete: widget.onPreviousBoundaryRequested,
+        );
+      }
     } else {
       _animateDragTo(0, const Duration(milliseconds: 210), Curves.easeOutCubic);
     }

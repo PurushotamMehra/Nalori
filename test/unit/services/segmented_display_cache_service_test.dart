@@ -3,7 +3,9 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/book_chunk.dart';
+import 'package:nalori/models/stable_book_location.dart';
 import 'package:nalori/services/book_cache_service.dart';
+import 'package:nalori/services/chapter_card_layout_service.dart';
 import 'package:nalori/services/display_generation_coordinator.dart';
 import 'package:nalori/services/progressive_display_state.dart';
 import 'package:nalori/services/segmented_display_cache_service.dart';
@@ -24,6 +26,7 @@ void main() {
   });
 
   DisplayGenerationSignature signature({
+    String bookId = 'book.epub',
     String cacheKey = 'book_dc_v11_settings_viewport',
     int parsedVersion = BookCacheService.parsedBookCacheFormatVersion,
     String layout = BookCacheService.displayLayoutVersion,
@@ -31,7 +34,7 @@ void main() {
     String viewport = 'viewport',
   }) {
     return DisplayGenerationSignature(
-      bookId: 'book.epub',
+      bookId: bookId,
       parsedContentVersion: parsedVersion,
       layoutSignature: layout,
       settingsSignature: settings,
@@ -115,6 +118,52 @@ void main() {
         jsonDecode(await file.readAsString()) as Map<String, dynamic>;
     await file.writeAsString(jsonEncode(update(manifest)), flush: true);
   }
+
+  test(
+    'chapter totals persist and invalidate by exact layout identity',
+    () async {
+      ChapterCardLayoutKey layoutKey(String settings) => ChapterCardLayoutKey(
+        bookId: 'book.epub',
+        publicationFingerprint: 'publication',
+        chapterIdentity: 'chapter-1',
+        parserSchema: 2,
+        displaySchema: 'display',
+        settingsSignature: settings,
+        viewportSignature: '400x800',
+        cardMode: true,
+      );
+      StableBookLocation location(int offset) => StableBookLocation(
+        bookId: 'book.epub',
+        spineIndex: 1,
+        href: 'chapter.xhtml',
+        sourceChecksum: 'checksum',
+        localChunkIndex: 0,
+        textOffset: offset,
+      );
+      final firstKey = layoutKey('font-16');
+      final layout = ChapterCardLayout(
+        key: firstKey,
+        pages: [
+          ChapterCardSourceRange(start: location(0), end: location(100)),
+          ChapterCardSourceRange(start: location(100), end: location(200)),
+        ],
+        completedAtMs: 1,
+      );
+
+      await service.writeChapterCardLayoutRecord(
+        layout: layout,
+        shouldWrite: () => true,
+      );
+
+      expect(await service.loadChapterCardLayoutRecord(firstKey), isNotNull);
+      expect(
+        await service.loadChapterCardLayoutRecord(layoutKey('font-18')),
+        isNull,
+      );
+      await service.deleteForBook('book.epub');
+      expect(await service.loadChapterCardLayoutRecord(firstKey), isNull);
+    },
+  );
 
   test('writes first segment with lightweight manifest only', () async {
     final key = cacheKey();
@@ -432,4 +481,174 @@ void main() {
 
     expect(manifest?.complete, isTrue);
   });
+
+  test('default policy is configurable and defaults to 48 MiB', () {
+    expect(service.configuredByteBudget, 48 * 1024 * 1024);
+    final configured = SegmentedDisplayCacheService(
+      rootDirectory: tempDir,
+      policy: const SegmentedDisplayCachePolicy(byteBudget: 1234),
+    );
+    expect(configured.configuredByteBudget, 1234);
+  });
+
+  test('actual-byte LRU evicts the coldest display range', () async {
+    var now = 10;
+    service = SegmentedDisplayCacheService(
+      rootDirectory: tempDir,
+      clock: () => now,
+    );
+    final key = cacheKey(sourceChunkCount: 288);
+    for (final start in [0, 96, 192]) {
+      now += 10;
+      await service.writeSegment(
+        key: key,
+        result: result(start: start, end: start + 96, generationId: now),
+        generationId: now,
+      );
+    }
+    now = 100;
+    expect(
+      await service.loadRange(
+        key: key,
+        sourceRange: const SourceChunkRange(0, 96),
+      ),
+      isNotNull,
+    );
+    final before = await service.payloadBytesOnDisk();
+    final constrained = SegmentedDisplayCacheService(
+      rootDirectory: tempDir,
+      policy: SegmentedDisplayCachePolicy(byteBudget: before - 1),
+      clock: () => now,
+    );
+
+    await constrained.enforceBudget();
+
+    final retained = await constrained.loadManifest(key);
+    expect(
+      retained?.segments.map((segment) => segment.sourceRange.toString()),
+      containsAll(<String>['[0,96)', '[192,288)']),
+    );
+    expect(
+      retained?.segments.map((segment) => segment.sourceRange.toString()),
+      isNot(contains('[96,192)')),
+    );
+    expect(
+      await constrained.payloadBytesOnDisk(),
+      lessThanOrEqualTo(before - 1),
+    );
+  });
+
+  test('active visible range is protected under byte pressure', () async {
+    final key = cacheKey(sourceChunkCount: 192);
+    await service.writeSegment(
+      key: key,
+      result: result(start: 0, end: 96, generationId: 1),
+      generationId: 1,
+    );
+    await service.writeSegment(
+      key: key,
+      result: result(start: 96, end: 192, generationId: 2),
+      generationId: 2,
+    );
+    final before = await service.payloadBytesOnDisk();
+    final constrained = SegmentedDisplayCacheService(
+      rootDirectory: tempDir,
+      policy: SegmentedDisplayCachePolicy(byteBudget: before - 1),
+    );
+    constrained.protectActiveRanges(
+      bookId: key.bookId,
+      cacheKey: key.cacheKey,
+      layoutIdentity: constrained.layoutIdentityForKey(key),
+      ranges: const [SourceChunkRange(0, 96)],
+    );
+
+    await constrained.enforceBudget();
+
+    final retained = await constrained.loadManifest(key);
+    expect(
+      retained?.segments.map((segment) => segment.sourceRange.toString()),
+      contains('[0,96)'),
+    );
+    expect(
+      retained?.segments.map((segment) => segment.sourceRange.toString()),
+      isNot(contains('[96,192)')),
+    );
+  });
+
+  test('obsolete layouts evict before current valid layout ranges', () async {
+    final obsolete = cacheKey(
+      sig: signature(cacheKey: 'obsolete-key', settings: 'old-settings'),
+      sourceChunkCount: 96,
+    );
+    final current = cacheKey(
+      sig: signature(cacheKey: 'current-key', settings: 'current-settings'),
+      sourceChunkCount: 96,
+    );
+    await service.writeSegment(
+      key: obsolete,
+      result: result(start: 0, end: 96, generationId: 10),
+      generationId: 10,
+    );
+    await service.writeSegment(
+      key: current,
+      result: result(start: 0, end: 96, generationId: 1),
+      generationId: 1,
+    );
+    final before = await service.payloadBytesOnDisk();
+    final constrained = SegmentedDisplayCacheService(
+      rootDirectory: tempDir,
+      policy: SegmentedDisplayCachePolicy(byteBudget: before - 1),
+    );
+    constrained.protectActiveRanges(
+      bookId: current.bookId,
+      cacheKey: current.cacheKey,
+      layoutIdentity: constrained.layoutIdentityForKey(current),
+      ranges: const [SourceChunkRange(0, 96)],
+    );
+
+    await constrained.enforceBudget();
+
+    expect(await constrained.loadManifest(obsolete), isNull);
+    expect(await constrained.loadManifest(current), isNotNull);
+  });
+
+  test(
+    'low storage reduces retention without touching external data',
+    () async {
+      final displayRoot = Directory('${tempDir.path}/display');
+      final sentinel = File('${tempDir.path}/parsed-source-and-user-data');
+      await sentinel.writeAsString('preserve', flush: true);
+      var pressure = DisplayCacheStoragePressure.normal;
+      final roomy = SegmentedDisplayCacheService(rootDirectory: displayRoot);
+      final key = cacheKey(sourceChunkCount: 288);
+      for (final start in [0, 96, 192]) {
+        await roomy.writeSegment(
+          key: key,
+          result: result(
+            start: start,
+            end: start + 96,
+            generationId: start + 1,
+          ),
+          generationId: start + 1,
+        );
+      }
+      final normalBytes = await roomy.payloadBytesOnDisk();
+      final adaptive = SegmentedDisplayCacheService(
+        rootDirectory: displayRoot,
+        policy: SegmentedDisplayCachePolicy(byteBudget: normalBytes),
+        storagePressureProvider: () => pressure,
+      );
+      expect(adaptive.effectiveByteBudget, normalBytes);
+
+      pressure = DisplayCacheStoragePressure.low;
+      await adaptive.enforceBudget();
+
+      expect(adaptive.effectiveByteBudget, normalBytes ~/ 2);
+      expect(
+        await adaptive.payloadBytesOnDisk(),
+        lessThanOrEqualTo(adaptive.effectiveByteBudget),
+      );
+      expect(await sentinel.readAsString(), 'preserve');
+    },
+  );
 }

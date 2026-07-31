@@ -1,4 +1,5 @@
 import '../models/stable_book_location.dart';
+import 'chapter_card_layout_service.dart';
 import 'chapter_navigation_service.dart';
 
 class CardDepthChapterPageMeta {
@@ -7,14 +8,12 @@ class CardDepthChapterPageMeta {
     required this.pageLabel,
     required this.progress,
     required this.isExact,
-    required this.shouldRequestChapterCompletion,
   });
 
   final String title;
   final String pageLabel;
   final double progress;
   final bool isExact;
-  final bool shouldRequestChapterCompletion;
 }
 
 class CardDepthChapterProgressService {
@@ -27,27 +26,36 @@ class CardDepthChapterProgressService {
     required Map<int, StableBookLocation> locationsByChunkIndex,
     required List<ChapterNavigationTarget> chapterNavigationTargets,
     required bool displayChunksComplete,
+    StableBookLocation? currentCardStartLocation,
+    StableBookLocation? currentCardEndLocation,
+    ChapterCardLayout? completeChapterLayout,
+    bool currentCardReachesChapterBoundary = false,
+    bool allowWindowExactFallback = true,
     List<({int chunkIndex, String title})> fallbackFlatChapters = const [],
   }) {
     if (displayChunkCount <= 0) {
-      return const CardDepthChapterPageMeta(
-        title: 'Current chapter',
-        pageLabel: '1 / 1',
-        progress: 1,
-        isExact: true,
-        shouldRequestChapterCompletion: false,
+      return _wholeWindowFallback(
+        displayIndex,
+        displayChunkCount,
+        allowWindowExactFallback: allowWindowExactFallback,
       );
     }
 
     if (displayIndex < 0 || displayIndex >= displayToOriginal.length) {
-      return _wholeWindowFallback(displayIndex, displayChunkCount);
+      return _wholeWindowFallback(
+        displayIndex,
+        displayChunkCount,
+        allowWindowExactFallback: allowWindowExactFallback,
+      );
     }
 
-    final currentLocation = _firstLocationForDisplayIndex(
-      displayIndex,
-      displayToOriginal,
-      locationsByChunkIndex,
-    );
+    final currentLocation =
+        currentCardStartLocation ??
+        _firstLocationForDisplayIndex(
+          displayIndex,
+          displayToOriginal,
+          locationsByChunkIndex,
+        );
     final selectableTargets = chapterNavigationTargets
         .where((target) => target.isSelectable)
         .toList(growable: false);
@@ -58,6 +66,8 @@ class CardDepthChapterProgressService {
         displayChunkCount: displayChunkCount,
         displayToOriginal: displayToOriginal,
         fallbackFlatChapters: fallbackFlatChapters,
+        allowWindowExactFallback: allowWindowExactFallback,
+        currentLocation: currentCardEndLocation ?? currentLocation,
       );
     }
 
@@ -71,6 +81,8 @@ class CardDepthChapterProgressService {
         displayChunkCount: displayChunkCount,
         displayToOriginal: displayToOriginal,
         fallbackFlatChapters: fallbackFlatChapters,
+        allowWindowExactFallback: allowWindowExactFallback,
+        currentLocation: currentCardEndLocation ?? currentLocation,
       );
     }
 
@@ -87,6 +99,7 @@ class CardDepthChapterProgressService {
         locationsByChunkIndex: locationsByChunkIndex,
         currentTarget: currentTarget,
         nextTarget: nextTarget,
+        currentCardEndLocation: currentCardEndLocation,
       );
     }
 
@@ -98,9 +111,34 @@ class CardDepthChapterProgressService {
     );
     final zeroBasedPage = chapterDisplayIndexes.indexOf(displayIndex);
 
+    final completePage = completeChapterLayout?.pageNumberFor(currentLocation);
+    if (completePage != null && completeChapterLayout!.totalCards > 0) {
+      return CardDepthChapterPageMeta(
+        title: _safeTitle(currentTarget.title),
+        pageLabel: '$completePage / ${completeChapterLayout.totalCards}',
+        progress: currentCardReachesChapterBoundary
+            ? 1.0
+            : _structuralChapterProgress(
+                currentLocation: currentCardEndLocation ?? currentLocation,
+                currentTarget: currentTarget,
+                nextTarget: nextTarget,
+                fallback: _safeApproximateProgress(
+                  (currentCardEndLocation ?? currentLocation)
+                      .sectionProgression,
+                ),
+              ),
+        isExact: true,
+      );
+    }
+
     final hasExactEnd = nextTarget == null
-        ? displayChunksComplete
+        ? displayChunksComplete && allowWindowExactFallback
         : _isBoundaryUsable(currentTarget, nextTarget) &&
+              _isTargetStartRendered(
+                currentTarget,
+                displayToOriginal,
+                locationsByChunkIndex,
+              ) &&
               _isTargetRendered(
                 nextTarget,
                 displayToOriginal,
@@ -113,9 +151,19 @@ class CardDepthChapterProgressService {
       return CardDepthChapterPageMeta(
         title: _safeTitle(currentTarget.title),
         pageLabel: '$current / $total',
-        progress: _progressForKnownTotal(current, total),
+        progress: currentCardEndLocation == null
+            ? _progressForKnownTotal(current, total)
+            : (currentCardReachesChapterBoundary
+                  ? 1.0
+                  : _structuralChapterProgress(
+                      currentLocation: currentCardEndLocation,
+                      currentTarget: currentTarget,
+                      nextTarget: nextTarget,
+                      fallback: _safeApproximateProgress(
+                        currentCardEndLocation.sectionProgression,
+                      ),
+                    )),
         isExact: true,
-        shouldRequestChapterCompletion: false,
       );
     }
 
@@ -129,13 +177,18 @@ class CardDepthChapterProgressService {
     final current = zeroBasedPage >= 0 ? zeroBasedPage + 1 : 1;
     return CardDepthChapterPageMeta(
       title: _safeTitle(currentTarget.title),
-      pageLabel: '$current / ?',
-      progress: _progressForInexactKnownPages(
-        zeroBasedPage: zeroBasedPage,
-        knownPageCount: chapterDisplayIndexes.length,
-      ),
+      pageLabel: 'Page $current',
+      progress: currentCardReachesChapterBoundary
+          ? 1.0
+          : _structuralChapterProgress(
+              currentLocation: currentCardEndLocation ?? currentLocation,
+              currentTarget: currentTarget,
+              nextTarget: nextTarget,
+              fallback: _safeApproximateProgress(
+                (currentCardEndLocation ?? currentLocation).sectionProgression,
+              ),
+            ),
       isExact: false,
-      shouldRequestChapterCompletion: true,
     );
   }
 
@@ -196,6 +249,26 @@ class CardDepthChapterProgressService {
     return false;
   }
 
+  static bool _isTargetStartRendered(
+    ChapterNavigationTarget target,
+    List<List<int>> displayToOriginal,
+    Map<int, StableBookLocation> locationsByChunkIndex,
+  ) {
+    for (var i = 0; i < displayToOriginal.length; i++) {
+      final location = _firstLocationForDisplayIndex(
+        i,
+        displayToOriginal,
+        locationsByChunkIndex,
+      );
+      if (location != null &&
+          ChapterNavigationService.compareTargetToLocation(target, location) ==
+              0) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   static bool _hasUsableStartBoundary(
     ChapterNavigationTarget target,
     StableBookLocation currentLocation,
@@ -239,6 +312,7 @@ class CardDepthChapterProgressService {
     required Map<int, StableBookLocation> locationsByChunkIndex,
     required ChapterNavigationTarget currentTarget,
     required ChapterNavigationTarget? nextTarget,
+    StableBookLocation? currentCardEndLocation,
   }) {
     final indexes = _displayIndexesInTargetRange(
       displayToOriginal: displayToOriginal,
@@ -247,15 +321,26 @@ class CardDepthChapterProgressService {
       nextTarget: nextTarget,
     );
     final page = indexes.indexOf(displayIndex);
+    final currentLocation = _firstLocationForDisplayIndex(
+      displayIndex,
+      displayToOriginal,
+      locationsByChunkIndex,
+    );
+    final progressLocation = currentCardEndLocation ?? currentLocation;
     return CardDepthChapterPageMeta(
       title: _safeTitle(title),
-      pageLabel: '${page >= 0 ? page + 1 : 1} / ?',
-      progress: _progressForInexactKnownPages(
-        zeroBasedPage: page,
-        knownPageCount: indexes.length,
-      ),
+      pageLabel: 'Page ${page >= 0 ? page + 1 : 1}',
+      progress: progressLocation == null
+          ? 0
+          : _structuralChapterProgress(
+              currentLocation: progressLocation,
+              currentTarget: currentTarget,
+              nextTarget: nextTarget,
+              fallback: _safeApproximateProgress(
+                progressLocation.sectionProgression,
+              ),
+            ),
       isExact: false,
-      shouldRequestChapterCompletion: true,
     );
   }
 
@@ -264,16 +349,26 @@ class CardDepthChapterProgressService {
     required int displayChunkCount,
     required List<List<int>> displayToOriginal,
     required List<({int chunkIndex, String title})> fallbackFlatChapters,
+    required bool allowWindowExactFallback,
+    StableBookLocation? currentLocation,
   }) {
     if (fallbackFlatChapters.isEmpty ||
         displayIndex < 0 ||
         displayIndex >= displayToOriginal.length) {
-      return _wholeWindowFallback(displayIndex, displayChunkCount);
+      return _wholeWindowFallback(
+        displayIndex,
+        displayChunkCount,
+        allowWindowExactFallback: allowWindowExactFallback,
+      );
     }
 
     final mappedOriginals = displayToOriginal[displayIndex];
     if (mappedOriginals.isEmpty) {
-      return _wholeWindowFallback(displayIndex, displayChunkCount);
+      return _wholeWindowFallback(
+        displayIndex,
+        displayChunkCount,
+        allowWindowExactFallback: allowWindowExactFallback,
+      );
     }
     final currentOriginal = mappedOriginals.first;
 
@@ -286,7 +381,11 @@ class CardDepthChapterProgressService {
       }
     }
     if (chapterIndex < 0) {
-      return _wholeWindowFallback(displayIndex, displayChunkCount);
+      return _wholeWindowFallback(
+        displayIndex,
+        displayChunkCount,
+        allowWindowExactFallback: allowWindowExactFallback,
+      );
     }
 
     final chapter = fallbackFlatChapters[chapterIndex];
@@ -306,28 +405,74 @@ class CardDepthChapterProgressService {
         ? 1
         : chapterDisplayIndexes.length;
     final current = zeroBasedPage >= 0 ? zeroBasedPage + 1 : 1;
+    if (allowWindowExactFallback) {
+      return CardDepthChapterPageMeta(
+        title: _safeTitle(chapter.title),
+        pageLabel: '$current / $total',
+        progress: _progressForKnownTotal(current, total),
+        isExact: true,
+      );
+    }
     return CardDepthChapterPageMeta(
       title: _safeTitle(chapter.title),
-      pageLabel: '$current / $total',
-      progress: _progressForKnownTotal(current, total),
-      isExact: true,
-      shouldRequestChapterCompletion: false,
+      pageLabel: 'Page $current',
+      progress: _safeApproximateProgress(currentLocation?.sectionProgression),
+      isExact: false,
     );
   }
 
   static CardDepthChapterPageMeta _wholeWindowFallback(
     int displayIndex,
-    int displayChunkCount,
-  ) {
+    int displayChunkCount, {
+    required bool allowWindowExactFallback,
+  }) {
     final total = displayChunkCount <= 0 ? 1 : displayChunkCount;
     final current = (displayIndex + 1).clamp(1, total);
+    if (!allowWindowExactFallback) {
+      return CardDepthChapterPageMeta(
+        title: 'Current chapter',
+        pageLabel: 'Page $current',
+        progress: 0,
+        isExact: false,
+      );
+    }
     return CardDepthChapterPageMeta(
       title: 'Current chapter',
       pageLabel: '$current / $total',
       progress: _progressForKnownTotal(current, total),
       isExact: true,
-      shouldRequestChapterCompletion: false,
     );
+  }
+
+  static double _structuralChapterProgress({
+    required StableBookLocation currentLocation,
+    required ChapterNavigationTarget currentTarget,
+    required ChapterNavigationTarget? nextTarget,
+    required double fallback,
+  }) {
+    if (nextTarget == null) return fallback;
+    final current = currentLocation.publicationProgression;
+    final start = currentTarget.stableLocation.publicationProgression;
+    final end = nextTarget.stableLocation.publicationProgression;
+    if (current != null && start != null && end != null && end > start) {
+      return ((current - start) / (end - start)).clamp(0.0, 0.98).toDouble();
+    }
+
+    if (currentLocation.spineIndex == currentTarget.spineIndex &&
+        currentLocation.spineIndex == nextTarget.spineIndex) {
+      final sectionCurrent = currentLocation.sectionProgression;
+      final sectionStart = currentTarget.stableLocation.sectionProgression;
+      final sectionEnd = nextTarget.stableLocation.sectionProgression;
+      if (sectionCurrent != null &&
+          sectionStart != null &&
+          sectionEnd != null &&
+          sectionEnd > sectionStart) {
+        return ((sectionCurrent - sectionStart) / (sectionEnd - sectionStart))
+            .clamp(0.0, 0.98)
+            .toDouble();
+      }
+    }
+    return fallback;
   }
 
   static double _progressForKnownTotal(int current, int total) {
@@ -335,12 +480,9 @@ class CardDepthChapterProgressService {
     return ((current - 1) / (total - 1)).clamp(0.0, 1.0).toDouble();
   }
 
-  static double _progressForInexactKnownPages({
-    required int zeroBasedPage,
-    required int knownPageCount,
-  }) {
-    if (zeroBasedPage <= 0 || knownPageCount <= 1) return 0;
-    return (zeroBasedPage / knownPageCount).clamp(0.0, 0.98).toDouble();
+  static double _safeApproximateProgress(double? progress) {
+    if (progress == null || !progress.isFinite) return 0;
+    return progress.clamp(0.0, 0.98).toDouble();
   }
 
   static String _safeTitle(String title) {

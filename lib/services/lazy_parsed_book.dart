@@ -109,6 +109,29 @@ class LazySectionIdentity {
   }
 }
 
+@immutable
+class LazySourceChunkIdentity {
+  const LazySourceChunkIdentity({
+    required this.section,
+    required this.localChunkIndex,
+  });
+
+  final LazySectionIdentity section;
+  final int localChunkIndex;
+
+  String get stableKey => '${section.stableKey}|$localChunkIndex';
+
+  @override
+  bool operator ==(Object other) {
+    return other is LazySourceChunkIdentity &&
+        other.localChunkIndex == localChunkIndex &&
+        other.section.stableKey == section.stableKey;
+  }
+
+  @override
+  int get hashCode => Object.hash(section.stableKey, localChunkIndex);
+}
+
 enum SectionParseStatus { notLoaded, queued, parsing, ready, failed, stale }
 
 @immutable

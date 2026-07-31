@@ -337,6 +337,49 @@ void main() {
     expect(await constrained.loadSection(cold.identity), isNull);
   });
 
+  test(
+    'display derivatives are offered eviction before parsed source',
+    () async {
+      final section = _section(
+        0,
+        'text/source.xhtml',
+        'Reusable parsed source.',
+      );
+      final generous = ParsedSectionCacheService(
+        rootDirectory: tempDir,
+        policy: const ParsedSectionCachePolicy(
+          configuredBudgetBytes: 1024 * 1024,
+          minimumBudgetBytes: 0,
+        ),
+        retentionRegistry: ParsedSectionRetentionRegistry(),
+      );
+      await generous.writeSection(section);
+      final record = (await generous.loadManifest(
+        section.identity.bookId,
+      ))!.records.single;
+      final payload = File(
+        p.join(tempDir.path, section.identity.bookId, record.fileName),
+      );
+      var displayEvictionRanWhileSourceExisted = false;
+      final constrained = ParsedSectionCacheService(
+        rootDirectory: tempDir,
+        policy: const ParsedSectionCachePolicy(
+          configuredBudgetBytes: 0,
+          minimumBudgetBytes: 0,
+        ),
+        retentionRegistry: ParsedSectionRetentionRegistry(),
+        evictDisplayDerivativesBeforeSource: () async {
+          displayEvictionRanWhileSourceExisted = await payload.exists();
+        },
+      );
+
+      await constrained.enforceBudget();
+
+      expect(displayEvictionRanWhileSourceExisted, isTrue);
+      expect(await payload.exists(), isFalse);
+    },
+  );
+
   test('low storage reduces budget and suspends P4 speculative work', () {
     final service = ParsedSectionCacheService(
       rootDirectory: tempDir,
