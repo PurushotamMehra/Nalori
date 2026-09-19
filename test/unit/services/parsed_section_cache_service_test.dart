@@ -10,6 +10,11 @@ import 'package:nalori/services/parsed_section_retention_policy.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
+  test('uses the structural paragraph parser and cache identities', () {
+    expect(lazyParsedSectionCacheFormatVersion, 3);
+    expect(lazyParsedSectionParserVersion, 'section_v4_lists');
+  });
+
   late Directory tempDir;
   late ParsedSectionCacheService cache;
 
@@ -64,6 +69,17 @@ void main() {
 
     expect(await cache.loadSection(original.identity), isNotNull);
     expect(await cache.loadSection(changedIdentity), isNull);
+  });
+
+  test('older parser artifacts are not accepted by the list parser', () async {
+    final section = _section(0, 'text/one.xhtml', 'Current parser text.');
+    await cache.writeSection(section);
+
+    expect(
+      await cache.loadSection(section.identity, parserVersion: 'section_v2'),
+      isNull,
+    );
+    expect(await cache.loadSection(section.identity), isNotNull);
   });
 
   test('repeated manifest loads preserve cached manifest state', () async {

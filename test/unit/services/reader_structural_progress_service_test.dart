@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/book_metadata.dart';
 import 'package:nalori/models/stable_book_location.dart';
@@ -90,6 +92,103 @@ void main() {
       expect(flushed?.location?.textOffset, 640);
       expect(queue.pending, isNull);
     });
+
+    test(
+      'rapid navigation persists only the newest immutable snapshot',
+      () async {
+        StableBookLocation location(int offset) => StableBookLocation(
+          bookId: 'book.epub',
+          spineIndex: 1,
+          href: 'chapter.xhtml',
+          sourceChecksum: 'checksum',
+          localChunkIndex: 0,
+          textOffset: offset,
+        );
+        final persisted = <ReaderCommittedPosition>[];
+        final queue = ReaderPositionPersistenceQueue()
+          ..stage(
+            ReaderCommittedPosition(
+              revision: 1,
+              displayIndex: 1,
+              originalIndex: 4,
+              location: location(120),
+            ),
+          )
+          ..stage(
+            ReaderCommittedPosition(
+              revision: 2,
+              displayIndex: 2,
+              originalIndex: 4,
+              location: location(360),
+            ),
+          )
+          ..stage(
+            ReaderCommittedPosition(
+              revision: 3,
+              displayIndex: 3,
+              originalIndex: 4,
+              location: location(640),
+            ),
+          )
+          // A delayed callback for B must not replace the already-staged C.
+          ..stage(
+            ReaderCommittedPosition(
+              revision: 2,
+              displayIndex: 2,
+              originalIndex: 4,
+              location: location(360),
+            ),
+          );
+
+        await queue.flush((position) async => persisted.add(position));
+
+        expect(persisted, hasLength(1));
+        expect(persisted.single.displayIndex, 3);
+        expect(persisted.single.location?.textOffset, 640);
+      },
+    );
+
+    test(
+      'route and lifecycle flushes wait for ordered position writes',
+      () async {
+        final firstStarted = Completer<void>();
+        final releaseFirst = Completer<void>();
+        final persisted = <int>[];
+        final queue = ReaderPositionPersistenceQueue();
+
+        queue.stage(
+          const ReaderCommittedPosition(
+            revision: 10,
+            displayIndex: 1,
+            originalIndex: 1,
+            location: null,
+          ),
+        );
+        final routeFlush = queue.flush((position) async {
+          firstStarted.complete();
+          await releaseFirst.future;
+          persisted.add(position.revision);
+        });
+        await firstStarted.future;
+
+        queue.stage(
+          const ReaderCommittedPosition(
+            revision: 11,
+            displayIndex: 2,
+            originalIndex: 2,
+            location: null,
+          ),
+        );
+        final lifecycleFlush = queue.flush(
+          (position) async => persisted.add(position.revision),
+        );
+
+        expect(persisted, isEmpty);
+        releaseFirst.complete();
+        await Future.wait(<Future<void>>[routeFlush, lifecycleFlush]);
+        expect(persisted, <int>[10, 11]);
+      },
+    );
 
     test('lazy global progress uses weighted stable source progression', () {
       const location = StableBookLocation(

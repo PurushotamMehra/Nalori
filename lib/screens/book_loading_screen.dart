@@ -8,8 +8,10 @@ import 'package:path/path.dart' as p;
 
 import '../models/book_metadata.dart';
 import '../models/reading_settings.dart';
+import '../models/derived_book_index.dart';
 import '../services/book_metadata_service.dart';
 import '../services/book_preparse_service.dart';
+import '../services/derived_book_index_service.dart';
 import '../services/lazy_reader_route_service.dart';
 import '../services/reader_open_service.dart';
 import 'reader_screen.dart';
@@ -46,6 +48,7 @@ class BookLoadingScreen extends StatefulWidget {
   final int? initialOriginalChunkIndex;
   final int? initialOriginalStartOffset;
   final String? initialSourceText;
+  final DerivedSourceRange? initialDerivedSourceRange;
 
   const BookLoadingScreen({
     super.key,
@@ -54,6 +57,7 @@ class BookLoadingScreen extends StatefulWidget {
     this.initialOriginalChunkIndex,
     this.initialOriginalStartOffset,
     this.initialSourceText,
+    this.initialDerivedSourceRange,
   });
 
   @override
@@ -145,10 +149,24 @@ class _BookLoadingScreenState extends State<BookLoadingScreen>
       if (mounted) {
         setState(() => _statusText = 'Loading book…');
       }
+      final derivedTarget = widget.initialDerivedSourceRange;
+      if (derivedTarget != null && derivedTarget.indexGeneration > 0) {
+        final snapshot = await DerivedBookIndexStore().loadForBook(bookId);
+        if (snapshot == null ||
+            snapshot.manifest.generation != derivedTarget.indexGeneration ||
+            snapshot.manifest.publicationFingerprint !=
+                derivedTarget.location.publicationFingerprint) {
+          throw StateError('This indexed text result is no longer current.');
+        }
+      }
       final result = await _readerOpenService.openLazy(
         bookFile: widget.bookFile,
         metadata: meta,
-        requestedLocation: meta?.lastReadLocation,
+        requestedLocation:
+            widget.initialDerivedSourceRange?.location ??
+            meta?.lastReadLocation,
+        requestedLocationIsNavigationTarget:
+            widget.initialDerivedSourceRange != null,
         caller: 'book_loading_screen',
       );
 
@@ -180,6 +198,10 @@ class _BookLoadingScreenState extends State<BookLoadingScreen>
                 result.window.locationsByChunkIndex,
             initialHasContentBefore: result.window.hasContentBefore,
             initialHasContentAfter: result.window.hasContentAfter,
+            initialCheckpoint: result.checkpoint,
+            initialDerivedSourceRange: widget.initialDerivedSourceRange,
+            initialLocationIsNavigationTarget:
+                widget.initialDerivedSourceRange != null,
           ),
           transitionsBuilder: (_, animation, __, child) {
             return FadeTransition(opacity: animation, child: child);

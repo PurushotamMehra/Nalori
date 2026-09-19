@@ -148,6 +148,154 @@ void main() {
     expect(find.text('Card 1'), findsWidgets);
   });
 
+  testWidgets('programmatic next then upward swipe remains enabled', (
+    tester,
+  ) async {
+    var latest = 0;
+    final controller = ReadingCardDeckController();
+    await tester.pumpWidget(
+      buildHarness(
+        itemCount: 4,
+        controller: controller,
+        onChanged: (index) => latest = index,
+      ),
+    );
+
+    final navigation = controller.startNavigation(
+      1,
+      const Duration(milliseconds: 220),
+      Curves.easeOutCubic,
+    );
+    await tester.pumpAndSettle();
+
+    expect(await navigation.completed, isTrue);
+    expect(latest, 1);
+
+    await tester.drag(find.byType(ReadingCardDeck), const Offset(0, -240));
+    await tester.pumpAndSettle();
+
+    expect(latest, 2);
+  });
+
+  testWidgets('repeated programmatic arrow then swipe keeps advancing', (
+    tester,
+  ) async {
+    var latest = 0;
+    final controller = ReadingCardDeckController();
+    await tester.pumpWidget(
+      buildHarness(
+        itemCount: 7,
+        controller: controller,
+        onChanged: (index) => latest = index,
+      ),
+    );
+
+    for (var repetition = 0; repetition < 3; repetition++) {
+      final navigation = controller.startNavigation(
+        latest + 1,
+        const Duration(milliseconds: 80),
+        Curves.linear,
+      );
+      await tester.pumpAndSettle();
+      expect(await navigation.completed, isTrue);
+
+      await tester.drag(find.byType(ReadingCardDeck), const Offset(0, -240));
+      await tester.pumpAndSettle();
+    }
+
+    expect(latest, 6);
+  });
+
+  testWidgets(
+    'controller replacement cancels navigation without locking deck',
+    (tester) async {
+      var currentIndex = 0;
+      var controller = ReadingCardDeckController();
+      late StateSetter updateHarness;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              updateHarness = setState;
+              return SizedBox(
+                width: 320,
+                height: 560,
+                child: ReadingCardDeck(
+                  controller: controller,
+                  currentIndex: currentIndex,
+                  itemCount: 3,
+                  onIndexChanged: (index) {
+                    setState(() => currentIndex = index);
+                  },
+                  cardBuilder: (context, index, progress, isCurrent) =>
+                      Center(child: Text('Replacement card $index')),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+
+      final navigation = controller.startNavigation(
+        1,
+        const Duration(milliseconds: 500),
+        Curves.linear,
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      updateHarness(() => controller = ReadingCardDeckController());
+      await tester.pump();
+
+      expect(await navigation.completed, isFalse);
+      expect(currentIndex, 0);
+
+      await tester.drag(find.byType(ReadingCardDeck), const Offset(0, -240));
+      await tester.pumpAndSettle();
+
+      expect(currentIndex, 1);
+    },
+  );
+
+  testWidgets('published target window unlocks and accepts the next swipe', (
+    tester,
+  ) async {
+    var currentIndex = 0;
+    var canSwipe = false;
+    late StateSetter updateHarness;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: StatefulBuilder(
+          builder: (context, setState) {
+            updateHarness = setState;
+            return SizedBox(
+              width: 320,
+              height: 560,
+              child: ReadingCardDeck(
+                currentIndex: currentIndex,
+                itemCount: 4,
+                canSwipe: canSwipe,
+                onIndexChanged: (index) {
+                  setState(() => currentIndex = index);
+                },
+                cardBuilder: (context, index, progress, isCurrent) =>
+                    Center(child: Text('Published card $index')),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    updateHarness(() {
+      currentIndex = 1;
+      canSwipe = true;
+    });
+    await tester.pump();
+    await tester.drag(find.byType(ReadingCardDeck), const Offset(0, -240));
+    await tester.pumpAndSettle();
+
+    expect(currentIndex, 2);
+  });
+
   testWidgets('incomplete swipe snaps back', (tester) async {
     var latest = 0;
     await tester.pumpWidget(

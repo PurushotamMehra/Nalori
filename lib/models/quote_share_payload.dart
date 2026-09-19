@@ -39,13 +39,12 @@ class QuoteSharePayload {
     int? startOffset,
     int? endOffset,
   }) {
-    final normalizedQuote = normalizeQuote(quote);
-    if (normalizedQuote.isEmpty) {
+    if (quote.trim().isEmpty) {
       throw ArgumentError.value(quote, 'quote', 'Quote cannot be empty');
     }
 
     return QuoteSharePayload(
-      quote: normalizedQuote,
+      quote: quote,
       bookTitle: normalizeMetadata(bookTitle, fallback: 'Untitled Book'),
       author: normalizeMetadata(author),
       bookId: bookId,

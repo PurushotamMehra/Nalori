@@ -85,8 +85,19 @@ class BookmarkService {
   }) async {
     final list = await load();
 
-    // Don't double-bookmark the same source location.
-    if (list.any((b) => b.isSameLocation(chunkIndex, originalStartOffset))) {
+    // Stable source identity is authoritative. Legacy coordinates are only
+    // comparable when neither side has a durable location.
+    final alreadyExists = stableLocation == null
+        ? list.any(
+            (bookmark) =>
+                bookmark.stableLocation == null &&
+                bookmark.isSameLocation(chunkIndex, originalStartOffset),
+          )
+        : list.any(
+            (bookmark) =>
+                _sameStableLocation(bookmark.stableLocation, stableLocation),
+          );
+    if (alreadyExists) {
       return list;
     }
 
@@ -128,6 +139,13 @@ class BookmarkService {
       return originalStartOffset == null ||
           b.originalStartOffset == originalStartOffset;
     });
+    await _save(list);
+    return list;
+  }
+
+  Future<List<Bookmark>> removeBookmark(Bookmark target) async {
+    final list = await load();
+    list.removeWhere((bookmark) => _sameStoredBookmark(bookmark, target));
     await _save(list);
     return list;
   }
@@ -183,6 +201,30 @@ class BookmarkService {
     return updated;
   }
 
+  Future<List<Bookmark>> updateBookmark(
+    Bookmark target, {
+    String? newName,
+    int? colorIndex,
+    int? colorValue,
+    bool clearColorValue = false,
+  }) async {
+    final list = await load();
+    final updated = <Bookmark>[
+      for (final bookmark in list)
+        if (_sameStoredBookmark(bookmark, target))
+          bookmark.copyWith(
+            name: newName ?? bookmark.name,
+            colorIndex: colorIndex ?? bookmark.colorIndex,
+            colorValue: colorValue,
+            clearColorValue: clearColorValue,
+          )
+        else
+          bookmark,
+    ];
+    await _save(updated);
+    return updated;
+  }
+
   /// Remove all bookmarks for this book.
   Future<List<Bookmark>> clearAll() async {
     await _save([]);
@@ -234,4 +276,22 @@ class BookmarkService {
     final prefs = await _cachedPrefs;
     await prefs.setString(_key, Bookmark.encodeList(list));
   }
+}
+
+bool _sameStoredBookmark(Bookmark a, Bookmark b) {
+  return a.createdAt == b.createdAt &&
+      a.chunkIndex == b.chunkIndex &&
+      a.originalStartOffset == b.originalStartOffset;
+}
+
+bool _sameStableLocation(StableBookLocation? a, StableBookLocation? b) {
+  if (a == null || b == null) return false;
+  return a.bookId == b.bookId &&
+      a.publicationFingerprint == b.publicationFingerprint &&
+      a.spineIndex == b.spineIndex &&
+      (a.normalizedHref ?? a.href) == (b.normalizedHref ?? b.href) &&
+      a.sourceChecksum == b.sourceChecksum &&
+      a.sourceParserVersion == b.sourceParserVersion &&
+      a.localChunkIndex == b.localChunkIndex &&
+      a.textOffset == b.textOffset;
 }

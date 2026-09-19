@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:nalori/models/reader_text_boundary.dart';
 import 'package:nalori/utils/final_layout_paragraphs.dart';
 
 void main() {
@@ -37,6 +38,38 @@ void main() {
 
       expect(segments, hasLength(1));
       expect(segments.single.text, text);
+    });
+
+    test('uses explicit structural metadata instead of packing seams', () {
+      const text = 'At about 1 A.\n\nM., as Shackleton returned.';
+      final sentenceOnly = splitFinalLayoutParagraphSegments(
+        text,
+        boundaries: const [
+          DisplayTextBoundary(
+            offset: 13,
+            kind: ReaderTextBoundaryKind.sentence,
+            synthesizedTextLength: 2,
+          ),
+        ],
+      );
+      expect(sentenceOnly, hasLength(1));
+      expect(sentenceOnly.single.text, text);
+
+      final structural = splitFinalLayoutParagraphSegments(
+        text,
+        boundaries: const [
+          DisplayTextBoundary(
+            offset: 13,
+            kind: ReaderTextBoundaryKind.structural,
+            synthesizedTextLength: 2,
+          ),
+        ],
+      );
+      expect(structural.map((segment) => segment.text), [
+        'At about 1 A.',
+        'M., as Shackleton returned.',
+      ]);
+      expect(structural.map((segment) => segment.startOffset), [0, 15]);
     });
   });
 

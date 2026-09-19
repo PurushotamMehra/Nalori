@@ -61,6 +61,10 @@ final class FrameBudgetedRangeScheduler {
   final RangeSchedulerYield _yieldToFrame;
   final RangeSchedulerClock _clock;
   FrameBudgetedRangeTask? _activeTask;
+  final List<FrameBudgetedRangeMetrics> _completedMetrics = [];
+
+  List<FrameBudgetedRangeMetrics> get completedMetrics =>
+      List<FrameBudgetedRangeMetrics>.unmodifiable(_completedMetrics);
 
   static final Stopwatch _monotonicClock = Stopwatch()..start();
   static Duration get _monotonicElapsed => _monotonicClock.elapsed;
@@ -98,6 +102,10 @@ final class FrameBudgetedRangeScheduler {
     if (identical(_activeTask, task)) {
       _activeTask = null;
     }
+  }
+
+  void _recordCompleted(FrameBudgetedRangeMetrics metrics) {
+    _completedMetrics.add(metrics);
   }
 }
 
@@ -203,7 +211,9 @@ final class FrameBudgetedRangeTask {
     }
     _finished = true;
     _scheduler._clearIfActive(this);
-    return _metrics(now);
+    final metrics = _metrics(now);
+    _scheduler._recordCompleted(metrics);
+    return metrics;
   }
 
   void _finishCurrentSlice(Duration duration) {

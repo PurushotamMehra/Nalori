@@ -1,4 +1,5 @@
 import '../models/book_metadata.dart';
+import '../models/reader_checkpoint.dart';
 import '../models/stable_book_location.dart';
 
 class ReaderGlobalProgress {
@@ -33,16 +34,21 @@ class ReaderCommittedPosition {
     required this.displayIndex,
     required this.originalIndex,
     required this.location,
+    this.cardIdentity,
+    this.navigationSource = 'page_settled',
   });
 
   final int revision;
   final int displayIndex;
   final int originalIndex;
   final StableBookLocation? location;
+  final ReaderCardIdentity? cardIdentity;
+  final String navigationSource;
 }
 
 class ReaderPositionPersistenceQueue {
   ReaderCommittedPosition? _pending;
+  Future<void> _writeTail = Future<void>.value();
 
   ReaderCommittedPosition? get pending => _pending;
 
@@ -58,6 +64,17 @@ class ReaderPositionPersistenceQueue {
     final latest = _pending;
     _pending = null;
     return latest;
+  }
+
+  Future<void> flush(
+    Future<void> Function(ReaderCommittedPosition position) persist,
+  ) {
+    final latest = takeLatest();
+    if (latest == null) return _writeTail;
+
+    final operation = _writeTail.then((_) => persist(latest));
+    _writeTail = operation.catchError((_) {});
+    return operation;
   }
 
   void clear() => _pending = null;

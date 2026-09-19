@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/derived_book_index.dart';
+
 class StoredCharacterOccurrenceIndex {
   final Map<String, StoredCharacterOccurrence> occurrences;
 
@@ -105,12 +107,14 @@ class CharacterOccurrencePosition {
   final int startOffset;
   final int endOffset;
   final String text;
+  final DerivedSourceRange? sourceRange;
 
   const CharacterOccurrencePosition({
     required this.chunkIndex,
     required this.startOffset,
     required this.endOffset,
     required this.text,
+    this.sourceRange,
   });
 
   Map<String, dynamic> toJson() => {
@@ -118,6 +122,7 @@ class CharacterOccurrencePosition {
     'startOffset': startOffset,
     'endOffset': endOffset,
     'text': text,
+    if (sourceRange != null) 'sourceRange': sourceRange!.toJson(),
   };
 
   factory CharacterOccurrencePosition.fromJson(Map<String, dynamic> json) {
@@ -126,6 +131,11 @@ class CharacterOccurrencePosition {
       startOffset: json['startOffset'] as int,
       endOffset: json['endOffset'] as int,
       text: (json['text'] as String?) ?? '',
+      sourceRange: json['sourceRange'] is Map
+          ? DerivedSourceRange.fromJson(
+              Map<String, dynamic>.from(json['sourceRange'] as Map),
+            )
+          : null,
     );
   }
 }

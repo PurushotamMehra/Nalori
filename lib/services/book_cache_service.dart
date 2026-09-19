@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/book_chunk.dart';
 import '../models/bookmark.dart';
+import '../models/canonical_display_cache_invalidation.dart';
 import 'lazy_epub_index_service.dart';
 import 'parsed_section_cache_service.dart';
 
@@ -95,6 +96,39 @@ class CachedDisplayChunks {
   });
 }
 
+/// Capability returned only after an exact whole-display manifest entry has
+/// been found beneath an explicit caller-owned root. Its payload key and file
+/// name remain private to this cache service.
+final class BookCacheDisplayInvalidationLookupReceipt
+    implements CanonicalDisplayInvalidationLookupReceipt {
+  BookCacheDisplayInvalidationLookupReceipt._(
+    this._service,
+    this.scope,
+    this._manifestKey,
+    this._fileName,
+  );
+
+  final BookCacheService _service;
+  @override
+  final CanonicalDisplayInvalidationStorageScope scope;
+  final String _manifestKey;
+  final String _fileName;
+
+  @override
+  CanonicalDisplayInvalidationCandidateType get candidateType =>
+      CanonicalDisplayInvalidationCandidateType.wholeDisplay;
+
+  @override
+  Future<CanonicalDisplayInvalidationPhysicalMutation> mutate(
+    CanonicalDisplayInvalidationAction action, {
+    CanonicalDisplayInvalidationMutationInterceptor? interceptor,
+  }) => _service._invalidateExactDisplayDerivative(
+    this,
+    action: action,
+    interceptor: interceptor,
+  );
+}
+
 /// Filesystem evidence used to validate a whole-book preparation result.
 class BookCacheFileIdentity {
   final String bookId;
@@ -171,10 +205,10 @@ class BookCacheService {
   static const String _cacheDirName = 'book_cache';
   static const String _manifestFileName = 'manifest.json';
   static const String _displayManifestFileName = 'display_manifest.json';
-  static const int parsedBookCacheFormatVersion = 4;
+  static const int parsedBookCacheFormatVersion = 6;
   static const String wholeBookPreparationVersion = 'whole_book_preparation_v1';
-  static const int displayCacheFormatVersion = 2;
-  static const String displayLayoutVersion = 'v11';
+  static const int displayCacheFormatVersion = 3;
+  static const String displayLayoutVersion = 'v14';
 
   /// Maximum total cache size in bytes (10 MB).
   static const int parsedBookCacheLimitBytes = 10 * 1024 * 1024;
@@ -477,6 +511,8 @@ class BookCacheService {
     required double fontSize,
     required String fontFamily,
     required String fontWeight,
+    String fontMetricIdentity = '',
+    String locale = 'und',
     required double density,
     required double lineHeight,
     required double paragraphSpacing,
@@ -498,6 +534,8 @@ class BookCacheService {
         '${safeAreaLeft.round()}_${safeAreaRight.round()}';
 
     return '${bookId}_dc_${displayLayoutVersion}_${fixed(fontSize)}_${fontFamily}_${fontWeight}_'
+        'metric_${fontMetricIdentity}_'
+        'locale_${locale}_'
         '${fixed(density)}_lineHeight_${fixed(lineHeight)}_paragraphSpacing_${fixed(paragraphSpacing)}_'
         'sideMargin_${fixed(sideMargin)}_'
         '${screenW.toInt()}x${screenH.toInt()}_${cardModeStr}_${textScalerStr}_$safeAreaStr';
@@ -649,6 +687,214 @@ class BookCacheService {
       'removedKeys': removedKeys,
       'deletedPaths': deletedPaths,
     });
+  }
+
+  /// Finds one existing whole-display derivative for scoped P06 invalidation.
+  ///
+  /// [trustedCacheKey] is a caller-owned lookup input, never a decoded payload
+  /// field. The returned receipt is the only value that can request mutation;
+  /// it does not expose a physical path or manifest key to the executor.
+  Future<BookCacheDisplayInvalidationLookupReceipt?>
+  lookupDisplayDerivativeForInvalidation({
+    required CanonicalDisplayInvalidationStorageScope scope,
+    required String trustedCacheKey,
+  }) async {
+    await _ensureInit();
+    if (!await _matchesInvalidationScope(scope, trustedCacheKey)) return null;
+    final fileName = _safeDisplayDerivativeFileName(trustedCacheKey);
+    if (fileName == null || !_displayManifest.containsKey(trustedCacheKey)) {
+      return null;
+    }
+    final file = _displayDerivativeFileFromSafeName(fileName);
+    if (file == null ||
+        await FileSystemEntity.type(file.path, followLinks: false) ==
+            FileSystemEntityType.link) {
+      return null;
+    }
+    return BookCacheDisplayInvalidationLookupReceipt._(
+      this,
+      scope,
+      trustedCacheKey,
+      fileName,
+    );
+  }
+
+  Future<CanonicalDisplayInvalidationPhysicalMutation>
+  _invalidateExactDisplayDerivative(
+    BookCacheDisplayInvalidationLookupReceipt receipt, {
+    required CanonicalDisplayInvalidationAction action,
+    CanonicalDisplayInvalidationMutationInterceptor? interceptor,
+  }) async {
+    await _ensureInit();
+    if (!await _matchesInvalidationScope(receipt.scope, receipt._manifestKey) ||
+        (action !=
+                CanonicalDisplayInvalidationAction
+                    .invalidateExactDiskDerivative &&
+            action !=
+                CanonicalDisplayInvalidationAction
+                    .quarantineExactDiskDerivative)) {
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: 0,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'unsafe_scope_or_action',
+      );
+    }
+    final expectedName = _safeDisplayDerivativeFileName(receipt._manifestKey);
+    final file = expectedName == receipt._fileName
+        ? _displayDerivativeFileFromSafeName(receipt._fileName)
+        : null;
+    if (file == null ||
+        await FileSystemEntity.type(file.path, followLinks: false) ==
+            FileSystemEntityType.link ||
+        !_displayManifest.containsKey(receipt._manifestKey)) {
+      return const CanonicalDisplayInvalidationPhysicalMutation.noOp();
+    }
+
+    if (action ==
+        CanonicalDisplayInvalidationAction.quarantineExactDiskDerivative) {
+      return _quarantineThenRemoveDisplayManifest(
+        receipt: receipt,
+        file: file,
+        interceptor: interceptor,
+      );
+    }
+    return _removeDisplayManifestThenPayload(
+      receipt: receipt,
+      file: file,
+      interceptor: interceptor,
+    );
+  }
+
+  Future<CanonicalDisplayInvalidationPhysicalMutation>
+  _removeDisplayManifestThenPayload({
+    required BookCacheDisplayInvalidationLookupReceipt receipt,
+    required File file,
+    CanonicalDisplayInvalidationMutationInterceptor? interceptor,
+  }) async {
+    final entry = _displayManifest.remove(receipt._manifestKey);
+    if (entry == null) {
+      return const CanonicalDisplayInvalidationPhysicalMutation.noOp();
+    }
+    try {
+      await interceptor?.call(
+        CanonicalDisplayInvalidationMutationStep.beforeManifestUpdate,
+      );
+      if (await FileSystemEntity.type(_cacheDir!.path, followLinks: false) ==
+          FileSystemEntityType.link) {
+        throw const FileSystemException('Unsafe display root link');
+      }
+      await _saveDisplayManifest();
+    } on Object {
+      _displayManifest[receipt._manifestKey] = entry;
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: 0,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'display_manifest_update_failed',
+      );
+    }
+    try {
+      await interceptor?.call(
+        CanonicalDisplayInvalidationMutationStep.beforePayloadMutation,
+      );
+      if (await FileSystemEntity.type(file.path, followLinks: false) ==
+          FileSystemEntityType.link) {
+        throw const FileSystemException('Unsafe payload link');
+      }
+      final hadFile = await file.exists();
+      if (hadFile) await file.delete();
+      return CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.applied,
+        physicalFilesTouched: hadFile ? 1 : 0,
+        manifestEntriesTouched: 1,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+      );
+    } on Object {
+      // The manifest no longer points to this record, so an undeleted payload
+      // is fail-closed and cannot be reused. P06-007 owns recovery/rename IO.
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: 0,
+        manifestEntriesTouched: 1,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'display_payload_removal_failed',
+      );
+    }
+  }
+
+  Future<CanonicalDisplayInvalidationPhysicalMutation>
+  _quarantineThenRemoveDisplayManifest({
+    required BookCacheDisplayInvalidationLookupReceipt receipt,
+    required File file,
+    CanonicalDisplayInvalidationMutationInterceptor? interceptor,
+  }) async {
+    var filesTouched = 0;
+    try {
+      if (await file.exists()) {
+        await interceptor?.call(
+          CanonicalDisplayInvalidationMutationStep.beforePayloadMutation,
+        );
+        if (await FileSystemEntity.type(file.path, followLinks: false) ==
+            FileSystemEntityType.link) {
+          throw const FileSystemException('Unsafe payload link');
+        }
+        final quarantine = _displayDerivativeFileFromSafeName(
+          '.${receipt._fileName}.quarantine',
+        );
+        if (quarantine == null || await quarantine.exists()) {
+          throw const FileSystemException('Unsafe quarantine target');
+        }
+        await file.rename(quarantine.path);
+        filesTouched = 1;
+      }
+      final entry = _displayManifest.remove(receipt._manifestKey);
+      if (entry == null) {
+        return const CanonicalDisplayInvalidationPhysicalMutation.noOp();
+      }
+      try {
+        await interceptor?.call(
+          CanonicalDisplayInvalidationMutationStep.beforeManifestUpdate,
+        );
+        if (await FileSystemEntity.type(_cacheDir!.path, followLinks: false) ==
+            FileSystemEntityType.link) {
+          throw const FileSystemException('Unsafe display root link');
+        }
+        await _saveDisplayManifest();
+      } on Object {
+        _displayManifest[receipt._manifestKey] = entry;
+        return CanonicalDisplayInvalidationPhysicalMutation(
+          status: CanonicalDisplayInvalidationMutationStatus.failed,
+          physicalFilesTouched: filesTouched,
+          manifestEntriesTouched: 0,
+          recordsQuarantined: filesTouched,
+          memoryEntriesEvicted: 0,
+          diagnosticCode: 'display_manifest_update_failed_after_quarantine',
+        );
+      }
+      return CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.applied,
+        physicalFilesTouched: filesTouched,
+        manifestEntriesTouched: 1,
+        recordsQuarantined: filesTouched,
+        memoryEntriesEvicted: 0,
+      );
+    } on Object {
+      return CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: filesTouched,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: filesTouched,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'display_quarantine_failed',
+      );
+    }
   }
 
   // ─── Serialization (runs in isolate) ────────────────────────────────
@@ -987,6 +1233,51 @@ class BookCacheService {
   }
 
   // ─── Path Helpers ──────────────────────────────────────────────────
+
+  Future<bool> _matchesInvalidationScope(
+    CanonicalDisplayInvalidationStorageScope scope,
+    String trustedCacheKey,
+  ) async {
+    final root = _cacheDir;
+    if (root == null ||
+        p.normalize(root.absolute.path) != scope.rootPath ||
+        !trustedCacheKey.startsWith('${scope.bookScope}_dc_') ||
+        await FileSystemEntity.type(root.path, followLinks: false) ==
+            FileSystemEntityType.link) {
+      return false;
+    }
+    return true;
+  }
+
+  String? _safeDisplayDerivativeFileName(String trustedCacheKey) {
+    final sanitized = _sanitizeKey(trustedCacheKey);
+    if (sanitized.isEmpty ||
+        p.isAbsolute(sanitized) ||
+        p.basename(sanitized) != sanitized ||
+        sanitized.contains('..') ||
+        sanitized.contains('/') ||
+        sanitized.contains('\\') ||
+        sanitized.contains('\u0000')) {
+      return null;
+    }
+    return '$sanitized.json.gz';
+  }
+
+  File? _displayDerivativeFileFromSafeName(String fileName) {
+    if (fileName.isEmpty ||
+        p.isAbsolute(fileName) ||
+        p.basename(fileName) != fileName ||
+        fileName.contains('..') ||
+        fileName.contains('/') ||
+        fileName.contains('\\') ||
+        fileName.contains('\u0000')) {
+      return null;
+    }
+    final root = p.normalize(_cacheDir!.absolute.path);
+    final path = p.normalize(p.join(root, fileName));
+    if (!p.isWithin(root, path) || p.dirname(path) != root) return null;
+    return File(path);
+  }
 
   File _fileFor(String key) {
     final sanitized = _sanitizeKey(key);

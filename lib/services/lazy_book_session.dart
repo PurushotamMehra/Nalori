@@ -90,6 +90,7 @@ final class LazyBookSession {
   StableBookLocation? get currentLocation => _currentLocation;
   Iterable<int> get loadedSpineIndices => _loadedSections.keys;
   int get retainedSectionCount => _repository.retainedSectionCount;
+  int get retainedEstimatedBytes => _repository.retainedEstimatedBytes;
   int get nearbySectionCount => _nearbySectionCount;
   int get maxLoadedSectionCount => 1 + (_nearbySectionCount * 2);
 
@@ -107,7 +108,9 @@ final class LazyBookSession {
     final firstChapter = _firstReadingChapter(index.chapters);
     if (firstChapter != null) {
       final location = resolveChapterTarget(firstChapter);
-      if (location != null) return location;
+      if (location != null && !_isFrontMatterHref(location.href)) {
+        return location;
+      }
     }
     final firstReadable = index.spine.firstWhere(
       (item) => item.isLinear && !_isFrontMatterHref(item.href),
@@ -417,6 +420,15 @@ final class LazyBookSession {
     return section;
   }
 
+  /// Parses a section for a low-priority derived consumer without adding it
+  /// to the reader's loaded window or changing the current stable location.
+  Future<ParsedSection> loadSectionForDerivedIndex(int spineIndex) {
+    return _repository.loadSectionWithPriority(
+      spineIndex,
+      priority: LazySectionWorkPriority.derivedIndexing,
+    );
+  }
+
   void updateCurrentLocation(StableBookLocation location) {
     if (!_isLocationCompatible(location)) return;
     _currentLocation = location;
@@ -575,15 +587,36 @@ final class LazyBookSession {
   }) async {
     final current = _currentLocation?.spineIndex;
     if (current == null) return;
+    _repository.resumeBackgroundWork();
     await _repository.hydrateParsedSectionsAround(
       centerSpineIndex: current,
       shouldPause: shouldPause,
     );
   }
 
+  /// Drops all unpinned source/intermediate graphs while retaining the
+  /// section that owns the visible stable location.
+  void handleMemoryPressure() {
+    final current = _currentLocation?.spineIndex;
+    if (current == null) {
+      _loadedSections.clear();
+      _repository.handleMemoryPressure(preserveSpineIndices: const []);
+      return;
+    }
+    _loadedSections.removeWhere((spineIndex, _) => spineIndex != current);
+    _repository.handleMemoryPressure(preserveSpineIndices: [current]);
+  }
+
+  void cancelBackgroundWork() {
+    _repository.cancelBackgroundWork();
+  }
+
   void recordMeaningfulRead(StableBookLocation location, int readAtMs) {
-    if (location.bookId != index.bookId ||
-        location.publicationFingerprint != index.publicationFingerprint) {
+    final currentIndex = _index;
+    if (currentIndex == null ||
+        location.bookId != currentIndex.bookId ||
+        location.publicationFingerprint !=
+            currentIndex.publicationFingerprint) {
       return;
     }
     _repository.recordMeaningfulRead(location.spineIndex, readAtMs);
@@ -769,10 +802,17 @@ final class LazyBookSession {
 
   int? _anchorChunkIndex(ParsedSection section, String anchor) {
     final decoded = Uri.decodeComponent(anchor);
-    return section.anchorMap[anchor] ??
+    final mapped =
+        section.anchorMap[anchor] ??
         section.anchorMap[decoded] ??
         section.anchorMap['#$anchor'] ??
         section.anchorMap['#$decoded'];
+    if (mapped != null) return mapped;
+    final logicalMatches = section.chunks
+        .where((chunk) => chunk.logicalParagraphId == anchor)
+        .map((chunk) => chunk.index)
+        .toSet();
+    return logicalMatches.length == 1 ? logicalMatches.single : null;
   }
 
   int? _uniqueQuoteMatch(ParsedSection section, StableBookLocation location) {

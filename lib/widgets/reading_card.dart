@@ -5,14 +5,19 @@ import 'package:flutter/rendering.dart' show SelectionStatus;
 import 'package:flutter/services.dart';
 
 import '../models/book_chunk.dart';
+import '../models/book_list_semantics.dart';
 import '../models/bookmark.dart';
 import '../models/highlight.dart';
+import '../models/reader_layout_contract.dart';
 import '../models/reading_settings.dart';
 import '../controllers/speed_read_controller.dart';
+import '../services/reader_character_match_service.dart';
+import '../services/reader_layout_contract_service.dart';
 import '../ui/app_visuals.dart';
 import '../utils/contrast_utils.dart';
 import '../utils/final_layout_paragraphs.dart';
 import '../utils/reader_content_parser.dart';
+import '../utils/reader_list_layout.dart';
 import '../widgets/highlight_palette_sheet.dart';
 import '../widgets/note_sheets.dart';
 import '../widgets/reader_table_block.dart';
@@ -34,6 +39,8 @@ const Color kBookmarkPink = Color(0xFFE1306C);
 class ReadingCard extends StatefulWidget {
   final BookChunk chunk;
   final ReadingSettings settings;
+  final ReaderLayoutContract? layoutContract;
+  final ResolvedReaderCardLayout? resolvedLayout;
   final SpeedReadController? speedReadController;
   final Function(String url)? onLinkTap;
   final Bookmark? bookmark;
@@ -52,9 +59,9 @@ class ReadingCard extends StatefulWidget {
   /// Highlights that apply to this chunk (matched by original chunk index).
   final List<Highlight> highlights;
 
-  /// Map of character name → highlight color, built from ALL character highlights
-  /// across the entire book. Used to style every occurrence of each name.
-  final Map<String, Color> characterNames;
+  /// Runtime-derived character occurrences already projected into this card.
+  /// These are visual-only and remain separate from persisted annotations.
+  final List<ReaderCharacterDisplayRange> generatedCharacterRanges;
 
   /// The colors available to pick from for highlights.
   final List<Color> highlightPalette;
@@ -129,8 +136,11 @@ class ReadingCard extends StatefulWidget {
   onDictionaryLookup;
 
   /// Called when user shares the active text selection as a quote card.
-  final void Function(int startOffset, int endOffset, String text)?
+  final FutureOr<void> Function(int startOffset, int endOffset, String text)?
   onQuoteShareRequested;
+
+  /// Test seam for observing clipboard completion and failures.
+  final Future<void> Function(ClipboardData data)? clipboardWriter;
 
   /// Used to clear highlight menus when the page changes
   final bool isActivePage;
@@ -140,6 +150,8 @@ class ReadingCard extends StatefulWidget {
     this.isActivePage = true,
     required this.chunk,
     required this.settings,
+    this.layoutContract,
+    this.resolvedLayout,
     this.speedReadController,
     this.onLinkTap,
     this.bookmark,
@@ -155,7 +167,7 @@ class ReadingCard extends StatefulWidget {
     this.enableTextSelection = true,
     this.onInteractionBlockedChanged,
     this.highlights = const [],
-    this.characterNames = const {},
+    this.generatedCharacterRanges = const [],
     this.highlightPalette = kHighlightColors,
     this.defaultHighlightColor = const Color(0xFFEF5350),
     this.onDefaultHighlightColorChanged,
@@ -173,6 +185,7 @@ class ReadingCard extends StatefulWidget {
     this.onSuppressParentReaderTap,
     this.onDictionaryLookup,
     this.onQuoteShareRequested,
+    this.clipboardWriter,
   });
 
   @override
@@ -232,6 +245,9 @@ class _ReadingCardState extends State<ReadingCard>
   bool _pointerHeldBeyondTapTimeout = false;
   bool _readerSimpleTapHandledForPointer = false;
   bool _annotationTapHandledForPointer = false;
+  bool _isCopyingSelection = false;
+  bool _isOpeningQuoteShare = false;
+  bool _isMoreActionsMenuOpen = false;
   final SelectionListenerNotifier _paragraphSelectionNotifier =
       SelectionListenerNotifier();
   final Map<_ReadingTextSpanCacheKey, TextSpan> _previewTextSpanCache = {};
@@ -331,7 +347,7 @@ class _ReadingCardState extends State<ReadingCard>
       _previewTextSpanCache.clear();
     }
     if (widget.settings != oldWidget.settings ||
-        widget.characterNames != oldWidget.characterNames ||
+        widget.generatedCharacterRanges != oldWidget.generatedCharacterRanges ||
         widget.isActivePage != oldWidget.isActivePage ||
         widget.enableTextSelection != oldWidget.enableTextSelection) {
       _previewTextSpanCache.clear();
@@ -632,13 +648,7 @@ class _ReadingCardState extends State<ReadingCard>
     });
   }
 
-  void _shareSelectedQuote(_SelectedTextRange? selection) {
-    if (selection == null) return;
-    widget.onQuoteShareRequested?.call(
-      selection.startOffset,
-      selection.endOffset,
-      selection.text,
-    );
+  void _clearActiveSelection() {
     _cancelSelectionMenuTimer();
     setState(() {
       _hasActiveSelection = false;
@@ -651,36 +661,166 @@ class _ReadingCardState extends State<ReadingCard>
     FocusScope.of(context).unfocus();
   }
 
-  void _copyActiveText({required bool isEditing}) {
-    final textToCopy = isEditing
-        ? (_tappedHighlight?.text ?? '')
-        : (_selectedTextRange()?.text ?? '');
+  Future<void> _shareSelectedQuote(_SelectedTextRange? selection) async {
+    final share = widget.onQuoteShareRequested;
+    if (selection == null || share == null || _isOpeningQuoteShare) return;
+
+    final frozenStartOffset = selection.startOffset;
+    final frozenEndOffset = selection.endOffset;
+    final frozenText = selection.text;
+    _isOpeningQuoteShare = true;
+    _clearActiveSelection();
+
+    try {
+      await share(frozenStartOffset, frozenEndOffset, frozenText);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open quote sharing'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      _isOpeningQuoteShare = false;
+    }
+  }
+
+  Future<void> _copyActiveText({
+    required bool isEditing,
+    String? capturedText,
+  }) async {
+    if (_isCopyingSelection) return;
+    final textToCopy =
+        capturedText ??
+        (isEditing
+            ? (_tappedHighlight?.text ?? '')
+            : (_selectedTextRange()?.text ?? ''));
     if (textToCopy.isEmpty) return;
 
-    Clipboard.setData(ClipboardData(text: textToCopy));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text('Copied to clipboard'),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-        backgroundColor: widget.settings.readerTextColor,
-        action: SnackBarAction(
-          label: 'OK',
-          textColor: widget.settings.backgroundColor,
-          onPressed: () {},
+    final frozenText = textToCopy;
+    _isCopyingSelection = true;
+    _clearActiveSelection();
+
+    try {
+      final writeClipboard = widget.clipboardWriter ?? Clipboard.setData;
+      await writeClipboard(ClipboardData(text: frozenText));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Copied to clipboard'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+          backgroundColor: widget.settings.readerTextColor,
+          action: SnackBarAction(
+            label: 'OK',
+            textColor: widget.settings.backgroundColor,
+            onPressed: () {},
+          ),
         ),
-      ),
-    );
-    _cancelSelectionMenuTimer();
-    setState(() {
-      _hasActiveSelection = false;
-      _showSelectionMenu = false;
-      _selectionStart = null;
-      _selectionEnd = null;
-      _tappedHighlight = null;
-    });
-    _notifyInteractionBlockedChanged();
-    FocusScope.of(context).unfocus();
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not copy text'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      _isCopyingSelection = false;
+    }
+  }
+
+  Future<void> _showMoreActions({
+    required bool isEditing,
+    required _SelectedTextRange? selectedTextRange,
+  }) async {
+    if (_isMoreActionsMenuOpen) return;
+
+    final frozenCopyText = isEditing
+        ? (_tappedHighlight?.text ?? '')
+        : (selectedTextRange?.text ?? '');
+    final canShare =
+        !isEditing &&
+        selectedTextRange != null &&
+        widget.onQuoteShareRequested != null;
+    final screenSize = MediaQuery.sizeOf(context);
+    final anchor =
+        _lastPointerPosition ??
+        Offset(screenSize.width / 2, screenSize.height - kBoundaryBottom - 56);
+
+    _isMoreActionsMenuOpen = true;
+    _removeFloatingMenuOverlay();
+
+    _HighlightMoreAction? action;
+    try {
+      action = await showMenu<_HighlightMoreAction>(
+        context: context,
+        color: widget.settings.menuColor,
+        position: RelativeRect.fromLTRB(
+          anchor.dx.clamp(0, screenSize.width),
+          anchor.dy.clamp(0, screenSize.height),
+          (screenSize.width - anchor.dx).clamp(0, screenSize.width),
+          (screenSize.height - anchor.dy).clamp(0, screenSize.height),
+        ),
+        items: [
+          PopupMenuItem(
+            value: _HighlightMoreAction.copy,
+            child: Row(
+              children: [
+                Icon(
+                  Icons.copy_rounded,
+                  color: widget.settings.readerTextColor,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Copy',
+                  style: TextStyle(color: widget.settings.readerTextColor),
+                ),
+              ],
+            ),
+          ),
+          if (canShare)
+            PopupMenuItem(
+              value: _HighlightMoreAction.share,
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.ios_share_rounded,
+                    color: widget.settings.readerTextColor,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Share',
+                    style: TextStyle(color: widget.settings.readerTextColor),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      );
+    } finally {
+      _isMoreActionsMenuOpen = false;
+    }
+
+    if (!mounted) return;
+    switch (action) {
+      case _HighlightMoreAction.copy:
+        await _copyActiveText(
+          isEditing: isEditing,
+          capturedText: frozenCopyText,
+        );
+        break;
+      case _HighlightMoreAction.share:
+        await _shareSelectedQuote(selectedTextRange);
+        break;
+      case null:
+        _syncFloatingMenuOverlay();
+        break;
+    }
   }
 
   void _handleRenderedAnnotationTap(Highlight highlight) {
@@ -916,9 +1056,18 @@ class _ReadingCardState extends State<ReadingCard>
   void _onParagraphSelectionChanged() {
     if (_isColorPickerOpen || !_paragraphSelectionNotifier.registered) return;
 
-    final details = _paragraphSelectionNotifier.selection;
-    final range = details.range;
-    if (details.status != SelectionStatus.uncollapsed || range == null) {
+    final selection = () {
+      try {
+        final details = _paragraphSelectionNotifier.selection;
+        return (status: details.status, range: details.range);
+      } on TypeError {
+        // Selectables can be detached while Flutter updates their geometry.
+        return null;
+      }
+    }();
+    if (selection == null) return;
+    final range = selection.range;
+    if (selection.status != SelectionStatus.uncollapsed || range == null) {
       if (_hasActiveSelection) {
         _cancelSelectionMenuTimer();
         setState(() {
@@ -939,7 +1088,24 @@ class _ReadingCardState extends State<ReadingCard>
     final text = widget.chunk.text;
     if (text == null || text.isEmpty) return;
 
-    final segments = splitFinalLayoutParagraphSegments(text);
+    final blocks = parseReaderContentBlocks(text);
+    final hasStructuredBlocks = blocks.any(
+      (block) => block.type != ReaderContentBlockType.paragraph,
+    );
+    final segments = hasStructuredBlocks
+        ? blocks
+              .where((block) => block.type == ReaderContentBlockType.paragraph)
+              .map(
+                (block) => FinalLayoutParagraphSegment(
+                  text: block.rawText,
+                  startOffset: block.startOffset,
+                ),
+              )
+              .toList(growable: false)
+        : splitFinalLayoutParagraphSegments(
+            text,
+            boundaries: widget.chunk.textBoundaries,
+          );
     final mapped = mapFinalLayoutParagraphSelectionToTextRange(
       segments: segments,
       selectionStart: range.startOffset,
@@ -991,8 +1157,6 @@ class _ReadingCardState extends State<ReadingCard>
     final activeColor = isEditing ? _tappedHighlight!.color : _selectedColor;
     final isCharacterActive = linkedCharacter != null;
     final selectedTextRange = isEditing ? null : _selectedTextRange();
-    final canShareSelection =
-        widget.onQuoteShareRequested != null && selectedTextRange != null;
     final settings = widget.settings;
     final menuColor = settings.menuColor;
     final textColor = settings.readerTextColor;
@@ -1226,55 +1390,19 @@ class _ReadingCardState extends State<ReadingCard>
                     ),
                   ),
                   divider(),
-                  PopupMenuButton<_HighlightMoreAction>(
+                  IconButton(
                     tooltip: 'More',
-                    color: menuColor,
                     icon: Icon(
                       Icons.more_horiz_rounded,
                       color: textColor,
                       size: 24,
                     ),
-                    itemBuilder: (context) => [
-                      PopupMenuItem(
-                        value: _HighlightMoreAction.copy,
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.copy_rounded,
-                              color: textColor,
-                              size: 20,
-                            ),
-                            const SizedBox(width: 12),
-                            Text('Copy', style: TextStyle(color: textColor)),
-                          ],
-                        ),
+                    onPressed: () => unawaited(
+                      _showMoreActions(
+                        isEditing: isEditing,
+                        selectedTextRange: selectedTextRange,
                       ),
-                      if (canShareSelection)
-                        PopupMenuItem(
-                          value: _HighlightMoreAction.share,
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.ios_share_rounded,
-                                color: textColor,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 12),
-                              Text('Share', style: TextStyle(color: textColor)),
-                            ],
-                          ),
-                        ),
-                    ],
-                    onSelected: (action) {
-                      switch (action) {
-                        case _HighlightMoreAction.copy:
-                          _copyActiveText(isEditing: isEditing);
-                          break;
-                        case _HighlightMoreAction.share:
-                          _shareSelectedQuote(selectedTextRange);
-                          break;
-                      }
-                    },
+                    ),
                   ),
                   divider(),
                   InkWell(
@@ -1381,6 +1509,23 @@ class _ReadingCardState extends State<ReadingCard>
 
   /// Apply inline styles (bold/italic) to a TextStyle for a given position.
   TextStyle _applyInlineStyles(TextStyle base, int position, int length) {
+    final contract = widget.layoutContract;
+    final blocks = widget.resolvedLayout?.blocks;
+    if (contract != null && blocks != null && blocks.isNotEmpty) {
+      for (final run in blocks.first.spanRuns) {
+        if (run.startUtf16 < position + length && run.endUtf16 > position) {
+          return contract.typography[run.role].toTextStyle().copyWith(
+            color: base.color,
+            backgroundColor: base.backgroundColor,
+            decoration: base.decoration,
+            decorationColor: base.decorationColor,
+            decorationStyle: base.decorationStyle,
+            decorationThickness: base.decorationThickness,
+            shadows: base.shadows,
+          );
+        }
+      }
+    }
     final styles = widget.chunk.inlineStyles;
     if (styles == null || styles.isEmpty) return base;
 
@@ -1421,7 +1566,13 @@ class _ReadingCardState extends State<ReadingCard>
     GestureRecognizer? recognizer,
   }) {
     final styles = widget.chunk.inlineStyles;
-    if (styles == null || styles.isEmpty) {
+    final links = widget.chunk.links;
+    final hasStyles = styles != null && styles.isNotEmpty;
+    final hasLinks = links != null && links.isNotEmpty;
+    final resolvedRuns = widget.resolvedLayout?.blocks.isNotEmpty == true
+        ? widget.resolvedLayout!.blocks.first.spanRuns
+        : const <ResolvedReaderSpanRun>[];
+    if (!hasStyles && !hasLinks && resolvedRuns.length <= 1) {
       final style = backgroundColor != null
           ? baseStyle.copyWith(backgroundColor: backgroundColor)
           : baseStyle;
@@ -1438,12 +1589,32 @@ class _ReadingCardState extends State<ReadingCard>
 
     // Collect all style boundary points within this range
     final boundaries = <int>{startInChunk, endInChunk};
-    for (final s in styles) {
-      if (s.start > startInChunk && s.start < endInChunk) {
-        boundaries.add(s.start);
+    if (hasStyles) {
+      for (final style in styles) {
+        if (style.start > startInChunk && style.start < endInChunk) {
+          boundaries.add(style.start);
+        }
+        if (style.end > startInChunk && style.end < endInChunk) {
+          boundaries.add(style.end);
+        }
       }
-      if (s.end > startInChunk && s.end < endInChunk) {
-        boundaries.add(s.end);
+    }
+    if (hasLinks) {
+      for (final link in links) {
+        if (link.start > startInChunk && link.start < endInChunk) {
+          boundaries.add(link.start);
+        }
+        if (link.end > startInChunk && link.end < endInChunk) {
+          boundaries.add(link.end);
+        }
+      }
+    }
+    for (final run in resolvedRuns) {
+      if (run.startUtf16 > startInChunk && run.startUtf16 < endInChunk) {
+        boundaries.add(run.startUtf16);
+      }
+      if (run.endUtf16 > startInChunk && run.endUtf16 < endInChunk) {
+        boundaries.add(run.endUtf16);
       }
     }
 
@@ -1458,7 +1629,7 @@ class _ReadingCardState extends State<ReadingCard>
         text: text,
         baseStyle: style,
         paragraphSpacingMultiplier: 1.0,
-        recognizer: recognizer,
+        recognizer: recognizer ?? _linkTapRecognizer(startInChunk, endInChunk),
       );
     }
 
@@ -1480,12 +1651,40 @@ class _ReadingCardState extends State<ReadingCard>
           text: segText,
           baseStyle: style,
           paragraphSpacingMultiplier: 1.0,
-          recognizer: recognizer,
+          recognizer: recognizer ?? _linkTapRecognizer(segStart, segEnd),
         ),
       );
     }
 
     return TextSpan(children: subSpans);
+  }
+
+  GestureRecognizer? _linkTapRecognizer(int startOffset, int endOffset) {
+    if (!_usesInteractiveText || widget.onLinkTap == null) return null;
+    final links = widget.chunk.links;
+    if (links == null || links.isEmpty) return null;
+
+    LinkMetadata? matchingLink;
+    for (final link in links) {
+      if (link.start <= startOffset && link.end >= endOffset) {
+        matchingLink = link;
+        break;
+      }
+    }
+    if (matchingLink == null) return null;
+
+    final url = matchingLink.url;
+    return TapGestureRecognizer()
+      ..onTapDown = (_) {
+        _markAnnotationTapHandled();
+      }
+      ..onTapUp = (_) {
+        _markAnnotationTapHandled();
+      }
+      ..onTap = () {
+        _markAnnotationTapHandled();
+        widget.onLinkTap?.call(url);
+      };
   }
 
   /// Show footnote content in a bottom sheet.
@@ -1551,7 +1750,7 @@ class _ReadingCardState extends State<ReadingCard>
         baseStyle: baseStyle,
         textAlign: textAlign,
         highlights: widget.highlights,
-        characterNames: widget.characterNames,
+        generatedCharacterRanges: widget.generatedCharacterRanges,
       );
       final cached = _previewTextSpanCache[cacheKey];
       if (cached != null) return cached;
@@ -1587,7 +1786,7 @@ class _ReadingCardState extends State<ReadingCard>
         ? _resolvedHighlightsForDisplay(text)
         : _resolvedHighlightsForDisplayRange(text, startOffset);
     final hasAnnotations = resolvedHighlights.isNotEmpty;
-    final hasCharacterNames = widget.characterNames.isNotEmpty;
+    final hasCharacterNames = widget.generatedCharacterRanges.isNotEmpty;
     final hasStyles =
         widget.chunk.inlineStyles != null &&
         widget.chunk.inlineStyles!.isNotEmpty;
@@ -1822,43 +2021,23 @@ class _ReadingCardState extends State<ReadingCard>
       );
     }
 
-    if (widget.characterNames.isNotEmpty) {
-      final textLower = text.toLowerCase();
-      for (final entry in widget.characterNames.entries) {
-        final nameLower = entry.key.toLowerCase();
-        final color = entry.value;
-        int searchFrom = 0;
-        while (searchFrom < textLower.length) {
-          final idx = textLower.indexOf(nameLower, searchFrom);
-          if (idx == -1) break;
-          final matchEnd = idx + entry.key.length;
-
-          // Word-boundary check
-          final charBefore = idx > 0 ? text[idx - 1] : ' ';
-          final charAfter = matchEnd < text.length ? text[matchEnd] : ' ';
-          final isWordStart = !RegExp(r'[a-zA-Z]').hasMatch(charBefore);
-          final isWordEndOrPossessive =
-              !RegExp(r'[a-zA-Z]').hasMatch(charAfter) ||
-              (charAfter == '\'' || charAfter == '\u2019');
-
-          if (isWordStart && isWordEndOrPossessive) {
-            final alreadyCovered = charRanges.any(
-              (r) => r.start == idx && r.end == matchEnd,
-            );
-            if (!alreadyCovered) {
-              charRanges.add(
-                _StyledRange(
-                  start: idx,
-                  end: matchEnd,
-                  color: color,
-                  highlight: null,
-                ),
-              );
-            }
-          }
-          searchFrom = idx + 1;
-        }
-      }
+    final rangeEnd = startOffset + text.length;
+    for (final range in widget.generatedCharacterRanges) {
+      final overlapStart = range.startOffset > startOffset
+          ? range.startOffset
+          : startOffset;
+      final overlapEnd = range.endOffset < rangeEnd
+          ? range.endOffset
+          : rangeEnd;
+      if (overlapStart >= overlapEnd) continue;
+      charRanges.add(
+        _StyledRange(
+          start: overlapStart - startOffset,
+          end: overlapEnd - startOffset,
+          color: Color(range.colorValue),
+          highlight: null,
+        ),
+      );
     }
 
     charRanges.sort((a, b) => a.start.compareTo(b.start));
@@ -1922,8 +2101,8 @@ class _ReadingCardState extends State<ReadingCard>
     final previousIndex = _previousSpeedReadWordIndex;
     for (var i = 0; i < tokens.length; i++) {
       final token = tokens[i];
-      var start = token.startOffset.clamp(0, text.length);
-      final end = token.endOffset.clamp(0, text.length);
+      var start = (token.startOffset - startOffset).clamp(0, text.length);
+      final end = (token.endOffset - startOffset).clamp(0, text.length);
       if (end <= start) continue;
 
       if (start < cursor) {
@@ -2418,14 +2597,21 @@ class _ReadingCardState extends State<ReadingCard>
 
       if (actualMarker == markerText) {
         // Render as tappable superscript
+        final footnoteSpec = widget
+            .layoutContract
+            ?.typography[ReaderLayoutTextRole.footnoteMarker];
         spans.add(
           TextSpan(
             text: actualMarker,
-            style: baseStyle.copyWith(
-              fontSize: (baseStyle.fontSize ?? 16) * 0.75,
-              color: const Color(0xFF6B9FFA),
-              fontWeight: FontWeight.w600,
-            ),
+            style:
+                footnoteSpec?.toTextStyle().copyWith(
+                  color: const Color(0xFF6B9FFA),
+                ) ??
+                baseStyle.copyWith(
+                  fontSize: (baseStyle.fontSize ?? 16) * 0.75,
+                  color: const Color(0xFF6B9FFA),
+                  fontWeight: FontWeight.w600,
+                ),
             recognizer: _usesInteractiveText
                 ? (TapGestureRecognizer()..onTap = () => _showFootnotePopup(fn))
                 : null,
@@ -2463,18 +2649,42 @@ class _ReadingCardState extends State<ReadingCard>
       return _buildMilestoneCard(context, bgColor);
     }
 
-    final textAlign = resolveReaderChunkTextAlign(chunk, widget.settings);
+    final resolvedBlock =
+        widget.layoutContract != null && widget.resolvedLayout != null
+        ? ReaderLayoutRenderingAdapter.block(
+            contract: widget.layoutContract!,
+            card: widget.resolvedLayout!,
+          )
+        : null;
+    final textAlign = resolvedBlock == null
+        ? resolveReaderChunkTextAlign(chunk, widget.settings)
+        : resolvedBlock.resolvedAlignment.textAlign;
 
-    final textStyle = widget.settings.getTextStyle(isHeading: chunk.isHeading);
+    final contract = widget.layoutContract;
+    final metricRole = chunk.isHeading
+        ? ReaderLayoutTextRole.heading
+        : ReaderLayoutTextRole.body;
+    final textStyle = contract == null
+        ? widget.settings
+              .getTextStyle(isHeading: chunk.isHeading)
+              .copyWith(locale: Localizations.maybeLocaleOf(context))
+        : contract.typography[metricRole].toTextStyle().copyWith(
+            color: widget.settings.readerTextColor,
+          );
 
-    final safeArea = MediaQuery.viewPaddingOf(context);
-    final layoutMetrics = resolveReaderLayoutMetrics(
-      MediaQuery.sizeOf(context),
-      safeArea,
-      widget.settings,
-    );
-    final contentPadding = layoutMetrics.contentPadding;
-    final cardMargin = layoutMetrics.cardMargin;
+    final safeArea =
+        contract?.environment.viewPadding ?? MediaQuery.viewPaddingOf(context);
+    final legacyMetrics = contract == null
+        ? resolveReaderLayoutMetrics(
+            MediaQuery.sizeOf(context),
+            safeArea,
+            widget.settings,
+          )
+        : null;
+    final contentPadding =
+        contract?.geometry.contentPadding ?? legacyMetrics!.contentPadding;
+    final cardMargin =
+        contract?.geometry.cardMargin ?? legacyMetrics!.cardMargin;
     final topPad = contentPadding.top;
 
     // Bookmark icon sits in the gap ABOVE the text boundary line
@@ -2486,7 +2696,8 @@ class _ReadingCardState extends State<ReadingCard>
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final viewportSize = MediaQuery.sizeOf(context);
+        final viewportSize =
+            contract?.environment.outerDeckSize ?? MediaQuery.sizeOf(context);
         final width = constraints.hasBoundedWidth
             ? constraints.maxWidth
             : viewportSize.width;
@@ -2581,17 +2792,12 @@ class _ReadingCardState extends State<ReadingCard>
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: radius ?? BorderRadius.zero,
-        border: isCardDepth
-            ? Border.all(
-                color: widget.settings.borderColor,
-                width: kReaderCardDepthBorderWidth,
-              )
-            : null,
         boxShadow: isCardDepth
             ? AppUi.readerCardShadows(widget.settings, sideShadow: stackToRight)
             : null,
       ),
       child: ClipRRect(
+        key: const ValueKey('reader-contract-card-box'),
         borderRadius: radius ?? BorderRadius.zero,
         child: Stack(
           children: [
@@ -2603,28 +2809,30 @@ class _ReadingCardState extends State<ReadingCard>
               padding: contentPadding,
               child: LayoutBuilder(
                 builder: (context, constraints) {
+                  final content = SingleChildScrollView(
+                    physics: const NeverScrollableScrollPhysics(),
+                    child: chunk.isHeading
+                        ? _buildHeadingContent(
+                            chunkText ?? '',
+                            textStyle,
+                            constraints,
+                          )
+                        : _buildBodyContent(
+                            chunk,
+                            chunkText,
+                            hasText,
+                            textStyle,
+                            textAlign,
+                            constraints,
+                          ),
+                  );
                   return SizedBox(
+                    key: const ValueKey('reader-contract-body-box'),
                     width: constraints.maxWidth,
                     height: constraints.maxHeight,
-                    child: Center(
-                      child: SingleChildScrollView(
-                        physics: const NeverScrollableScrollPhysics(),
-                        child: chunk.isHeading
-                            ? _buildHeadingContent(
-                                chunkText ?? '',
-                                textStyle,
-                                constraints,
-                              )
-                            : _buildBodyContent(
-                                chunk,
-                                chunkText,
-                                hasText,
-                                textStyle,
-                                textAlign,
-                                constraints,
-                              ),
-                      ),
-                    ),
+                    child: chunk.effectiveListDisplaySegments.isNotEmpty
+                        ? Align(alignment: Alignment.topCenter, child: content)
+                        : Center(child: content),
                   );
                 },
               ),
@@ -2650,6 +2858,21 @@ class _ReadingCardState extends State<ReadingCard>
               ),
             ],
             if (_showPopIcon) _buildBookmarkPopIcon(),
+            if (isCardDepth)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 220),
+                    decoration: BoxDecoration(
+                      borderRadius: radius,
+                      border: Border.all(
+                        color: widget.settings.borderColor,
+                        width: kReaderCardDepthBorderWidth,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -2890,28 +3113,45 @@ class _ReadingCardState extends State<ReadingCard>
     BoxConstraints constraints,
   ) {
     final settings = widget.settings;
+    final contract = widget.layoutContract;
+    final headingSpec = contract?.typography[ReaderLayoutTextRole.heading];
+    final dividerSpec =
+        contract?.typography[ReaderLayoutTextRole.headingDivider];
     return Column(
+      key: const ValueKey('reader-resolved-heading-layout'),
       mainAxisAlignment: MainAxisAlignment.center,
       mainAxisSize: MainAxisSize.min,
       children: [
         SelectableText.rich(
           TextSpan(text: text, style: textStyle),
           textAlign: TextAlign.center,
-          strutStyle: settings.getHeadingStrutStyle(),
+          textDirection: headingSpec?.textDirection,
+          textScaler: contract == null ? null : TextScaler.noScaling,
+          strutStyle:
+              headingSpec?.toStrutStyle() ?? settings.getHeadingStrutStyle(),
+          textHeightBehavior: readerTextHeightBehavior,
           selectionColor: _activeSelectionColor(),
           onSelectionChanged: _onSelectionChanged,
           contextMenuBuilder: (context, editableTextState) {
             return const SizedBox.shrink();
           },
         ),
-        const SizedBox(height: 20),
+        SizedBox(height: contract?.structure.headingGap ?? 20),
         Text(
-          '─────── ◆ ───────',
-          style: TextStyle(
-            color: settings.readerMutedColor.withValues(alpha: 0.45),
-            fontSize: 14,
-            letterSpacing: 2,
-          ),
+          contract?.structure.headingDividerText ?? '─────── ◆ ───────',
+          textAlign: TextAlign.center,
+          textDirection: dividerSpec?.textDirection,
+          textScaler: contract == null ? null : TextScaler.noScaling,
+          strutStyle: dividerSpec?.toStrutStyle(),
+          style:
+              dividerSpec?.toTextStyle().copyWith(
+                color: settings.readerMutedColor.withValues(alpha: 0.45),
+              ) ??
+              TextStyle(
+                color: settings.readerMutedColor.withValues(alpha: 0.45),
+                fontSize: 14,
+                letterSpacing: 2,
+              ),
         ),
       ],
     );
@@ -2926,6 +3166,18 @@ class _ReadingCardState extends State<ReadingCard>
     TextAlign textAlign,
     BoxConstraints constraints,
   ) {
+    final contract = widget.layoutContract;
+    final resolvedBlocks = widget.resolvedLayout?.blocks;
+    final resolvedBlock = resolvedBlocks == null || resolvedBlocks.isEmpty
+        ? null
+        : resolvedBlocks.first;
+    final bodySpec = contract?.typography[ReaderLayoutTextRole.body];
+    final layoutDirection = bodySpec?.textDirection ?? TextDirection.ltr;
+    final layoutScaler = contract == null
+        ? MediaQuery.textScalerOf(context)
+        : TextScaler.noScaling;
+    final layoutStrut =
+        bodySpec?.toStrutStyle() ?? widget.settings.getBodyStrutStyle();
     TextPainter? wordHitTestPainter;
     final speedReadController = widget.speedReadController;
     final isSpeedReadActive =
@@ -2946,9 +3198,15 @@ class _ReadingCardState extends State<ReadingCard>
     final contentBlocks = hasText
         ? parseReaderContentBlocks(chunkText!)
         : const <ReaderContentBlock>[];
-    final hasStructuredBlocks = contentBlocks.any(
-      (block) => block.type != ReaderContentBlockType.paragraph,
-    );
+    final listSegments = chunk.effectiveListDisplaySegments;
+    final hasListContent = listSegments.isNotEmpty;
+    final hasStructuredBlocks =
+        hasListContent ||
+        resolvedBlock?.blockKind == ReaderResolvedBlockKind.table ||
+        resolvedBlock?.blockKind == ReaderResolvedBlockKind.preformatted ||
+        contentBlocks.any(
+          (block) => block.type != ReaderContentBlockType.paragraph,
+        );
 
     if (hasText && isSpeedReadActive && !hasStructuredBlocks) {
       final span = _buildSpeedReadTextSpan(
@@ -2959,10 +3217,12 @@ class _ReadingCardState extends State<ReadingCard>
       );
       wordHitTestPainter = TextPainter(
         text: span,
-        textDirection: TextDirection.ltr,
+        textDirection: layoutDirection,
+        locale: bodyTextStyle.locale,
         textAlign: textAlign,
-        textScaler: MediaQuery.textScalerOf(context),
-        strutStyle: widget.settings.getBodyStrutStyle(),
+        textScaler: layoutScaler,
+        strutStyle: layoutStrut,
+        textHeightBehavior: readerTextHeightBehavior,
       );
       final maxWidth =
           constraints.maxWidth - dialogueInset - publisherPadding.horizontal;
@@ -2974,7 +3234,7 @@ class _ReadingCardState extends State<ReadingCard>
     TextSpan buildBodySpan({String? text, int startOffset = 0}) {
       final spanText = text ?? chunkText!;
       final controller = widget.speedReadController;
-      if (!hasStructuredBlocks &&
+      if ((!hasStructuredBlocks || hasListContent) &&
           controller?.isActive == true &&
           widget.isActivePage) {
         return _buildSpeedReadTextSpan(
@@ -3012,9 +3272,9 @@ class _ReadingCardState extends State<ReadingCard>
         textSpan: span,
         noteRanges: noteRanges,
         textAlign: textAlign,
-        textDirection: TextDirection.ltr,
-        textScaler: MediaQuery.textScalerOf(context),
-        strutStyle: widget.settings.getBodyStrutStyle(),
+        textDirection: layoutDirection,
+        textScaler: layoutScaler,
+        strutStyle: layoutStrut,
         onNoteTap: (highlight) {
           _markAnnotationTapHandled();
           _handleRenderedAnnotationTap(highlight);
@@ -3026,181 +3286,124 @@ class _ReadingCardState extends State<ReadingCard>
     Widget buildTextBlock({String? text, int startOffset = 0}) {
       final spanText = text ?? chunkText!;
       final span = buildBodySpan(text: text, startOffset: startOffset);
-
-      if (!_usesInteractiveText) {
-        return buildNoteBackdrop(
-          spanText: spanText,
-          span: span,
-          startOffset: startOffset,
-          child: RichText(
-            text: span,
-            textAlign: textAlign,
-            strutStyle: widget.settings.getBodyStrutStyle(),
-            textScaler: MediaQuery.textScalerOf(context),
-          ),
-        );
-      }
-
       return buildNoteBackdrop(
         spanText: spanText,
         span: span,
         startOffset: startOffset,
         child: Listener(
           behavior: HitTestBehavior.translucent,
-          onPointerUp: (event) {
-            _lastPointerPosition = event.position;
-            _speedReadTapHandled = _handleSpeedReadTextTap(
-              localPosition: event.localPosition,
-              globalPosition: event.position,
-              textPainter: wordHitTestPainter,
-            );
-          },
-          child: SelectableText.rich(
+          onPointerUp: !_usesInteractiveText
+              ? null
+              : (event) {
+                  _lastPointerPosition = event.position;
+                  _speedReadTapHandled = _handleSpeedReadTextTap(
+                    localPosition: event.localPosition,
+                    globalPosition: event.position,
+                    textPainter: wordHitTestPainter,
+                  );
+                  if (_isSimpleReaderTap(event.position)) {
+                    _handleReaderSimpleTap(event.position);
+                  }
+                },
+          child: Text.rich(
+            key: ValueKey('reader-resolved-text-$startOffset'),
             span,
             textAlign: textAlign,
-            strutStyle: widget.settings.getBodyStrutStyle(),
+            textDirection: layoutDirection,
+            strutStyle: layoutStrut,
+            textScaler: layoutScaler,
+            textHeightBehavior: readerTextHeightBehavior,
+          ),
+        ),
+      );
+    }
+
+    Widget wrapSelectableBody(Widget child) {
+      if (!_usesInteractiveText) return child;
+      return SelectionArea(
+        contextMenuBuilder: (context, selectableRegionState) {
+          return const SizedBox.shrink();
+        },
+        child: SelectionListener(
+          selectionNotifier: _paragraphSelectionNotifier,
+          child: DefaultSelectionStyle.merge(
             selectionColor: _activeSelectionColor(),
-            onSelectionChanged: (selection, cause) =>
-                _onSelectionChangedFromOffset(selection, cause, startOffset),
-            onTap: () {
-              if (_readerSimpleTapHandledForPointer) {
-                return;
-              }
-              if (_selectionChangedDuringPointer) {
-                return;
-              }
-              if (_speedReadTapHandled) {
-                return;
-              }
-
-              // Guard: if we just set _tappedHighlight via long-press, don't clear it
-              if (_justTappedHighlight) return;
-
-              if (_hasActiveSelection || _tappedHighlight != null) {
-                _cancelSelectionMenuTimer();
-                setState(() {
-                  _hasActiveSelection = false;
-                  _showSelectionMenu = false;
-                  _tappedHighlight = null;
-                  _selectionStart = null;
-                  _selectionEnd = null;
-                });
-                FocusScope.of(context).unfocus();
-                if (widget.speedReadController?.isActive == true) {
-                  widget.speedReadController!.resume();
-                }
-                return;
-              }
-
-              // Let taps on text blocks that miss word tokens act as general toggles.
-              _dispatchReaderOutsideTap(null);
-            },
-            contextMenuBuilder: (context, editableTextState) {
-              return const SizedBox.shrink();
-            },
+            child: child,
           ),
         ),
       );
     }
 
     Widget buildParagraphSeparatedBodyContent() {
-      if (!hasText || isSpeedReadActive) {
-        return buildTextBlock();
-      }
-
-      final segments = splitFinalLayoutParagraphSegments(chunkText!);
-      if (segments.length <= 1) {
-        return buildTextBlock();
-      }
+      if (!hasText) return const SizedBox.shrink();
+      final resolvedSegments = resolvedBlock?.paragraphSegments;
+      final segments = resolvedSegments == null || resolvedSegments.isEmpty
+          ? splitFinalLayoutParagraphSegments(
+              chunkText!,
+              boundaries: widget.chunk.textBoundaries,
+            )
+          : <FinalLayoutParagraphSegment>[
+              for (final segment in resolvedSegments)
+                FinalLayoutParagraphSegment(
+                  text: chunkText!.substring(
+                    segment.startUtf16,
+                    segment.endUtf16,
+                  ),
+                  startOffset: segment.startUtf16,
+                ),
+            ];
 
       final paragraphGap = finalLayoutParagraphGapForStyle(
         style: bodyTextStyle,
         fallbackFontSize: widget.settings.fontSizeValue,
-        fallbackLineHeight: widget.settings.lineHeight,
+        fallbackLineHeight: widget.settings.effectiveLineHeight,
         paragraphSpacing: widget.settings.paragraphSpacing,
       );
 
-      if (!_usesInteractiveText) {
-        return Column(
+      return wrapSelectableBody(
+        Column(
+          key: const ValueKey('reader-resolved-paragraph-layout'),
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             for (var i = 0; i < segments.length; i++)
-              Padding(
-                padding: EdgeInsets.only(top: i == 0 ? 0 : paragraphGap),
-                child: buildTextBlock(
+              if (segments.length == 1)
+                buildTextBlock(
                   text: segments[i].text,
                   startOffset: segments[i].startOffset,
+                )
+              else
+                Padding(
+                  padding: EdgeInsets.only(
+                    top: resolvedSegments == null || resolvedSegments.isEmpty
+                        ? (i == 0 ? 0 : paragraphGap)
+                        : resolvedSegments[i].gapBefore,
+                  ),
+                  child: buildTextBlock(
+                    text: segments[i].text,
+                    startOffset: segments[i].startOffset,
+                  ),
                 ),
-              ),
           ],
-        );
-      }
-
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SelectionArea(
-            contextMenuBuilder: (context, selectableRegionState) {
-              return const SizedBox.shrink();
-            },
-            child: SelectionListener(
-              selectionNotifier: _paragraphSelectionNotifier,
-              child: DefaultSelectionStyle.merge(
-                selectionColor: _activeSelectionColor(),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (var i = 0; i < segments.length; i++)
-                      Builder(
-                        builder: (context) {
-                          final segment = segments[i];
-                          final span = buildBodySpan(
-                            text: segment.text,
-                            startOffset: segment.startOffset,
-                          );
-                          return Padding(
-                            padding: EdgeInsets.only(
-                              top: i == 0 ? 0 : paragraphGap,
-                            ),
-                            child: buildNoteBackdrop(
-                              spanText: segment.text,
-                              span: span,
-                              startOffset: segment.startOffset,
-                              child: Listener(
-                                behavior: HitTestBehavior.translucent,
-                                onPointerUp: (event) {
-                                  _lastPointerPosition = event.position;
-                                  if (_isSimpleReaderTap(event.position)) {
-                                    _handleReaderSimpleTap(event.position);
-                                  }
-                                },
-                                child: Text.rich(
-                                  span,
-                                  textAlign: textAlign,
-                                  strutStyle: widget.settings
-                                      .getBodyStrutStyle(),
-                                  textScaler: MediaQuery.textScalerOf(context),
-                                ),
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
+        ),
       );
     }
 
     Widget buildTableAwareContent() {
+      if (resolvedBlock?.blockKind == ReaderResolvedBlockKind.preformatted) {
+        return SelectionContainer.disabled(
+          child: ReaderPreformattedBlockWidget(
+            text: chunkText ?? '',
+            settings: widget.settings,
+            baseTextStyle: bodyTextStyle,
+            layoutContract: contract,
+            resolvedLines: resolvedBlock?.preformattedLines,
+            resolvedTotalHeight: resolvedBlock?.totalHeight,
+          ),
+        );
+      }
       final paragraphPadding = 4.0 * widget.settings.paragraphSpacing;
-      return Column(
+      final content = Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -3213,19 +3416,137 @@ class _ReadingCardState extends State<ReadingCard>
                   startOffset: block.startOffset,
                 ),
               ),
-              ReaderContentBlockType.table => ReaderTableBlockWidget(
-                table: block.table!,
-                settings: widget.settings,
-                baseTextStyle: bodyTextStyle,
-              ),
-              ReaderContentBlockType.preformatted =>
-                ReaderPreformattedBlockWidget(
-                  text: block.rawText,
+              ReaderContentBlockType.table => SelectionContainer.disabled(
+                child: ReaderTableBlockWidget(
+                  table: block.table!,
                   settings: widget.settings,
                   baseTextStyle: bodyTextStyle,
+                  layoutContract: contract,
+                  resolvedLayout: resolvedBlock?.table,
+                ),
+              ),
+              ReaderContentBlockType.preformatted =>
+                SelectionContainer.disabled(
+                  child: ReaderPreformattedBlockWidget(
+                    text: block.rawText,
+                    settings: widget.settings,
+                    baseTextStyle: bodyTextStyle,
+                    layoutContract: contract,
+                    resolvedLines: resolvedBlock?.preformattedLines,
+                    resolvedTotalHeight: resolvedBlock?.totalHeight,
+                  ),
                 ),
             },
         ],
+      );
+      final hasSelectableParagraph = contentBlocks.any(
+        (block) => block.type == ReaderContentBlockType.paragraph,
+      );
+      return hasSelectableParagraph ? wrapSelectableBody(content) : content;
+    }
+
+    Widget buildListContent() {
+      final textScaler = layoutScaler;
+      final listText = chunkText ?? '';
+      BookListDisplaySegment? previous;
+      final children = <Widget>[];
+      for (
+        var segmentIndex = 0;
+        segmentIndex < listSegments.length;
+        segmentIndex++
+      ) {
+        final segment = listSegments[segmentIndex];
+        final resolvedSegment =
+            resolvedBlock?.listSegments.length == listSegments.length
+            ? resolvedBlock!.listSegments[segmentIndex]
+            : null;
+        final start = segment.displayStartOffset.clamp(0, listText.length);
+        final end = segment.displayEndOffset.clamp(start, listText.length);
+        if (start >= end) continue;
+        final legacyMetrics = resolvedSegment == null
+            ? resolveReaderListLayoutMetrics(
+                semantics: segment.semantics,
+                style: bodyTextStyle,
+                textScaler: textScaler,
+              )
+            : null;
+        final leadingIndent =
+            resolvedSegment?.leadingIndent ?? legacyMetrics!.leadingIndent;
+        final markerWidth =
+            resolvedSegment?.markerWidth ?? legacyMetrics!.markerWidth;
+        final markerGap =
+            resolvedSegment?.markerGap ?? legacyMetrics!.markerGap;
+        final gap =
+            resolvedSegment?.gapBefore ??
+            (previous == null
+                ? 0.0
+                : readerListGapBefore(
+                    previous: previous,
+                    current: segment,
+                    lineBoxHeight: widget.settings.effectiveLineBoxHeight,
+                    paragraphSpacing: widget.settings.paragraphSpacing,
+                  ));
+        final marker =
+            resolvedSegment?.marker ??
+            (segment.showsMarker ? bookListMarkerText(segment.semantics) : '');
+        final markerSpec =
+            contract?.typography[ReaderLayoutTextRole.listMarker];
+        children.add(
+          Padding(
+            padding: EdgeInsets.only(top: gap),
+            child: Row(
+              key: ValueKey(
+                'reader-list-segment-${segment.semantics.itemId}-'
+                '${segment.semantics.blockIndex}-${segment.fragmentState.name}',
+              ),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(width: leadingIndent),
+                SelectionContainer.disabled(
+                  child: SizedBox(
+                    width: markerWidth,
+                    child: Text(
+                      marker,
+                      key: ValueKey(
+                        'reader-list-marker-${segment.semantics.itemId}-'
+                        '${segment.semantics.blockIndex}',
+                      ),
+                      textAlign: TextAlign.right,
+                      textDirection: markerSpec?.textDirection,
+                      textScaler: textScaler,
+                      strutStyle: markerSpec?.toStrutStyle() ?? layoutStrut,
+                      textHeightBehavior: readerTextHeightBehavior,
+                      style:
+                          markerSpec?.toTextStyle().copyWith(
+                            color: widget.settings.readerMutedColor,
+                          ) ??
+                          bodyTextStyle.copyWith(
+                            color: widget.settings.readerMutedColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ),
+                ),
+                SizedBox(width: markerGap),
+                Expanded(
+                  child: buildTextBlock(
+                    text: listText.substring(start, end),
+                    startOffset: start,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+        previous = segment;
+      }
+      return wrapSelectableBody(
+        Column(
+          key: const ValueKey('reader-resolved-list-layout'),
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: children,
+        ),
       );
     }
 
@@ -3261,11 +3582,22 @@ class _ReadingCardState extends State<ReadingCard>
             children: [
               if (chunk.type == BookChunkType.image && chunk.imageBytes != null)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
+                  padding: EdgeInsets.only(
+                    bottom: resolvedBlock?.image?.bottomPadding ?? 16,
+                  ),
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: widget.onImageTap,
-                    child: Image.memory(chunk.imageBytes!, fit: BoxFit.contain),
+                    child: SizedBox(
+                      key: const ValueKey('reader-resolved-image-layout'),
+                      width: resolvedBlock?.image?.width,
+                      height: resolvedBlock?.image?.height,
+                      child: Image.memory(
+                        chunk.imageBytes!,
+                        fit: BoxFit.contain,
+                        gaplessPlayback: true,
+                      ),
+                    ),
                   ),
                 ),
               if (hasText)
@@ -3283,7 +3615,17 @@ class _ReadingCardState extends State<ReadingCard>
                           ),
                         ),
                       ),
-                    hasStructuredBlocks
+                    hasListContent
+                        ? speedReadController == null
+                              ? buildListContent()
+                              : AnimatedBuilder(
+                                  animation: Listenable.merge([
+                                    speedReadController,
+                                    _speedReadStyleController,
+                                  ]),
+                                  builder: (context, _) => buildListContent(),
+                                )
+                        : hasStructuredBlocks
                         ? buildTableAwareContent()
                         : speedReadController == null
                         ? buildParagraphSeparatedBodyContent()
@@ -3681,6 +4023,7 @@ class _NoteHighlightPainter extends CustomPainter {
       textDirection: textDirection,
       textScaler: textScaler,
       strutStyle: strutStyle,
+      textHeightBehavior: readerTextHeightBehavior,
     )..layout(maxWidth: size.width);
 
     for (final range in noteRanges) {
@@ -3744,6 +4087,7 @@ class _NoteHighlightPainter extends CustomPainter {
       textDirection: textDirection,
       textScaler: textScaler,
       strutStyle: strutStyle,
+      textHeightBehavior: readerTextHeightBehavior,
     )..layout(maxWidth: size.width);
 
     for (final range in noteRanges) {
@@ -3909,7 +4253,7 @@ class _ReadingTextSpanCacheKey {
   final TextStyle baseStyle;
   final TextAlign textAlign;
   final List<Highlight> highlights;
-  final Map<String, Color> characterNames;
+  final List<ReaderCharacterDisplayRange> generatedCharacterRanges;
 
   const _ReadingTextSpanCacheKey({
     required this.text,
@@ -3918,7 +4262,7 @@ class _ReadingTextSpanCacheKey {
     required this.baseStyle,
     required this.textAlign,
     required this.highlights,
-    required this.characterNames,
+    required this.generatedCharacterRanges,
   });
 
   @override
@@ -3930,7 +4274,7 @@ class _ReadingTextSpanCacheKey {
         other.baseStyle == baseStyle &&
         other.textAlign == textAlign &&
         identical(other.highlights, highlights) &&
-        identical(other.characterNames, characterNames);
+        identical(other.generatedCharacterRanges, generatedCharacterRanges);
   }
 
   @override
@@ -3941,7 +4285,7 @@ class _ReadingTextSpanCacheKey {
     baseStyle,
     textAlign,
     identityHashCode(highlights),
-    identityHashCode(characterNames),
+    identityHashCode(generatedCharacterRanges),
   );
 }
 

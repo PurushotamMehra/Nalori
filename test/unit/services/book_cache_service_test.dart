@@ -3,10 +3,17 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/book_chunk.dart';
+import 'package:nalori/models/reader_text_boundary.dart';
 import 'package:nalori/services/book_cache_service.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
+  test('text-boundary cache identities reject pre-migration artifacts', () {
+    expect(BookCacheService.parsedBookCacheFormatVersion, 6);
+    expect(BookCacheService.displayCacheFormatVersion, 3);
+    expect(BookCacheService.displayLayoutVersion, 'v14');
+  });
+
   late Directory tempDir;
 
   setUp(() async {
@@ -49,6 +56,40 @@ void main() {
     expect(probe.status, BookCacheProbeStatus.validPayload);
     final cached = await service.loadCachedBook('book.epub');
     expect(cached?.title, 'Book');
+  });
+
+  test('whole display cache round-trips paragraph and seam metadata', () async {
+    final service = BookCacheService.testing(cacheDirectory: tempDir);
+    const chunk = BookChunk(
+      index: 0,
+      type: BookChunkType.text,
+      text: 'First. Second.',
+      logicalParagraphId: 'chapter.xhtml#paragraph-0',
+      logicalParagraphEndOffset: 14,
+      textBoundaries: [
+        DisplayTextBoundary(offset: 7, kind: ReaderTextBoundaryKind.sentence),
+      ],
+    );
+
+    await service.cacheDisplayChunks(
+      key: 'display-v14-roundtrip',
+      displayChunks: const [chunk],
+      displayToOriginal: const [
+        [0],
+      ],
+      originalToDisplay: const {0: 0},
+    );
+    final cached = await service.loadDisplayChunks('display-v14-roundtrip');
+
+    expect(cached, isNotNull);
+    expect(
+      cached!.displayChunks.single.logicalParagraphId,
+      chunk.logicalParagraphId,
+    );
+    expect(
+      cached.displayChunks.single.textBoundaries!.single.kind,
+      ReaderTextBoundaryKind.sentence,
+    );
   });
 
   test(
@@ -134,7 +175,7 @@ void main() {
       final manifest = File(p.join(tempDir.path, 'preparation_manifest.json'));
       final data =
           jsonDecode(await manifest.readAsString()) as Map<String, dynamic>;
-      (data['book.epub'] as Map<String, dynamic>)['formatVersion'] = 999;
+      (data['book.epub'] as Map<String, dynamic>)['formatVersion'] = 4;
       await manifest.writeAsString(jsonEncode(data));
       final incompatible = BookCacheService.testing(
         cacheDirectory: tempDir,
@@ -193,6 +234,31 @@ void main() {
   });
 
   group('BookCacheService.displayChunkKey', () {
+    test('differs when the resolved font metric identity differs', () {
+      String key(String metric) => BookCacheService.displayChunkKey(
+        bookId: 'book.epub',
+        fontSize: 18,
+        fontFamily: 'lexend',
+        fontWeight: 'regular',
+        fontMetricIdentity: metric,
+        density: 1,
+        lineHeight: 1.3,
+        paragraphSpacing: 1,
+        sideMargin: 24,
+        screenW: 412,
+        screenH: 915,
+        enableCardDepth: false,
+        textScaleFactor: 1,
+        safeAreaTop: 44,
+        safeAreaBottom: 34,
+        safeAreaLeft: 0,
+        safeAreaRight: 0,
+      );
+
+      expect(key('reader_typography_v1'), isNot(key('reader_typography_v0')));
+      expect(BookCacheService.displayLayoutVersion, 'v14');
+    });
+
     test('differs when only paragraphSpacing differs', () {
       final base = BookCacheService.displayChunkKey(
         bookId: 'book.epub',

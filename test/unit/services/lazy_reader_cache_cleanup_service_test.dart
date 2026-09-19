@@ -6,6 +6,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/book_chunk.dart';
 import 'package:nalori/services/book_cache_service.dart';
+import 'package:nalori/services/derived_book_index_service.dart';
 import 'package:nalori/services/lazy_epub_index_service.dart';
 import 'package:nalori/services/lazy_parsed_book.dart';
 import 'package:nalori/services/lazy_reader_cache_cleanup_service.dart';
@@ -56,6 +57,9 @@ void main() {
       workCoordinator: SharedLazySectionWorkCoordinator(),
       segmentedDisplayCacheFactory: () async =>
           SegmentedDisplayCacheService(rootDirectory: segmentedRoot),
+      derivedIndexStore: DerivedBookIndexStore(
+        rootDirectory: Directory(p.join(temp.path, 'derived')),
+      ),
     );
 
     await cleanup.deleteDerivativesForBook(bookId);
@@ -107,6 +111,9 @@ void main() {
       workCoordinator: SharedLazySectionWorkCoordinator(),
       segmentedDisplayCacheFactory: () async => SegmentedDisplayCacheService(
         rootDirectory: Directory(p.join(temp.path, 'segments')),
+      ),
+      derivedIndexStore: DerivedBookIndexStore(
+        rootDirectory: Directory(p.join(temp.path, 'derived')),
       ),
     );
 

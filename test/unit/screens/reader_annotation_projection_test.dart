@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/book_chunk.dart';
+import 'package:nalori/models/book_list_semantics.dart';
 import 'package:nalori/models/highlight.dart';
 import 'package:nalori/models/stable_book_location.dart';
 import 'package:nalori/screens/reader_screen.dart';
@@ -17,6 +18,7 @@ void main() {
     normalizedHref: 'chapter-4.xhtml',
     localChunkIndex: 3,
     textOffset: 0,
+    sourceParserVersion: 'section_v2',
   );
 
   Highlight annotation({
@@ -47,6 +49,7 @@ void main() {
       publicationFingerprint: publication,
       normalizedHref: 'chapter-4.xhtml',
       localChunkIndex: 3,
+      sourceParserVersion: 'section_v2',
     ),
   };
 
@@ -88,6 +91,39 @@ void main() {
 
     expect(before, isEmpty);
     expect(after.single.originalChunkIndex, 0);
+  });
+
+  test('stable projection resolves exact segment text after reindexing', () {
+    final stored = Highlight(
+      id: 'multi-range-note',
+      originalChunkIndex: 42,
+      startOffset: 0,
+      endOffset: 7,
+      text: 'unrelated whole display selection',
+      colorValue: Colors.teal.toARGB32(),
+      type: HighlightType.highlight,
+      note: 'Remember this',
+      createdAt: DateTime(2026, 7, 31),
+      stableLocation: stable.copyWith(textOffset: 7),
+    );
+
+    final resolved = resolveReaderHighlightsForSourceWindow(
+      highlights: <Highlight>[stored],
+      locationsByChunkIndex: currentTargetWindow,
+      sourceChunks: const <BookChunk>[
+        BookChunk(
+          index: 0,
+          type: BookChunkType.text,
+          text: 'prefix segment suffix',
+        ),
+      ],
+    );
+
+    expect(resolved.single.originalChunkIndex, 0);
+    expect(resolved.single.startOffset, 7);
+    expect(resolved.single.endOffset, 14);
+    expect(resolved.single.text, 'segment');
+    expect(resolved.single.note, 'Remember this');
   });
 
   test('migration projects one record without duplicate visual spans', () {
@@ -204,4 +240,102 @@ void main() {
       expect(resolved.single.id, 'legacy-match');
     },
   );
+
+  test('legacy marker-bearing list offset uses a unique body-text alias', () {
+    final legacy = Highlight(
+      id: 'legacy-list',
+      originalChunkIndex: 0,
+      startOffset: 3,
+      endOffset: 6,
+      text: 'Ada',
+      createdAt: DateTime(2026, 8, 8),
+    );
+    const listSemantics = BookListSemantics(
+      listId: 'chapter.xhtml#list-0',
+      itemId: 'chapter.xhtml#list-0#item-0',
+      ordered: true,
+      depth: 0,
+      markerType: BookListMarkerType.decimal,
+      resolvedOrdinal: 4,
+      orderedStart: 4,
+      blockIndex: 0,
+      beginsItem: true,
+      endsItem: true,
+    );
+
+    final resolved = resolveReaderHighlightsForSourceWindow(
+      highlights: [legacy],
+      locationsByChunkIndex: currentTargetWindow,
+      sourceChunks: const [
+        BookChunk(index: 0, type: BookChunkType.text, text: 'Earlier prose.'),
+        BookChunk(
+          index: 1,
+          type: BookChunkType.text,
+          text: 'Ada reads.',
+          listSemantics: listSemantics,
+        ),
+      ],
+    );
+
+    expect(resolved, hasLength(1));
+    expect(resolved.single.originalChunkIndex, 1);
+    expect(resolved.single.startOffset, 0);
+    expect(resolved.single.endOffset, 3);
+  });
+
+  test('legacy list alias refuses ambiguous duplicate body text', () {
+    final legacy = Highlight(
+      id: 'ambiguous-list',
+      originalChunkIndex: 0,
+      startOffset: 3,
+      endOffset: 6,
+      text: 'Ada',
+      createdAt: DateTime(2026, 8, 8),
+    );
+    const first = BookListSemantics(
+      listId: 'list',
+      itemId: 'item-0',
+      ordered: true,
+      depth: 0,
+      markerType: BookListMarkerType.decimal,
+      resolvedOrdinal: 4,
+      orderedStart: 4,
+      blockIndex: 0,
+      beginsItem: true,
+      endsItem: true,
+    );
+    const second = BookListSemantics(
+      listId: 'list',
+      itemId: 'item-1',
+      ordered: true,
+      depth: 0,
+      markerType: BookListMarkerType.decimal,
+      resolvedOrdinal: 5,
+      orderedStart: 4,
+      blockIndex: 0,
+      beginsItem: true,
+      endsItem: true,
+    );
+
+    final resolved = resolveReaderHighlightsForSourceWindow(
+      highlights: [legacy],
+      locationsByChunkIndex: currentTargetWindow,
+      sourceChunks: const [
+        BookChunk(
+          index: 0,
+          type: BookChunkType.text,
+          text: 'Ada reads.',
+          listSemantics: first,
+        ),
+        BookChunk(
+          index: 1,
+          type: BookChunkType.text,
+          text: 'Ada returns.',
+          listSemantics: second,
+        ),
+      ],
+    );
+
+    expect(resolved, isEmpty);
+  });
 }

@@ -372,6 +372,7 @@ class BookMetadata {
     bool clearTheme = false,
     bool clearReadingSummary = false,
     bool clearManagedFilePath = false,
+    bool clearLastReadLocation = false,
   }) {
     return BookMetadata(
       id: id ?? this.id,
@@ -398,7 +399,9 @@ class BookMetadata {
       originalSourceAuthor: originalSourceAuthor ?? this.originalSourceAuthor,
       metadataConfidence: metadataConfidence ?? this.metadataConfidence,
       lastReadIndex: lastReadIndex ?? this.lastReadIndex,
-      lastReadLocation: lastReadLocation ?? this.lastReadLocation,
+      lastReadLocation: clearLastReadLocation
+          ? null
+          : (lastReadLocation ?? this.lastReadLocation),
       totalChunks: totalChunks ?? this.totalChunks,
       lastReadTime: lastReadTime ?? this.lastReadTime,
       lastReadRevision: lastReadRevision ?? this.lastReadRevision,

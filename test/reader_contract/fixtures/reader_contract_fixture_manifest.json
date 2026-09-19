@@ -1,0 +1,90 @@
+{
+  "manifestVersion": 1,
+  "fixtures": [
+    {
+      "id": "reader-core-micro-v1",
+      "name": "Reader core micro EPUB",
+      "type": "generated-epub",
+      "provenance": "Created in-repository as transparent Nalori test data for P02; no external text or network source.",
+      "license": "Generated test data; Nalori repository test fixture.",
+      "builder": "test/reader_contract/support/reader_contract_fixture.dart",
+      "checksumPolicy": "Every human-readable source file is SHA-256 checked by the focused fixture test. Archive bytes are not an oracle; logical entry order, entry bytes and SHA-256 values must match across builds.",
+      "sourceFiles": [
+        {"archivePath": "mimetype", "path": "fixtures/reader_core_micro/mimetype", "sha256": "10d2be66d6bc55a9deff57bbc8fca445750688312720125181aa7189cb99af45"},
+        {"archivePath": "META-INF/container.xml", "path": "fixtures/reader_core_micro/META-INF/container.xml", "sha256": "014cc1b89e997f98f48ec584da90b79eb9f5031cefa37df76074f37bb37a532a"},
+        {"archivePath": "OEBPS/content.opf", "path": "fixtures/reader_core_micro/OEBPS/content.opf", "sha256": "ac73feaeb14dfb016edc87b8866ce34b9fd88916687b3fcb6654adca87fc2272"},
+        {"archivePath": "OEBPS/nav.xhtml", "path": "fixtures/reader_core_micro/OEBPS/nav.xhtml", "sha256": "4e7535854e3b24846d669857148d927a0dfbab2ce88246063ac5313f90316534"},
+        {"archivePath": "OEBPS/text/chapter-one.xhtml", "path": "fixtures/reader_core_micro/OEBPS/text/chapter-one.xhtml", "sha256": "665b5a08248b5ac8951af87f47718f9fc3b82bc3af9e8e4a8e18ce5c27f003f5"},
+        {"archivePath": "OEBPS/text/chapter-two.xhtml", "path": "fixtures/reader_core_micro/OEBPS/text/chapter-two.xhtml", "sha256": "f2c68d94750df1e9199e31f48346f72beed62adfcf6419d4c3f35d8f58cf6b7e"}
+      ],
+      "spine": [
+        {
+          "manifestId": "chapter-one",
+          "href": "text/chapter-one.xhtml",
+          "normalizedExpectedSourceText": "Micro Reader Chapter\nMicro Reader Subsection\nMerge one.\nMerge two.\nMerge three.\nThe deliberate long paragraph begins with a 🚀 marker and continues through forty calm, artificial words so later controlled layouts must split source coverage without changing this authored oracle.\nThe repeated marker appears here.\nOrdered item alpha.\nOrdered item beta.\nColumn Value North Seven\nInline bold token and italic token stay in source order.\nA linked note remains an inline source structure.\nFootnote body from the first section.\nFirst-section seam tail continues into the next spine resource.",
+          "structuralOrder": ["chapter-title", "subsection-heading", "merge-one", "merge-two", "merge-three", "long-paragraph", "repeated-one", "ordered-list", "reading-table", "inline-prose", "linked-prose", "footnote-one", "seam-tail"],
+          "manuallyValidatedAnchors": ["chapter-title", "subsection-heading", "merge-one", "merge-two", "merge-three", "long-paragraph", "repeated-one", "ordered-list", "reading-table", "inline-prose", "linked-prose", "footnote-one", "seam-tail"],
+          "parserExpectedSubstrings": ["Micro Reader Chapter", "Micro Reader Subsection", "Merge one.", "The deliberate long paragraph begins with a 🚀 marker", "Ordered item alpha.", "Inline bold token and italic token stay in source order.", "First-section seam tail continues into the next spine resource."],
+          "ranges": [
+            {
+              "anchor": "long-paragraph",
+              "sourceText": "The deliberate long paragraph begins with a 🚀 marker and continues through forty calm, artificial words so later controlled layouts must split source coverage without changing this authored oracle.",
+              "startUtf16": 44,
+              "endUtf16": 53,
+              "expectedSubstring": "🚀 marker"
+            }
+          ]
+        },
+        {
+          "manifestId": "chapter-two",
+          "href": "text/chapter-two.xhtml",
+          "normalizedExpectedSourceText": "Second Section Heading\nSecond-section seam head follows the first resource.\nThe repeated marker appears here.\nSecond section closes the deterministic source fixture.",
+          "structuralOrder": ["second-section-title", "seam-head", "repeated-two", "second-prose"],
+          "manuallyValidatedAnchors": ["second-section-title", "seam-head", "repeated-two", "second-prose"],
+          "parserExpectedSubstrings": ["Second Section Heading", "Second-section seam head follows the first resource.", "The repeated marker appears here.", "Second section closes the deterministic source fixture."],
+          "ranges": [
+            {
+              "anchor": "seam-head",
+              "sourceText": "Second-section seam head follows the first resource.",
+              "startUtf16": 0,
+              "endUtf16": 19,
+              "expectedSubstring": "Second-section seam"
+            }
+          ]
+        }
+      ],
+      "structures": ["chapter-title", "subsection-heading", "short-mergeable-prose", "long-splittable-prose", "repeated-prose", "ordered-list", "table", "inline-bold", "inline-italic", "footnote-style-link", "two-spine-sections", "cross-section-seam", "heading-seam"],
+      "structureEvidence": {
+        "chapter-title": {"archivePath": "OEBPS/text/chapter-one.xhtml", "contains": "id=\"chapter-title\""},
+        "subsection-heading": {"archivePath": "OEBPS/text/chapter-one.xhtml", "contains": "id=\"subsection-heading\""},
+        "short-mergeable-prose": {"archivePath": "OEBPS/text/chapter-one.xhtml", "contains": "id=\"merge-three\""},
+        "long-splittable-prose": {"archivePath": "OEBPS/text/chapter-one.xhtml", "contains": "id=\"long-paragraph\""},
+        "repeated-prose": {"archivePath": "OEBPS/text/chapter-two.xhtml", "contains": "id=\"repeated-two\""},
+        "ordered-list": {"archivePath": "OEBPS/text/chapter-one.xhtml", "contains": "<ol id=\"ordered-list\""},
+        "table": {"archivePath": "OEBPS/text/chapter-one.xhtml", "contains": "<table id=\"reading-table\""},
+        "inline-bold": {"archivePath": "OEBPS/text/chapter-one.xhtml", "contains": "<strong>bold token</strong>"},
+        "inline-italic": {"archivePath": "OEBPS/text/chapter-one.xhtml", "contains": "<em>italic token</em>"},
+        "footnote-style-link": {"archivePath": "OEBPS/text/chapter-one.xhtml", "contains": "epub:type=\"noteref\""},
+        "two-spine-sections": {"archivePath": "OEBPS/content.opf", "contains": "<itemref idref=\"chapter-two\"/>"},
+        "cross-section-seam": {"archivePath": "OEBPS/text/chapter-two.xhtml", "contains": "id=\"seam-head\""},
+        "heading-seam": {"archivePath": "OEBPS/text/chapter-two.xhtml", "contains": "id=\"second-section-title\""}
+      },
+      "repeatedTextOccurrences": [
+        {"text": "The repeated marker appears here.", "href": "text/chapter-one.xhtml", "anchor": "repeated-one"},
+        {"text": "The repeated marker appears here.", "href": "text/chapter-two.xhtml", "anchor": "repeated-two"}
+      ],
+      "sourceSeam": {
+        "fromHref": "text/chapter-one.xhtml",
+        "fromAnchor": "seam-tail",
+        "fromText": "First-section seam tail continues into the next spine resource.",
+        "toHref": "text/chapter-two.xhtml",
+        "toAnchor": "seam-head",
+        "toText": "Second-section seam head follows the first resource."
+      },
+      "purpose": "P02 source oracle for P03+ reader construction-order, heading seam, parser/source, cache, checkpoint and navigation tests. It supplies no physical-card count or signature oracle.",
+      "requirements": ["REQ-007", "REQ-008", "REQ-009", "REQ-010", "REQ-011", "REQ-028", "REQ-032", "REQ-033", "REQ-034", "REQ-035", "REQ-044", "REQ-045", "REQ-048", "REQ-051"],
+      "knownExclusions": ["No canonical physical-card signatures.", "No expected card count.", "No renderer pixel/golden oracle.", "No public-domain or network content.", "No cache/checkpoint payload migration fixture."],
+      "permittedUpdateProcedure": "Edit visible component source and independently authored oracle first; update each affected source SHA-256 and structure evidence; explain mapped requirement impact in the change log; run the focused fixture test twice. Do not derive expected ranges or source text from the production parser or paginator."
+    }
+  ]
+}

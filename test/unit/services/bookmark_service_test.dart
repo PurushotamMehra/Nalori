@@ -37,6 +37,29 @@ void main() {
     });
 
     group('add', () {
+      const firstLocation = StableBookLocation(
+        bookId: testBookId,
+        spineIndex: 1,
+        href: 'chapter-1.xhtml',
+        normalizedHref: 'chapter-1.xhtml',
+        sourceChecksum: 'checksum-1',
+        sourceParserVersion: 'section_v2',
+        publicationFingerprint: 'publication',
+        localChunkIndex: 0,
+        textOffset: 4,
+      );
+      const secondLocation = StableBookLocation(
+        bookId: testBookId,
+        spineIndex: 2,
+        href: 'chapter-2.xhtml',
+        normalizedHref: 'chapter-2.xhtml',
+        sourceChecksum: 'checksum-2',
+        sourceParserVersion: 'section_v2',
+        publicationFingerprint: 'publication',
+        localChunkIndex: 0,
+        textOffset: 4,
+      );
+
       test('should add a new bookmark', () async {
         final result = await bookmarkService.add(10);
 
@@ -86,6 +109,39 @@ void main() {
         expect(result.length, 2);
         expect(result.map((b) => b.originalStartOffset), containsAll([0, 42]));
       });
+
+      test(
+        'stable identity overrides conflicting window coordinates',
+        () async {
+          await bookmarkService.add(
+            0,
+            originalStartOffset: 4,
+            stableLocation: firstLocation,
+          );
+          final result = await bookmarkService.add(
+            0,
+            originalStartOffset: 4,
+            stableLocation: secondLocation,
+          );
+
+          expect(result, hasLength(2));
+        },
+      );
+
+      test('same stable source is not duplicated after reindexing', () async {
+        await bookmarkService.add(
+          0,
+          originalStartOffset: 4,
+          stableLocation: firstLocation,
+        );
+        final result = await bookmarkService.add(
+          99,
+          originalStartOffset: 0,
+          stableLocation: firstLocation,
+        );
+
+        expect(result, hasLength(1));
+      });
     });
 
     group('remove', () {
@@ -116,6 +172,29 @@ void main() {
         final result = await bookmarkService.remove(999);
 
         expect(result.length, 1);
+      });
+
+      test('removeBookmark removes only the exact stored record', () async {
+        final createdAt = DateTime(2026, 7, 31);
+        final first = Bookmark(
+          chunkIndex: 0,
+          originalStartOffset: 4,
+          name: 'First',
+          createdAt: createdAt,
+        );
+        final second = Bookmark(
+          chunkIndex: 0,
+          originalStartOffset: 4,
+          name: 'Second',
+          createdAt: createdAt.add(const Duration(microseconds: 1)),
+        );
+        await bookmarkService.restoreAll(<Bookmark>[first, second]);
+
+        final result = await bookmarkService.removeBookmark(first);
+
+        expect(result, hasLength(1));
+        expect(result.single.name, second.name);
+        expect(result.single.createdAt, second.createdAt);
       });
     });
 

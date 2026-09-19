@@ -24,6 +24,7 @@ import '../services/metadata_enhancement_preferences.dart';
 import '../services/open_library_metadata_service.dart';
 import '../services/public_domain_book_service.dart';
 import '../services/reading_stats_service.dart';
+import '../services/reader_checkpoint_store.dart';
 import '../ui/app_visuals.dart';
 import '../widgets/add_book_sheet.dart';
 import '../widgets/floating_progress_hud.dart';
@@ -56,6 +57,7 @@ class _BookListScreenState extends State<BookListScreen> {
   final BookMetadataService _metadataService = BookMetadataService();
   final ReadingSettingsService _settingsService = ReadingSettingsService();
   final ReadingStatsService _statsService = ReadingStatsService();
+  final ReaderCheckpointStore _checkpointStore = ReaderCheckpointStore();
   final MetadataEnhancementPreferences _metadataEnhancementPreferences =
       MetadataEnhancementPreferences();
   final PublicDomainBookService _publicDomainBookService =
@@ -123,6 +125,7 @@ class _BookListScreenState extends State<BookListScreen> {
         try {
           await file.delete();
         } catch (_) {}
+        await _checkpointStore.deleteBook(bookId);
         await _metadataService.deleteMetadata(bookId);
         continue;
       }
@@ -1415,13 +1418,20 @@ class _BookListScreenState extends State<BookListScreen> {
 
   Future<void> _startFromBeginning(String bookId) async {
     // Reset reading position
+    await _checkpointStore.deleteBook(bookId);
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('last_read_$bookId');
 
     // Reset progress in metadata
     final meta = _metadataService.getMetadata(bookId);
     if (meta != null) {
-      await _metadataService.updateMetadata(meta.copyWith(lastReadIndex: 0));
+      await _metadataService.updateMetadata(
+        meta.copyWith(
+          lastReadIndex: 0,
+          lastReadRevision: meta.lastReadRevision + 1,
+          clearLastReadLocation: true,
+        ),
+      );
     }
 
     // Clear bookmarks
@@ -1492,6 +1502,7 @@ class _BookListScreenState extends State<BookListScreen> {
       }
 
       // 2. Delete metadata + cover image
+      await _checkpointStore.deleteBook(bookId);
       await _metadataService.deleteMetadata(bookId);
 
       // 3. Clear reading position, bookmarks, and book memory entries.

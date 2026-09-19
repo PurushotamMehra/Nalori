@@ -96,6 +96,59 @@ void main() {
     expect(initial.anchorId, 'chapter1');
   });
 
+  test(
+    'title-like front matter entry does not own the initial location',
+    () async {
+      final file = File(p.join(tempDir.path, 'misleading_title.epub'));
+      await file.writeAsBytes(
+        _buildFrontMatterFixture(titleEntryLooksReadable: true),
+        flush: true,
+      );
+      final session = LazyBookSession(
+        repository: LazySectionRepository(
+          cache: ParsedSectionCacheService(
+            rootDirectory: Directory(p.join(tempDir.path, 'title_cache')),
+          ),
+        ),
+      );
+      addTearDown(session.close);
+
+      await session.open(file);
+      final initial = session.initialLocation();
+
+      expect(initial.spineIndex, 4);
+      expect(initial.href, 'text/chapter1.xhtml');
+    },
+  );
+
+  test(
+    'late meaningful-read persistence is ignored after session close',
+    () async {
+      final file = File(p.join(tempDir.path, 'closed_session.epub'));
+      await file.writeAsBytes(_buildSessionFixture(), flush: true);
+      final session = LazyBookSession(
+        repository: LazySectionRepository(
+          cache: ParsedSectionCacheService(
+            rootDirectory: Directory(p.join(tempDir.path, 'closed_cache')),
+          ),
+        ),
+      );
+      addTearDown(session.close);
+
+      await session.open(file);
+      final initial = session.initialLocation();
+      await session.close();
+
+      expect(
+        () => session.recordMeaningfulRead(
+          initial,
+          DateTime.now().millisecondsSinceEpoch,
+        ),
+        returnsNormally,
+      );
+    },
+  );
+
   test('unloaded chapter targets retain distinct stable order', () async {
     final file = File(p.join(tempDir.path, 'session.epub'));
     await file.writeAsBytes(_buildSessionFixture(), flush: true);
@@ -430,6 +483,28 @@ void main() {
       greaterThan(offset.location!.publicationProgression!),
     );
 
+    final conflictingDisplayHint = await session.resolveStableLocation(
+      StableBookLocation(
+        bookId: session.index.bookId,
+        spineIndex: 2,
+        href: 'text/s3.xhtml',
+        sourceChecksum: session.index.spine[2].sourceChecksum,
+        publicationFingerprint: session.index.publicationFingerprint,
+        normalizedHref: 'text/s3.xhtml',
+        localChunkIndex: 1,
+        textOffset: 8,
+        localDisplayIndex: 999,
+        readerLayoutFingerprint: 'obsolete-layout',
+        sourceParserVersion: laterOffset.location!.sourceParserVersion,
+        sectionProgression: 0,
+        publicationProgression: 0,
+      ),
+    );
+    expect(conflictingDisplayHint.confidence, StableLocationConfidence.exact);
+    expect(conflictingDisplayHint.reason, 'source_offset');
+    expect(conflictingDisplayHint.location?.localChunkIndex, 1);
+    expect(conflictingDisplayHint.location?.textOffset, 8);
+
     final parserChanged = await session.resolveStableLocation(
       StableBookLocation(
         bookId: session.index.bookId,
@@ -728,7 +803,7 @@ List<int> _buildSessionFixture({
   return ZipEncoder().encode(archive)!;
 }
 
-List<int> _buildFrontMatterFixture() {
+List<int> _buildFrontMatterFixture({bool titleEntryLooksReadable = false}) {
   final archive = Archive()
     ..addFile(
       ArchiveFile.string(
@@ -778,7 +853,7 @@ List<int> _buildFrontMatterFixture() {
   <head><meta name="dtb:uid" content="front-fixture"/></head>
   <docTitle><text>Front Matter Fixture</text></docTitle>
   <navMap>
-    <navPoint id="nav1" playOrder="1"><navLabel><text>Cover</text></navLabel><content src="text/cover.xhtml#cover"/></navPoint>
+    <navPoint id="nav1" playOrder="1"><navLabel><text>${titleEntryLooksReadable ? 'Front Matter Fixture' : 'Cover'}</text></navLabel><content src="text/cover.xhtml#cover"/></navPoint>
     <navPoint id="nav2" playOrder="2"><navLabel><text>Preface</text></navLabel><content src="text/preface.xhtml#preface"/></navPoint>
     <navPoint id="nav3" playOrder="3"><navLabel><text>Introduction</text></navLabel><content src="text/introduction.xhtml#introduction"/></navPoint>
     <navPoint id="nav4" playOrder="4"><navLabel><text>Foreword</text></navLabel><content src="text/foreword.xhtml#foreword"/></navPoint>

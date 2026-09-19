@@ -163,6 +163,91 @@ void main() {
     expect(state.preparedSourceRange.toString(), '[3,9)');
   });
 
+  test('anchored initial consumption and continuation meet exactly once', () {
+    final state = ProgressiveDisplayState(
+      signature: signature(),
+      sourceChunkCount: 8,
+    );
+    BookChunk rangedRun(int startIndex, List<String> paragraphs) {
+      final text = paragraphs.join('\n\n');
+      var displayOffset = 0;
+      final ranges = <ChunkSourceRange>[];
+      for (var index = 0; index < paragraphs.length; index++) {
+        final paragraph = paragraphs[index];
+        ranges.add(
+          ChunkSourceRange(
+            originalChunkIndex: startIndex + index,
+            originalStartOffset: 0,
+            originalEndOffset: paragraph.length,
+            displayStartOffset: displayOffset,
+            displayEndOffset: displayOffset + paragraph.length,
+          ),
+        );
+        displayOffset += paragraph.length + 2;
+      }
+      return BookChunk(
+        index: startIndex,
+        type: BookChunkType.text,
+        text: text,
+        sourceRanges: ranges,
+      );
+    }
+
+    state.publishInitial(
+      result(
+        direction: DisplayRangeDirection.initial,
+        start: 2,
+        end: 5,
+        generationId: 1,
+        displayChunks: [
+          rangedRun(2, const ['two', 'three', 'four']),
+        ],
+        displayToOriginal: const [
+          [2, 3, 4],
+        ],
+        originalToDisplay: const {2: 0, 3: 0, 4: 0},
+      ),
+    );
+    state.append(
+      result(
+        direction: DisplayRangeDirection.forward,
+        start: 5,
+        end: 8,
+        generationId: 2,
+        displayChunks: [
+          rangedRun(5, const ['five', 'six', 'seven']),
+        ],
+        displayToOriginal: const [
+          [5, 6, 7],
+        ],
+        originalToDisplay: const {5: 0, 6: 0, 7: 0},
+      ),
+    );
+
+    expect(state.ranges.map((range) => range.sourceRange.toString()), [
+      '[2,5)',
+      '[5,8)',
+    ]);
+    expect(state.displayToOriginal.expand((indexes) => indexes).toList(), [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+    ]);
+    expect(
+      state.displayChunks
+          .expand((chunk) => chunk.effectiveSourceRanges)
+          .map((range) => range.originalChunkIndex),
+      [2, 3, 4, 5, 6, 7],
+    );
+    expect(
+      state.displayChunks.map((chunk) => chunk.text).join('\n\n'),
+      'two\n\nthree\n\nfour\n\nfive\n\nsix\n\nseven',
+    );
+  });
+
   test('prepends adjacent range and preserves existing source mappings', () {
     final state = ProgressiveDisplayState(
       signature: signature(),
@@ -228,6 +313,10 @@ void main() {
                 originalEndOffset: 7,
                 displayStartOffset: 0,
                 displayEndOffset: 7,
+                logicalParagraphId: 'chapter.xhtml#paragraph-0',
+                paragraphStartOffset: 10,
+                paragraphEndOffset: 17,
+                isParagraphStart: true,
               ),
             ],
           ),
@@ -248,6 +337,11 @@ void main() {
       state.displayChunks.single.sourceRanges!.single.originalChunkIndex,
       3,
     );
+    final shiftedRange = state.displayChunks.single.sourceRanges!.single;
+    expect(shiftedRange.logicalParagraphId, 'chapter.xhtml#paragraph-0');
+    expect(shiftedRange.paragraphStartOffset, 10);
+    expect(shiftedRange.paragraphEndOffset, 17);
+    expect(shiftedRange.isParagraphStart, isTrue);
   });
 
   test('rejects non-adjacent append to prevent hidden gaps', () {

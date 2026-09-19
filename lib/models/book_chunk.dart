@@ -3,6 +3,9 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import 'book_list_semantics.dart';
+import 'reader_text_boundary.dart';
+
 /// Types of content in a book chunk.
 enum BookChunkType { text, image, milestone }
 
@@ -129,6 +132,11 @@ class ChunkSourceRange {
   final int originalEndOffset;
   final int displayStartOffset;
   final int displayEndOffset;
+  final String? logicalParagraphId;
+  final int? paragraphStartOffset;
+  final int? paragraphEndOffset;
+  final bool isParagraphStart;
+  final bool isParagraphEnd;
 
   const ChunkSourceRange({
     required this.originalChunkIndex,
@@ -136,6 +144,11 @@ class ChunkSourceRange {
     required this.originalEndOffset,
     required this.displayStartOffset,
     required this.displayEndOffset,
+    this.logicalParagraphId,
+    this.paragraphStartOffset,
+    this.paragraphEndOffset,
+    this.isParagraphStart = false,
+    this.isParagraphEnd = false,
   });
 
   ChunkSourceRange shiftDisplayOffsets(int delta) => ChunkSourceRange(
@@ -144,6 +157,11 @@ class ChunkSourceRange {
     originalEndOffset: originalEndOffset,
     displayStartOffset: displayStartOffset + delta,
     displayEndOffset: displayEndOffset + delta,
+    logicalParagraphId: logicalParagraphId,
+    paragraphStartOffset: paragraphStartOffset,
+    paragraphEndOffset: paragraphEndOffset,
+    isParagraphStart: isParagraphStart,
+    isParagraphEnd: isParagraphEnd,
   );
 
   Map<String, dynamic> toJson() => {
@@ -152,6 +170,11 @@ class ChunkSourceRange {
     'oe': originalEndOffset,
     'ds': displayStartOffset,
     'de': displayEndOffset,
+    if (logicalParagraphId != null) 'pi': logicalParagraphId,
+    if (paragraphStartOffset != null) 'ps': paragraphStartOffset,
+    if (paragraphEndOffset != null) 'pe': paragraphEndOffset,
+    if (isParagraphStart) 'pb': true,
+    if (isParagraphEnd) 'px': true,
   };
 
   factory ChunkSourceRange.fromJson(Map<String, dynamic> json) =>
@@ -161,6 +184,11 @@ class ChunkSourceRange {
         originalEndOffset: json['oe'] as int,
         displayStartOffset: json['ds'] as int,
         displayEndOffset: json['de'] as int,
+        logicalParagraphId: json['pi'] as String?,
+        paragraphStartOffset: json['ps'] as int?,
+        paragraphEndOffset: json['pe'] as int?,
+        isParagraphStart: json['pb'] == true,
+        isParagraphEnd: json['px'] == true,
       );
 }
 
@@ -172,6 +200,11 @@ class MappedTextRange {
   final int originalEndOffset;
   final int displayStartOffset;
   final int displayEndOffset;
+  final String? logicalParagraphId;
+  final int? paragraphStartOffset;
+  final int? paragraphEndOffset;
+  final bool isParagraphStart;
+  final bool isParagraphEnd;
 
   const MappedTextRange({
     required this.originalChunkIndex,
@@ -179,6 +212,11 @@ class MappedTextRange {
     required this.originalEndOffset,
     required this.displayStartOffset,
     required this.displayEndOffset,
+    this.logicalParagraphId,
+    this.paragraphStartOffset,
+    this.paragraphEndOffset,
+    this.isParagraphStart = false,
+    this.isParagraphEnd = false,
   });
 
   MappedTextRange mergeWith(MappedTextRange other) => MappedTextRange(
@@ -187,6 +225,11 @@ class MappedTextRange {
     originalEndOffset: other.originalEndOffset,
     displayStartOffset: displayStartOffset,
     displayEndOffset: other.displayEndOffset,
+    logicalParagraphId: logicalParagraphId,
+    paragraphStartOffset: paragraphStartOffset,
+    paragraphEndOffset: other.paragraphEndOffset,
+    isParagraphStart: isParagraphStart,
+    isParagraphEnd: other.isParagraphEnd,
   );
 }
 
@@ -236,6 +279,26 @@ class BookChunk {
   /// Populated for rebuilt display chunks; original chunks fall back to identity.
   final List<ChunkSourceRange>? sourceRanges;
 
+  /// Stable identity and paragraph-relative range for the normalized EPUB
+  /// block represented by this source chunk.
+  final String? logicalParagraphId;
+  final int logicalParagraphStartOffset;
+  final int? logicalParagraphEndOffset;
+  final bool isLogicalParagraphStart;
+  final bool isLogicalParagraphEnd;
+
+  /// Explicit display boundaries. Structural entries may own synthesized
+  /// separators; packing entries never imply paragraph spacing.
+  final List<DisplayTextBoundary>? textBoundaries;
+
+  /// Authoritative list relationship for a source block. Generated markers
+  /// are derived from this metadata and never enter [text].
+  final BookListSemantics? listSemantics;
+
+  /// Layout-derived list fragments for rebuilt display cards. Source chunks
+  /// normally leave this null and derive a single segment from [listSemantics].
+  final List<BookListDisplaySegment>? listDisplaySegments;
+
   const BookChunk({
     required this.index,
     required this.type,
@@ -255,6 +318,14 @@ class BookChunk {
     this.preserveWhitespace = false,
     this.sourceFile,
     this.sourceRanges,
+    this.logicalParagraphId,
+    this.logicalParagraphStartOffset = 0,
+    this.logicalParagraphEndOffset,
+    this.isLogicalParagraphStart = true,
+    this.isLogicalParagraphEnd = true,
+    this.textBoundaries,
+    this.listSemantics,
+    this.listDisplaySegments,
   });
 
   bool get usesPublisherLayout =>
@@ -281,6 +352,14 @@ class BookChunk {
     preserveWhitespace: preserveWhitespace,
     sourceFile: sourceFile,
     sourceRanges: sourceRanges,
+    logicalParagraphId: logicalParagraphId,
+    logicalParagraphStartOffset: logicalParagraphStartOffset,
+    logicalParagraphEndOffset: logicalParagraphEndOffset,
+    isLogicalParagraphStart: isLogicalParagraphStart,
+    isLogicalParagraphEnd: isLogicalParagraphEnd,
+    textBoundaries: textBoundaries,
+    listSemantics: listSemantics,
+    listDisplaySegments: listDisplaySegments,
   );
 
   BookChunk copyWith({
@@ -302,6 +381,14 @@ class BookChunk {
     bool? preserveWhitespace,
     String? sourceFile,
     List<ChunkSourceRange>? sourceRanges,
+    String? logicalParagraphId,
+    int? logicalParagraphStartOffset,
+    int? logicalParagraphEndOffset,
+    bool? isLogicalParagraphStart,
+    bool? isLogicalParagraphEnd,
+    List<DisplayTextBoundary>? textBoundaries,
+    BookListSemantics? listSemantics,
+    List<BookListDisplaySegment>? listDisplaySegments,
   }) {
     return BookChunk(
       index: index ?? this.index,
@@ -322,7 +409,42 @@ class BookChunk {
       preserveWhitespace: preserveWhitespace ?? this.preserveWhitespace,
       sourceFile: sourceFile ?? this.sourceFile,
       sourceRanges: sourceRanges ?? this.sourceRanges,
+      logicalParagraphId: logicalParagraphId ?? this.logicalParagraphId,
+      logicalParagraphStartOffset:
+          logicalParagraphStartOffset ?? this.logicalParagraphStartOffset,
+      logicalParagraphEndOffset:
+          logicalParagraphEndOffset ?? this.logicalParagraphEndOffset,
+      isLogicalParagraphStart:
+          isLogicalParagraphStart ?? this.isLogicalParagraphStart,
+      isLogicalParagraphEnd:
+          isLogicalParagraphEnd ?? this.isLogicalParagraphEnd,
+      textBoundaries: textBoundaries ?? this.textBoundaries,
+      listSemantics: listSemantics ?? this.listSemantics,
+      listDisplaySegments: listDisplaySegments ?? this.listDisplaySegments,
     );
+  }
+
+  List<BookListDisplaySegment> get effectiveListDisplaySegments {
+    final displaySegments = listDisplaySegments;
+    if (displaySegments != null && displaySegments.isNotEmpty) {
+      return displaySegments;
+    }
+    final semantics = listSemantics;
+    final chunkText = text;
+    if (semantics == null || chunkText == null || chunkText.isEmpty) {
+      return const [];
+    }
+    return [
+      BookListDisplaySegment(
+        displayStartOffset: 0,
+        displayEndOffset: chunkText.length,
+        semantics: semantics,
+        fragmentState: bookListFragmentState(
+          beginsItem: semantics.beginsItem,
+          endsItem: semantics.endsItem,
+        ),
+      ),
+    ];
   }
 
   List<ChunkSourceRange> get effectiveSourceRanges {
@@ -343,6 +465,13 @@ class BookChunk {
         originalEndOffset: chunkText.length,
         displayStartOffset: 0,
         displayEndOffset: chunkText.length,
+        logicalParagraphId: logicalParagraphId,
+        paragraphStartOffset: logicalParagraphStartOffset,
+        paragraphEndOffset:
+            logicalParagraphEndOffset ??
+            logicalParagraphStartOffset + chunkText.length,
+        isParagraphStart: isLogicalParagraphStart,
+        isParagraphEnd: isLogicalParagraphEnd,
       ),
     ];
   }
@@ -375,6 +504,20 @@ class BookChunk {
               (overlapEnd - range.displayStartOffset),
           displayStartOffset: overlapStart,
           displayEndOffset: overlapEnd,
+          logicalParagraphId: range.logicalParagraphId,
+          paragraphStartOffset: range.paragraphStartOffset == null
+              ? null
+              : range.paragraphStartOffset! +
+                    (overlapStart - range.displayStartOffset),
+          paragraphEndOffset: range.paragraphStartOffset == null
+              ? null
+              : range.paragraphStartOffset! +
+                    (overlapEnd - range.displayStartOffset),
+          isParagraphStart:
+              range.isParagraphStart &&
+              overlapStart == range.displayStartOffset,
+          isParagraphEnd:
+              range.isParagraphEnd && overlapEnd == range.displayEndOffset,
         ),
       );
     }
@@ -411,6 +554,20 @@ class BookChunk {
           displayEndOffset:
               range.displayStartOffset +
               (overlapEnd - range.originalStartOffset),
+          logicalParagraphId: range.logicalParagraphId,
+          paragraphStartOffset: range.paragraphStartOffset == null
+              ? null
+              : range.paragraphStartOffset! +
+                    (overlapStart - range.originalStartOffset),
+          paragraphEndOffset: range.paragraphStartOffset == null
+              ? null
+              : range.paragraphStartOffset! +
+                    (overlapEnd - range.originalStartOffset),
+          isParagraphStart:
+              range.isParagraphStart &&
+              overlapStart == range.originalStartOffset,
+          isParagraphEnd:
+              range.isParagraphEnd && overlapEnd == range.originalEndOffset,
         ),
       );
     }
@@ -429,7 +586,9 @@ class BookChunk {
       final canMerge =
           previous.originalChunkIndex == range.originalChunkIndex &&
           previous.originalEndOffset == range.originalStartOffset &&
-          previous.displayEndOffset == range.displayStartOffset;
+          previous.displayEndOffset == range.displayStartOffset &&
+          previous.logicalParagraphId == range.logicalParagraphId &&
+          previous.paragraphEndOffset == range.paragraphStartOffset;
 
       if (canMerge) {
         merged[merged.length - 1] = previous.mergeWith(range);
@@ -471,6 +630,24 @@ class BookChunk {
     if (sourceFile != null) map['sf'] = sourceFile;
     if (sourceRanges != null && sourceRanges!.isNotEmpty) {
       map['sr'] = sourceRanges!.map((r) => r.toJson()).toList();
+    }
+    if (logicalParagraphId != null) map['lp'] = logicalParagraphId;
+    if (logicalParagraphStartOffset != 0) {
+      map['lps'] = logicalParagraphStartOffset;
+    }
+    if (logicalParagraphEndOffset != null) {
+      map['lpe'] = logicalParagraphEndOffset;
+    }
+    if (!isLogicalParagraphStart) map['lpb'] = false;
+    if (!isLogicalParagraphEnd) map['lpx'] = false;
+    if (textBoundaries != null && textBoundaries!.isNotEmpty) {
+      map['tb'] = textBoundaries!.map((boundary) => boundary.toJson()).toList();
+    }
+    if (listSemantics != null) map['ls'] = listSemantics!.toJson();
+    if (listDisplaySegments != null && listDisplaySegments!.isNotEmpty) {
+      map['lf'] = listDisplaySegments!
+          .map((segment) => segment.toJson())
+          .toList();
     }
     return map;
   }
@@ -516,6 +693,32 @@ class BookChunk {
           ? (json['sr'] as List)
                 .map(
                   (e) => ChunkSourceRange.fromJson(e as Map<String, dynamic>),
+                )
+                .toList()
+          : null,
+      logicalParagraphId: json['lp'] as String?,
+      logicalParagraphStartOffset: json['lps'] as int? ?? 0,
+      logicalParagraphEndOffset: json['lpe'] as int?,
+      isLogicalParagraphStart: json['lpb'] != false,
+      isLogicalParagraphEnd: json['lpx'] != false,
+      textBoundaries: json['tb'] != null
+          ? (json['tb'] as List)
+                .map(
+                  (value) => DisplayTextBoundary.fromJson(
+                    value as Map<String, dynamic>,
+                  ),
+                )
+                .toList()
+          : null,
+      listSemantics: json['ls'] != null
+          ? BookListSemantics.fromJson(json['ls'] as Map<String, dynamic>)
+          : null,
+      listDisplaySegments: json['lf'] != null
+          ? (json['lf'] as List)
+                .map(
+                  (value) => BookListDisplaySegment.fromJson(
+                    value as Map<String, dynamic>,
+                  ),
                 )
                 .toList()
           : null,

@@ -4,13 +4,39 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../models/book_metadata.dart';
+import '../models/reader_checkpoint.dart';
 import '../models/stable_book_location.dart';
 import 'book_metadata_service.dart';
 import 'book_preparse_service.dart';
 import 'lazy_book_session.dart';
+import 'reader_checkpoint_store.dart';
 
 const bool _readerOpenDiagEnabled = bool.fromEnvironment('NALORI_EPUB_DIAG');
 const String _readerOpenDiagPrefix = 'NALORI_EPUB_DIAG';
+
+StableBookLocation? selectReaderOpenRestoreLocation({
+  required StableBookLocation? checkpointLocation,
+  required StableBookLocation? requestedLocation,
+  required StableBookLocation? metadataLocation,
+  required bool requestedLocationIsNavigationTarget,
+}) {
+  return requestedLocationIsNavigationTarget
+      ? requestedLocation
+      : checkpointLocation ?? requestedLocation ?? metadataLocation;
+}
+
+StableBookLocation? selectReaderOpenPersistedLastRead({
+  required StableBookLocation? existingLocation,
+  required StableBookLocation resolvedTarget,
+  required bool canMigratePersisted,
+  required bool canMigrateLegacyPosition,
+  required bool requestedLocationIsNavigationTarget,
+}) {
+  return !requestedLocationIsNavigationTarget &&
+          (canMigratePersisted || canMigrateLegacyPosition)
+      ? resolvedTarget
+      : existingLocation;
+}
 
 void _readerOpenDiagLog(String phase, Map<String, Object?> fields) {
   if (!_readerOpenDiagEnabled) return;
@@ -46,6 +72,7 @@ final class ReaderOpenResult {
     required this.targetLocation,
     required this.window,
     required this.metadata,
+    required this.checkpoint,
     required this.elapsedMs,
   });
 
@@ -55,6 +82,7 @@ final class ReaderOpenResult {
   final StableBookLocation targetLocation;
   final LazyLoadedContentWindow window;
   final BookMetadata? metadata;
+  final ReaderCheckpoint? checkpoint;
   final int elapsedMs;
 }
 
@@ -69,15 +97,22 @@ final class ReaderOpenOperation {
 }
 
 final class ReaderOpenService {
-  ReaderOpenService({BookMetadataService? metadataService})
-    : _metadataService = metadataService ?? BookMetadataService();
+  ReaderOpenService({
+    BookMetadataService? metadataService,
+    ReaderCheckpointStore? checkpointStore,
+  }) : _metadataService = metadataService ?? BookMetadataService(),
+       _checkpointStore = checkpointStore ?? ReaderCheckpointStore() {
+    _checkpointStore.trace ??= _readerOpenDiagLog;
+  }
 
   final BookMetadataService _metadataService;
+  final ReaderCheckpointStore _checkpointStore;
 
   Future<ReaderOpenResult> openLazy({
     required File bookFile,
     BookMetadata? metadata,
     StableBookLocation? requestedLocation,
+    bool requestedLocationIsNavigationTarget = false,
     int? legacyLastReadIndex,
     ReaderOpenOperation? operation,
     String caller = 'unknown',
@@ -93,6 +128,9 @@ final class ReaderOpenService {
 
       await _metadataService.init();
       final meta = metadata ?? _metadataService.getMetadata(bookId);
+      // A canonical-store failure is not equivalent to "no checkpoint". Let
+      // it fail the open instead of silently allowing legacy indexes to win.
+      final storedCheckpoint = await _checkpointStore.loadNewestValid(bookId);
 
       BookPreparseService.instance.cancelQueue();
       BookPreparseService.instance.suppressBackgroundBook(bookId);
@@ -117,7 +155,18 @@ final class ReaderOpenService {
         'elapsedMs': stopwatch.elapsedMilliseconds,
       });
 
-      final persistedLocation = requestedLocation ?? meta?.lastReadLocation;
+      final checkpoint =
+          storedCheckpoint?.publicationFingerprint ==
+              index.publicationFingerprint
+          ? storedCheckpoint
+          : null;
+      final persistedLocation = selectReaderOpenRestoreLocation(
+        checkpointLocation: checkpoint?.stableLocation,
+        requestedLocation: requestedLocation,
+        metadataLocation: meta?.lastReadLocation,
+        requestedLocationIsNavigationTarget:
+            requestedLocationIsNavigationTarget,
+      );
       StableLocationResolution? persistedResolution;
       if (persistedLocation != null) {
         persistedResolution = await session.resolveStableLocation(
@@ -160,9 +209,14 @@ final class ReaderOpenService {
         await _metadataService.updateMetadata(
           meta.copyWith(
             lastOpenedAt: DateTime.now().millisecondsSinceEpoch,
-            lastReadLocation: canMigratePersisted || canMigrateLegacyPosition
-                ? resolvedTarget
-                : meta.lastReadLocation,
+            lastReadLocation: selectReaderOpenPersistedLastRead(
+              existingLocation: meta.lastReadLocation,
+              resolvedTarget: resolvedTarget,
+              canMigratePersisted: canMigratePersisted,
+              canMigrateLegacyPosition: canMigrateLegacyPosition,
+              requestedLocationIsNavigationTarget:
+                  requestedLocationIsNavigationTarget,
+            ),
           ),
         );
       }
@@ -199,6 +253,7 @@ final class ReaderOpenService {
         targetLocation: resolvedTarget,
         window: window,
         metadata: meta,
+        checkpoint: requestedLocationIsNavigationTarget ? null : checkpoint,
         elapsedMs: stopwatch.elapsedMilliseconds,
       );
     } on ReaderOpenException {

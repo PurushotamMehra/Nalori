@@ -4,6 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:nalori/models/book_chunk.dart';
 import 'package:nalori/models/highlight.dart';
 import 'package:nalori/models/reading_settings.dart';
+import 'package:nalori/services/reader_character_match_service.dart';
+import 'package:nalori/models/reader_text_boundary.dart';
 import 'package:nalori/utils/contrast_utils.dart';
 import 'package:nalori/widgets/reader_table_block.dart';
 import 'package:nalori/widgets/reading_card.dart';
@@ -115,7 +117,9 @@ PUT /v1/businesses/{:id} | Update details of a business''';
     await _pumpReadingCard(tester, text);
 
     expect(find.byType(ReaderTableBlockWidget), findsNothing);
-    expect(find.byType(SelectableText), findsOneWidget);
+    expect(find.byType(SelectionArea), findsOneWidget);
+    expect(find.byType(SelectableText), findsNothing);
+    expect(_richTextWithPlainText(text), findsOneWidget);
     expect(find.text(text), findsOneWidget);
   });
 
@@ -135,29 +139,32 @@ PUT /v1/businesses/{:id} | Update details of a business''';
     expect(find.byType(SelectableText), findsNothing);
     expect(_paragraphTopGapPaddings(tester, 0), hasLength(3));
 
-    await _pumpReadingCard(
-      tester,
-      text,
-      settings: const ReadingSettings(lineHeight: 1),
-    );
+    const defaultSpacing = ReadingSettings(lineHeight: 1);
+    await _pumpReadingCard(tester, text, settings: defaultSpacing);
 
     expect(find.byType(SelectionArea), findsOneWidget);
     expect(find.byType(SelectionListener), findsOneWidget);
     expect(find.byType(SelectableText), findsNothing);
     expect(_paragraphTopGapPaddings(tester, 0), hasLength(1));
-    expect(_paragraphTopGapPaddings(tester, 18), hasLength(2));
-
-    await _pumpReadingCard(
-      tester,
-      text,
-      settings: const ReadingSettings(lineHeight: 1, paragraphSpacing: 2),
+    expect(
+      _paragraphTopGapPaddings(tester, defaultSpacing.effectiveLineBoxHeight),
+      hasLength(2),
     );
+
+    const doubleSpacing = ReadingSettings(lineHeight: 1, paragraphSpacing: 2);
+    await _pumpReadingCard(tester, text, settings: doubleSpacing);
 
     expect(find.byType(SelectionArea), findsOneWidget);
     expect(find.byType(SelectionListener), findsOneWidget);
     expect(find.byType(SelectableText), findsNothing);
     expect(_paragraphTopGapPaddings(tester, 0), hasLength(1));
-    expect(_paragraphTopGapPaddings(tester, 36), hasLength(2));
+    expect(
+      _paragraphTopGapPaddings(
+        tester,
+        doubleSpacing.effectiveLineBoxHeight * 2,
+      ),
+      hasLength(2),
+    );
   });
 
   testWidgets('ReadingCard does not add paragraph padding inside wrapped prose', (
@@ -170,8 +177,36 @@ PUT /v1/businesses/{:id} | Update details of a business''';
 
     await _pumpReadingCard(tester, text);
 
-    expect(find.byType(SelectableText), findsOneWidget);
+    expect(find.byType(SelectionArea), findsOneWidget);
+    expect(find.byType(SelectableText), findsNothing);
+    expect(_richTextWithPlainText(text), findsOneWidget);
     expect(_paragraphPaddings(tester, 4), isEmpty);
+    expect(_paragraphTopGapPaddings(tester, 0), isEmpty);
+  });
+
+  testWidgets('ReadingCard spaces only explicit structural boundaries', (
+    tester,
+  ) async {
+    const text = 'At about 1 A.M., as Shackleton returned.';
+    await _pumpReadingCard(
+      tester,
+      text,
+      chunk: const BookChunk(
+        index: 0,
+        type: BookChunkType.text,
+        text: text,
+        logicalParagraphId: 'chapter.xhtml#paragraph-0',
+        logicalParagraphEndOffset: 41,
+        textBoundaries: [
+          DisplayTextBoundary(
+            offset: 13,
+            kind: ReaderTextBoundaryKind.sentence,
+          ),
+        ],
+      ),
+    );
+
+    expect(find.text(text), findsOneWidget);
     expect(_paragraphTopGapPaddings(tester, 0), isEmpty);
   });
 
@@ -253,7 +288,14 @@ PUT /v1/businesses/{:id} | Update details of a business''';
           createdAt: DateTime(2026, 7, 12),
         ),
       ],
-      characterNames: const {'McNeish': color},
+      generatedCharacterRanges: const <ReaderCharacterDisplayRange>[
+        ReaderCharacterDisplayRange(
+          declarationId: 'mcneish',
+          startOffset: 0,
+          endOffset: 7,
+          colorValue: 0xFF00897B,
+        ),
+      ],
     );
 
     expect(_spanForText(tester, 'McNeish').style?.color, color);
@@ -261,6 +303,112 @@ PUT /v1/businesses/{:id} | Update details of a business''';
       tester,
     ).firstWhere((span) => span.text?.contains('es, and') == true);
     expect(unrelated.style?.color, isNot(color));
+  });
+
+  testWidgets('ReadingCard removes and recolors generated ranges on update', (
+    tester,
+  ) async {
+    const text = 'Elizabeth arrived.';
+    const red = Color(0xFFEF5350);
+    const blue = Color(0xFF42A5F5);
+
+    await _pumpReadingCard(
+      tester,
+      text,
+      generatedCharacterRanges: const <ReaderCharacterDisplayRange>[
+        ReaderCharacterDisplayRange(
+          declarationId: 'elizabeth',
+          startOffset: 0,
+          endOffset: 9,
+          colorValue: 0xFFEF5350,
+        ),
+      ],
+    );
+    expect(_spanForText(tester, 'Elizabeth').style?.color, red);
+
+    await _pumpReadingCard(
+      tester,
+      text,
+      generatedCharacterRanges: const <ReaderCharacterDisplayRange>[
+        ReaderCharacterDisplayRange(
+          declarationId: 'elizabeth',
+          startOffset: 0,
+          endOffset: 9,
+          colorValue: 0xFF42A5F5,
+        ),
+      ],
+    );
+    expect(_spanForText(tester, 'Elizabeth').style?.color, blue);
+
+    await _pumpReadingCard(tester, text);
+    expect(_spanForText(tester, text).style?.color, isNot(blue));
+  });
+
+  testWidgets('ReadingCard keeps generated styling across inline nodes', (
+    tester,
+  ) async {
+    const color = Color(0xFF00897B);
+    const text = 'Elizabeth Bennet arrived.';
+    const chunk = BookChunk(
+      index: 0,
+      type: BookChunkType.text,
+      text: text,
+      inlineStyles: <InlineStyle>[
+        InlineStyle(start: 10, end: 16, type: InlineStyleType.italic),
+      ],
+    );
+
+    await _pumpReadingCard(
+      tester,
+      text,
+      chunk: chunk,
+      generatedCharacterRanges: const <ReaderCharacterDisplayRange>[
+        ReaderCharacterDisplayRange(
+          declarationId: 'elizabeth-bennet',
+          startOffset: 0,
+          endOffset: 16,
+          colorValue: 0xFF00897B,
+        ),
+      ],
+    );
+
+    expect(_spanForText(tester, 'Elizabeth ').style?.color, color);
+    expect(_spanForText(tester, 'Bennet').style?.color, color);
+    expect(_spanForText(tester, 'Bennet').style?.fontStyle, FontStyle.italic);
+  });
+
+  testWidgets('ReadingCard layers generated styling with normal highlights', (
+    tester,
+  ) async {
+    const text = 'Alice arrived.';
+    const characterColor = Color(0xFF00897B);
+
+    await _pumpReadingCard(
+      tester,
+      text,
+      highlights: <Highlight>[
+        Highlight(
+          id: 'normal-highlight',
+          originalChunkIndex: 0,
+          startOffset: 0,
+          endOffset: 5,
+          text: 'Alice',
+          createdAt: DateTime(2026, 8, 6),
+        ),
+      ],
+      generatedCharacterRanges: const <ReaderCharacterDisplayRange>[
+        ReaderCharacterDisplayRange(
+          declarationId: 'alice',
+          startOffset: 0,
+          endOffset: 5,
+          colorValue: 0xFF00897B,
+        ),
+      ],
+    );
+
+    final alice = _spanForText(tester, 'Alice');
+    expect(alice.style?.color, characterColor);
+    expect(alice.style?.backgroundColor, isNotNull);
   });
 
   testWidgets('ReadingCard paints note blocks inside split paragraphs', (
@@ -541,7 +689,8 @@ Future<void> _pumpReadingCard(
   String text, {
   ReadingSettings settings = const ReadingSettings(),
   List<Highlight> highlights = const [],
-  Map<String, Color> characterNames = const {},
+  List<ReaderCharacterDisplayRange> generatedCharacterRanges = const [],
+  BookChunk? chunk,
   bool isActivePage = true,
   void Function(Offset? globalPosition)? onTapOutside,
 }) async {
@@ -552,10 +701,12 @@ Future<void> _pumpReadingCard(
           width: 420,
           height: 720,
           child: ReadingCard(
-            chunk: BookChunk(index: 0, type: BookChunkType.text, text: text),
+            chunk:
+                chunk ??
+                BookChunk(index: 0, type: BookChunkType.text, text: text),
             settings: settings,
             highlights: highlights,
-            characterNames: characterNames,
+            generatedCharacterRanges: generatedCharacterRanges,
             isActivePage: isActivePage,
             onTapOutside: onTapOutside,
           ),

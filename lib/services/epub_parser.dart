@@ -11,6 +11,7 @@ import 'package:html/parser.dart' as html_parser;
 import 'package:path/path.dart' as p;
 
 import '../models/book_chunk.dart';
+import '../models/book_list_semantics.dart';
 import '../models/bookmark.dart';
 import 'lazy_parsed_book.dart';
 import '../utils/reader_content_parser.dart';
@@ -37,6 +38,86 @@ int _epubDiagRssBytes() {
   } catch (_) {
     return -1;
   }
+}
+
+BookListMarkerType _orderedListMarkerType(String? value) {
+  return switch (value?.trim()) {
+    'a' => BookListMarkerType.lowerAlpha,
+    'A' => BookListMarkerType.upperAlpha,
+    'i' => BookListMarkerType.lowerRoman,
+    'I' => BookListMarkerType.upperRoman,
+    _ => BookListMarkerType.decimal,
+  };
+}
+
+bool _legacyListMarkerOccupiedItsOwnParagraph(dom.Element item) {
+  const blockTags = <String>{
+    'address',
+    'blockquote',
+    'div',
+    'dl',
+    'figure',
+    'h1',
+    'h2',
+    'h3',
+    'h4',
+    'h5',
+    'h6',
+    'ol',
+    'p',
+    'pre',
+    'table',
+    'ul',
+  };
+  for (final child in item.nodes) {
+    if (child is dom.Text) {
+      if (child.data.trim().isNotEmpty) return false;
+      continue;
+    }
+    if (child is! dom.Element) continue;
+    final tag = child.localName?.toLowerCase();
+    if (tag != null && blockTags.contains(tag)) return true;
+    if (child.text.trim().isNotEmpty) return false;
+  }
+  return false;
+}
+
+final class _ListParseFrame {
+  _ListParseFrame({
+    required this.listId,
+    required this.parentListId,
+    required this.parentItemId,
+    required this.ordered,
+    required this.depth,
+    required this.markerType,
+    required this.orderedStart,
+    required this.nextOrdinal,
+  });
+
+  final String listId;
+  final String? parentListId;
+  final String? parentItemId;
+  final bool ordered;
+  final int depth;
+  final BookListMarkerType markerType;
+  final int? orderedStart;
+  int nextOrdinal;
+  int nextItemIndex = 0;
+  _ActiveListItem? activeItem;
+}
+
+final class _ActiveListItem {
+  _ActiveListItem({
+    required this.itemId,
+    required this.resolvedOrdinal,
+    required this.itemValue,
+  });
+
+  final String itemId;
+  final int? resolvedOrdinal;
+  final int? itemValue;
+  final List<int> chunkPositions = [];
+  int nextBlockIndex = 0;
 }
 
 void _epubDiagLog(String runId, String phase, Map<String, Object?> fields) {
@@ -172,60 +253,8 @@ bool isLikelyDialogueText(String text) {
 }
 
 class EpubParserService {
-  /// Target maximum words per card — keeps each card short and digestible.
-  static const int _targetWords = 50;
-
   /// Hard ceiling — if a single paragraph exceeds this, it gets split.
   static const int _hardMaxWords = 80;
-
-  /// Common abbreviations that should NOT trigger sentence breaks.
-  static const _abbreviations = <String>{
-    'mr',
-    'mrs',
-    'ms',
-    'dr',
-    'prof',
-    'sr',
-    'jr',
-    'st',
-    'ave',
-    'blvd',
-    'dept',
-    'est',
-    'govt',
-    'inc',
-    'ltd',
-    'gen',
-    'sgt',
-    'cpl',
-    'pvt',
-    'rev',
-    'hon',
-    'pres',
-    'gov',
-    'ofc',
-    'etc',
-    'vol',
-    'vs',
-    'fig',
-    'approx',
-  };
-
-  /// Dotted abbreviations like U.S., e.g., i.e.
-  static const _dottedAbbreviations = <String>{
-    'u.s',
-    'u.k',
-    'u.n',
-    'e.g',
-    'i.e',
-    'a.m',
-    'p.m',
-    'a.d',
-    'b.c',
-    'ph.d',
-    'm.d',
-    'd.c',
-  };
 
   // ─── Public API ──────────────────────────────────────────────────────
 
@@ -591,6 +620,8 @@ class EpubParserService {
     final Map<String, int> anchorMap = {};
     final Map<String, List<int>> searchIndex = {};
     int chunkIndex = 0;
+    int logicalParagraphIndex = 0;
+    int imageOwnerIndex = 0;
 
     final contentMap = book.Content?.Html;
     if (contentMap == null || contentMap.isEmpty) {
@@ -616,6 +647,7 @@ class EpubParserService {
     final List<LinkMetadata> linkBuffer = [];
     final List<InlineStyle> styleBuffer = [];
     final List<FootnoteRef> footnoteBuffer = [];
+    bool pendingCollapsedWhitespace = false;
     // Track the section for the current file being parsed.
     ChunkSection currentSection = ChunkSection.frontMatter;
     // Track the current source file key for grouping.
@@ -645,9 +677,8 @@ class EpubParserService {
     }
 
     // ── List tracking (D-10) ──
-    int olCounter = 0;
-    bool insideOl = false;
-    bool insideUl = false;
+    final List<_ListParseFrame> listStack = [];
+    int listIndex = 0;
 
     // ── Verse/poetry tracking (D-12) ──
     bool insideVerse = false;
@@ -761,7 +792,10 @@ class EpubParserService {
 
     // Flush the buffer into a new card chunk.
     void flush() {
-      if (textBuffer.isEmpty) return;
+      if (textBuffer.isEmpty) {
+        pendingCollapsedWhitespace = false;
+        return;
+      }
       final rawText = textBuffer.toString();
       final text = rawText.trim();
       if (text.isEmpty) {
@@ -769,6 +803,7 @@ class EpubParserService {
         linkBuffer.clear();
         styleBuffer.clear();
         footnoteBuffer.clear();
+        pendingCollapsedWhitespace = false;
         return;
       }
 
@@ -783,66 +818,81 @@ class EpubParserService {
           })
           .whereType<InlineStyle>()
           .toList();
+      final adjustedLinks = linkBuffer
+          .map((link) {
+            final start = (link.start - leadingWs).clamp(0, text.length);
+            final end = (link.end - leadingWs).clamp(0, text.length);
+            if (start >= end) return null;
+            return link.copyWith(start: start, end: end);
+          })
+          .whereType<LinkMetadata>()
+          .toList();
 
       final adjustedFootnotes = footnoteBuffer.map((f) {
         final np = (f.position - leadingWs).clamp(0, text.length);
         return FootnoteRef(position: np, label: f.label, content: f.content);
       }).toList();
 
+      final activeListItem = listStack.isEmpty
+          ? null
+          : listStack.last.activeItem;
+      final listSemantics = activeListItem == null
+          ? null
+          : BookListSemantics(
+              listId: listStack.last.listId,
+              itemId: activeListItem.itemId,
+              parentListId: listStack.last.parentListId,
+              parentItemId: listStack.last.parentItemId,
+              ordered: listStack.last.ordered,
+              depth: listStack.last.depth,
+              markerType: listStack.last.markerType,
+              resolvedOrdinal: activeListItem.resolvedOrdinal,
+              orderedStart: listStack.last.orderedStart,
+              itemValue: activeListItem.itemValue,
+              blockIndex: activeListItem.nextBlockIndex,
+              beginsItem: activeListItem.nextBlockIndex == 0,
+              endsItem: false,
+            );
       final detectedDialogue = !currentIsHeading && isLikelyDialogueText(text);
       final chunkRole = currentIsHeading
           ? BookBlockRole.heading
           : currentBlockRole;
-
-      if (_wordCount(text) <= _hardMaxWords ||
-          chunkRole != BookBlockRole.paragraph) {
-        chunks.add(
-          BookChunk(
-            index: chunkIndex++,
-            type: BookChunkType.text,
-            text: text,
-            section: currentSection,
-            sourceFile: currentKey,
-            links: List.from(linkBuffer),
-            inlineStyles: adjustedStyles.isNotEmpty ? adjustedStyles : null,
-            footnotes: adjustedFootnotes.isNotEmpty ? adjustedFootnotes : null,
-            isHeading: currentIsHeading,
-            isDialogue: detectedDialogue,
-            blockRole: chunkRole,
-            publisherTextAlign: currentPublisherTextAlign,
-            publisherLeftIndent: currentPublisherLeftIndent,
-            publisherRightIndent: currentPublisherRightIndent,
-            preserveLineBreaks: currentPreserveLineBreaks,
-            preserveWhitespace: currentPreserveWhitespace,
-          ),
-        );
-      } else {
-        // Text is too large — split by sentence, drop links/styles/footnotes.
-        final subTexts = _splitBySentence(text, _targetWords);
-        for (final sub in subTexts) {
-          chunks.add(
-            BookChunk(
-              index: chunkIndex++,
-              type: BookChunkType.text,
-              text: sub,
-              section: currentSection,
-              sourceFile: currentKey,
-              isHeading: currentIsHeading,
-              isDialogue: detectedDialogue,
-              blockRole: chunkRole,
-              publisherTextAlign: currentPublisherTextAlign,
-              publisherLeftIndent: currentPublisherLeftIndent,
-              publisherRightIndent: currentPublisherRightIndent,
-              preserveLineBreaks: currentPreserveLineBreaks,
-              preserveWhitespace: currentPreserveWhitespace,
-            ),
-          );
-        }
+      final paragraphSequence = logicalParagraphIndex++;
+      final paragraphId = listSemantics == null
+          ? '$currentKey#paragraph-$paragraphSequence'
+          : '${listSemantics.itemId}#block-${listSemantics.blockIndex}';
+      chunks.add(
+        BookChunk(
+          index: chunkIndex++,
+          type: BookChunkType.text,
+          text: text,
+          section: currentSection,
+          sourceFile: currentKey,
+          links: adjustedLinks.isNotEmpty ? adjustedLinks : null,
+          inlineStyles: adjustedStyles.isNotEmpty ? adjustedStyles : null,
+          footnotes: adjustedFootnotes.isNotEmpty ? adjustedFootnotes : null,
+          isHeading: currentIsHeading,
+          isDialogue: detectedDialogue,
+          blockRole: chunkRole,
+          publisherTextAlign: currentPublisherTextAlign,
+          publisherLeftIndent: currentPublisherLeftIndent,
+          publisherRightIndent: currentPublisherRightIndent,
+          preserveLineBreaks: currentPreserveLineBreaks,
+          preserveWhitespace: currentPreserveWhitespace,
+          logicalParagraphId: paragraphId,
+          logicalParagraphEndOffset: text.length,
+          listSemantics: listSemantics,
+        ),
+      );
+      if (activeListItem != null) {
+        activeListItem.chunkPositions.add(chunks.length - 1);
+        activeListItem.nextBlockIndex++;
       }
       textBuffer.clear();
       linkBuffer.clear();
       styleBuffer.clear();
       footnoteBuffer.clear();
+      pendingCollapsedWhitespace = false;
     }
 
     if (kDebugMode) {
@@ -858,6 +908,10 @@ class EpubParserService {
       final htmlContent = entry.value;
       final htmlString = htmlContent.Content;
       if (htmlString == null || htmlString.isEmpty) continue;
+      logicalParagraphIndex = 0;
+      imageOwnerIndex = 0;
+      listIndex = 0;
+      listStack.clear();
       final chapterStartChunkCount = chunks.length;
       final chapterStartAnchorCount = anchorMap.length;
       var visitedNodes = 0;
@@ -997,6 +1051,8 @@ class EpubParserService {
                 if (imageBytes != null) {
                   imageCount++;
                   flush();
+                  final imageOwner =
+                      '$currentKey#image-${imageOwnerIndex++}:$src';
                   chunks.add(
                     BookChunk(
                       index: chunkIndex++,
@@ -1004,6 +1060,7 @@ class EpubParserService {
                       section: currentSection,
                       sourceFile: currentKey,
                       imageBytes: imageBytes,
+                      logicalParagraphId: imageOwner,
                     ),
                   );
                 }
@@ -1072,6 +1129,8 @@ class EpubParserService {
                   ? _renderPlainTextTable(node)
                   : encodeReaderTableBlock(parsedTable);
               if (tableText.isNotEmpty) {
+                final paragraphId =
+                    '$currentKey#paragraph-${logicalParagraphIndex++}';
                 chunks.add(
                   BookChunk(
                     index: chunkIndex++,
@@ -1081,6 +1140,8 @@ class EpubParserService {
                     sourceFile: currentKey,
                     blockRole: BookBlockRole.table,
                     preserveLineBreaks: true,
+                    logicalParagraphId: paragraphId,
+                    logicalParagraphEndOffset: tableText.length,
                   ),
                 );
               }
@@ -1130,47 +1191,82 @@ class EpubParserService {
             }
 
             // ── Lists (D-10) ──
-            if (tag == 'ul') {
+            if (tag == 'ul' || tag == 'ol') {
               flush();
-              final wasUl = insideUl;
-              insideUl = true;
+              final ordered = tag == 'ol';
+              final orderedStart = ordered
+                  ? int.tryParse(node.attributes['start']?.trim() ?? '') ?? 1
+                  : null;
+              final parentFrame = listStack.isEmpty ? null : listStack.last;
+              final frame = _ListParseFrame(
+                listId: '$currentKey#list-${listIndex++}',
+                parentListId: parentFrame?.listId,
+                parentItemId: parentFrame?.activeItem?.itemId,
+                ordered: ordered,
+                depth: listStack.length,
+                markerType: ordered
+                    ? _orderedListMarkerType(node.attributes['type'])
+                    : BookListMarkerType.unordered,
+                orderedStart: orderedStart,
+                nextOrdinal: orderedStart ?? 1,
+              );
+              listStack.add(frame);
               for (final child in node.nodes) {
                 visit(child, depth + 1);
               }
-              insideUl = wasUl;
               flush();
-              return;
-            }
-
-            if (tag == 'ol') {
-              flush();
-              final wasOl = insideOl;
-              final prevCounter = olCounter;
-              insideOl = true;
-              olCounter = 0;
-              for (final child in node.nodes) {
-                visit(child, depth + 1);
-              }
-              insideOl = wasOl;
-              olCounter = prevCounter;
-              flush();
+              listStack.removeLast();
               return;
             }
 
             if (tag == 'li') {
-              if (textBuffer.isNotEmpty &&
-                  !textBuffer.toString().endsWith('\n')) {
-                textBuffer.write('\n');
+              if (listStack.isEmpty) {
+                // Malformed orphan item: preserve readable publisher text as
+                // ordinary normalized prose rather than inventing a marker.
+                flush();
+                for (final child in node.nodes) {
+                  visit(child, depth + 1);
+                }
+                flush();
+                return;
               }
-              if (insideOl) {
-                olCounter++;
-                textBuffer.write('$olCounter. ');
-              } else if (insideUl) {
-                textBuffer.write('• ');
+
+              flush();
+              if (_legacyListMarkerOccupiedItsOwnParagraph(node)) {
+                // The previous parser assigned a paragraph slot to its
+                // generated marker before block-first item content. Retain
+                // that gap so later ordinary paragraph IDs do not shift.
+                logicalParagraphIndex++;
               }
+              final frame = listStack.last;
+              final explicitValue = frame.ordered
+                  ? int.tryParse(node.attributes['value']?.trim() ?? '')
+                  : null;
+              final ordinal = frame.ordered
+                  ? explicitValue ?? frame.nextOrdinal
+                  : null;
+              if (frame.ordered) frame.nextOrdinal = ordinal! + 1;
+              final item = _ActiveListItem(
+                itemId: '${frame.listId}#item-${frame.nextItemIndex++}',
+                resolvedOrdinal: ordinal,
+                itemValue: explicitValue,
+              );
+              frame.activeItem = item;
               for (final child in node.nodes) {
                 visit(child, depth + 1);
               }
+              flush();
+
+              if (item.chunkPositions.isNotEmpty) {
+                final finalPosition = item.chunkPositions.last;
+                final finalChunk = chunks[finalPosition];
+                chunks[finalPosition] = finalChunk.copyWith(
+                  listSemantics: finalChunk.listSemantics?.copyWith(
+                    endsItem: true,
+                  ),
+                );
+              }
+              frame.activeItem = null;
               return;
             }
 
@@ -1231,14 +1327,27 @@ class EpubParserService {
                   .replaceAll('\r', '\n')
                   .replaceAll(RegExp(r'[ \t]+'), ' ');
             } else {
-              text = node.text.replaceAll(RegExp(r'\s+'), ' ').trim();
+              final raw = node.text;
+              final leadingWhitespace =
+                  raw.isNotEmpty && RegExp(r'^\s').hasMatch(raw);
+              final trailingWhitespace =
+                  raw.isNotEmpty && RegExp(r'\s$').hasMatch(raw);
+              text = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+              if (text.isNotEmpty &&
+                  textBuffer.isNotEmpty &&
+                  (pendingCollapsedWhitespace || leadingWhitespace) &&
+                  !textBuffer.toString().endsWith(' ') &&
+                  !textBuffer.toString().endsWith('\n')) {
+                textBuffer.write(' ');
+              }
+              pendingCollapsedWhitespace = trailingWhitespace;
             }
             if (text.isNotEmpty) {
               extractedTextChars += text.length;
               final style = currentStyle();
               final startPos = textBuffer.length;
 
-              if (!insideVerse) {
+              if (!insideVerse && currentPreserveWhitespace) {
                 if (textBuffer.isNotEmpty &&
                     !textBuffer.toString().endsWith(' ') &&
                     !textBuffer.toString().endsWith('\n')) {
@@ -1311,12 +1420,10 @@ class EpubParserService {
     );
 
     // Extract chapters from EPUB Table of Contents.
-    final chapters = _epubDiagSync(
-      diagRun,
-      'toc_chapters_extract',
-      {'chunks': merged.length, 'anchorMap': mergedAnchorMap.length},
-      () => _extractTocChapters(book, merged, mergedAnchorMap),
-    );
+    final chapters = _epubDiagSync(diagRun, 'toc_chapters_extract', {
+      'chunks': merged.length,
+      'anchorMap': mergedAnchorMap.length,
+    }, () => _extractTocChapters(book, merged, mergedAnchorMap));
 
     // Log section breakdown.
     final fmCount = merged
@@ -1438,6 +1545,8 @@ class EpubParserService {
       // Only merge chunks from the same section AND same source file. Do not merge headings with normal text
       if (pendingWords < 15 &&
           (pendingWords + chunkWords) <= _hardMaxWords &&
+          pendingChunk.logicalParagraphId != null &&
+          pendingChunk.logicalParagraphId == chunk.logicalParagraphId &&
           pendingChunk.section == chunk.section &&
           pendingChunk.sourceFile == chunk.sourceFile &&
           pendingChunk.isHeading == chunk.isHeading &&
@@ -1456,14 +1565,14 @@ class EpubParserService {
             publisherRightIndent: pendingChunk.publisherRightIndent,
             preserveLineBreaks: pendingChunk.preserveLineBreaks,
             preserveWhitespace: pendingChunk.preserveWhitespace,
-            text: '$pendingText\n\n$text',
+            text: '$pendingText$text',
             links: [
               ...?pendingChunk.links,
               // Offset the current chunk's links by the combined text position.
               ...?chunk.links?.map(
                 (l) => LinkMetadata(
-                  start: l.start + pendingText.length + 2,
-                  end: l.end + pendingText.length + 2,
+                  start: l.start + pendingText.length,
+                  end: l.end + pendingText.length,
                   url: l.url,
                 ),
               ),
@@ -1472,8 +1581,8 @@ class EpubParserService {
               ...?pendingChunk.inlineStyles,
               ...?chunk.inlineStyles?.map(
                 (s) => s.copyWith(
-                  start: s.start + pendingText.length + 2,
-                  end: s.end + pendingText.length + 2,
+                  start: s.start + pendingText.length,
+                  end: s.end + pendingText.length,
                 ),
               ),
             ],
@@ -1481,12 +1590,18 @@ class EpubParserService {
               ...?pendingChunk.footnotes,
               ...?chunk.footnotes?.map(
                 (f) => FootnoteRef(
-                  position: f.position + pendingText.length + 2,
+                  position: f.position + pendingText.length,
                   label: f.label,
                   content: f.content,
                 ),
               ),
             ],
+            logicalParagraphId: pendingChunk.logicalParagraphId,
+            logicalParagraphStartOffset:
+                pendingChunk.logicalParagraphStartOffset,
+            logicalParagraphEndOffset: chunk.logicalParagraphEndOffset,
+            isLogicalParagraphStart: pendingChunk.isLogicalParagraphStart,
+            isLogicalParagraphEnd: chunk.isLogicalParagraphEnd,
           ),
           sourceIndices: [...pendingValue.sourceIndices, chunk.index],
         );
@@ -1599,42 +1714,19 @@ class EpubParserService {
       ];
     }
 
-    final subTexts = _splitBySentence(fullText, _targetWords);
-    final chunks = <BookChunk>[];
-    for (int i = 0; i < subTexts.length; i++) {
-      chunks.add(
-        BookChunk(index: i, type: BookChunkType.text, text: subTexts[i]),
-      );
-    }
+    final chunks = <BookChunk>[
+      BookChunk(
+        index: 0,
+        type: BookChunkType.text,
+        text: fullText,
+        logicalParagraphId: 'fallback#paragraph-0',
+        logicalParagraphEndOffset: fullText.length,
+      ),
+    ];
     if (kDebugMode) {
       debugPrint('EpubParser: fallback produced ${chunks.length} chunks');
     }
     return chunks;
-  }
-
-  // ─── Text splitting utilities ────────────────────────────────────────
-
-  /// Split text into chunks of approximately [targetWords] words each,
-  /// breaking at sentence boundaries.
-  List<String> _splitBySentence(String text, int targetWords) {
-    final sentences = _splitIntoSentences(text);
-    final List<String> result = [];
-    final buf = StringBuffer();
-
-    for (final s in sentences) {
-      final bufWords = _wordCount(buf.toString());
-      final sWords = _wordCount(s);
-      if (bufWords + sWords > targetWords && buf.isNotEmpty) {
-        result.add(buf.toString().trim());
-        buf.clear();
-      }
-      if (buf.isNotEmpty) buf.write(' ');
-      buf.write(s);
-    }
-    if (buf.isNotEmpty && buf.toString().trim().isNotEmpty) {
-      result.add(buf.toString().trim());
-    }
-    return result;
   }
 
   /// Count words efficiently by counting whitespace boundaries.
@@ -1658,79 +1750,6 @@ class EpubParserService {
       }
     }
     return count;
-  }
-
-  List<String> _splitIntoSentences(String text) {
-    final List<String> sentences = [];
-    final buffer = StringBuffer();
-
-    for (int i = 0; i < text.length; i++) {
-      final char = text[i];
-      buffer.write(char);
-      if ((char == '.' || char == '!' || char == '?') &&
-          _isEndOfSentence(text, i)) {
-        while (i + 1 < text.length && _isClosingQuote(text[i + 1])) {
-          i++;
-          buffer.write(text[i]);
-        }
-        sentences.add(buffer.toString().trim());
-        buffer.clear();
-      }
-    }
-    if (buffer.isNotEmpty && buffer.toString().trim().isNotEmpty) {
-      sentences.add(buffer.toString().trim());
-    }
-    return sentences;
-  }
-
-  bool _isEndOfSentence(String text, int i) {
-    // Check for abbreviations before the period
-    if (text[i] == '.') {
-      // Extract the word before the dot
-      int wordStart = i - 1;
-      while (wordStart >= 0 &&
-          text[wordStart] != ' ' &&
-          text[wordStart] != '\n') {
-        wordStart--;
-      }
-      wordStart++;
-      if (wordStart < i) {
-        final wordBeforeDot = text.substring(wordStart, i).toLowerCase();
-        // Check single-word abbreviations (e.g., "Dr", "Mr")
-        if (_abbreviations.contains(wordBeforeDot)) return false;
-        // Check dotted abbreviations (e.g., "U.S", "e.g")
-        if (_dottedAbbreviations.contains(wordBeforeDot)) return false;
-        // Single uppercase letter + dot (initials like "J." in "J. K. Rowling")
-        if (wordBeforeDot.length == 1 &&
-            wordBeforeDot == wordBeforeDot.toUpperCase() &&
-            wordBeforeDot != wordBeforeDot.toLowerCase()) {
-          return false;
-        }
-      }
-    }
-
-    int j = i + 1;
-    while (j < text.length && _isClosingQuoteOrSpace(text[j])) {
-      j++;
-    }
-    if (j >= text.length) return true;
-    final next = text[j];
-    return next == next.toUpperCase() && next != next.toLowerCase();
-  }
-
-  bool _isClosingQuoteOrSpace(String char) {
-    return char == ' ' ||
-        char == '\n' ||
-        char == '\r' ||
-        char == '\t' ||
-        _isClosingQuote(char);
-  }
-
-  bool _isClosingQuote(String char) {
-    return char == '"' ||
-        char == '\u201D' ||
-        char == '\u2019' ||
-        char == '\u00BB';
   }
 
   // ─── Table rendering (D-14) ──────────────────────────────────────────
@@ -1764,9 +1783,12 @@ class EpubParserService {
       }
     }
 
-    if (cellRows.length < 2) return null;
+    if (cellRows.isEmpty) return null;
     final table = ReaderTableBlock.fromCellRows(cellRows);
-    if (table.columnCount < 2 || table.rows.isEmpty) return null;
+    if (table.columnCount < 2 ||
+        (table.headers.isEmpty && table.rows.isEmpty)) {
+      return null;
+    }
     return table;
   }
 

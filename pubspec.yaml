@@ -27,6 +27,7 @@ dependencies:
   share_plus: ^12.0.1
   flutter_svg: ^2.0.10+1
   intl: any
+  characters: ^1.4.0
 
 dev_dependencies:
   flutter_test:
@@ -47,5 +48,208 @@ flutter:
     - assets/images/nalori_mark.svg
     - assets/images/nalori_app_icon.png
     - assets/catalog/gutenberg_starter_catalog.json
+    # Test-only local Lexend bytes registered through the reader-contract
+    # FontLoader alias; this does not declare or change a production family.
+    - assets/fonts/reader_contract/Lexend-Regular.ttf
+    - assets/fonts/reader_contract/Lexend-SemiBold.ttf
+    - assets/fonts/reader_contract/Lexend-Bold.ttf
+    - assets/fonts/reader_contract/Lexend-Black.ttf
+    - assets/fonts/reader/
+    - assets/fonts/reader/licenses/
     - test/fixtures/books/feature_rich_lazy_reader.epub
     - Dialogues -- Plato.epub
+  fonts:
+    - family: NaloriReaderInter
+      fonts:
+        - asset: assets/fonts/reader/Inter-300-Normal.ttf
+          weight: 300
+        - asset: assets/fonts/reader/Inter-400-Normal.ttf
+          weight: 400
+        - asset: assets/fonts/reader/Inter-500-Normal.ttf
+          weight: 500
+        - asset: assets/fonts/reader/Inter-600-Normal.ttf
+          weight: 600
+        - asset: assets/fonts/reader/Inter-700-Normal.ttf
+          weight: 700
+        - asset: assets/fonts/reader/Inter-800-Normal.ttf
+          weight: 800
+        - asset: assets/fonts/reader/Inter-900-Normal.ttf
+          weight: 900
+        - asset: assets/fonts/reader/Inter-300-Italic.ttf
+          weight: 300
+          style: italic
+        - asset: assets/fonts/reader/Inter-400-Italic.ttf
+          weight: 400
+          style: italic
+        - asset: assets/fonts/reader/Inter-500-Italic.ttf
+          weight: 500
+          style: italic
+        - asset: assets/fonts/reader/Inter-600-Italic.ttf
+          weight: 600
+          style: italic
+        - asset: assets/fonts/reader/Inter-700-Italic.ttf
+          weight: 700
+          style: italic
+    - family: NaloriReaderRobotoMono
+      fonts:
+        - asset: assets/fonts/reader/RobotoMono-300-Normal.ttf
+          weight: 300
+        - asset: assets/fonts/reader/RobotoMono-400-Normal.ttf
+          weight: 400
+        - asset: assets/fonts/reader/RobotoMono-500-Normal.ttf
+          weight: 500
+        - asset: assets/fonts/reader/RobotoMono-600-Normal.ttf
+          weight: 600
+        - asset: assets/fonts/reader/RobotoMono-700-Normal.ttf
+          weight: 700
+        - asset: assets/fonts/reader/RobotoMono-300-Italic.ttf
+          weight: 300
+          style: italic
+        - asset: assets/fonts/reader/RobotoMono-400-Italic.ttf
+          weight: 400
+          style: italic
+        - asset: assets/fonts/reader/RobotoMono-500-Italic.ttf
+          weight: 500
+          style: italic
+        - asset: assets/fonts/reader/RobotoMono-600-Italic.ttf
+          weight: 600
+          style: italic
+        - asset: assets/fonts/reader/RobotoMono-700-Italic.ttf
+          weight: 700
+          style: italic
+    - family: NaloriReaderMerriweather
+      fonts:
+        - asset: assets/fonts/reader/Merriweather-300-Normal.ttf
+          weight: 300
+        - asset: assets/fonts/reader/Merriweather-400-Normal.ttf
+          weight: 400
+        - asset: assets/fonts/reader/Merriweather-500-Normal.ttf
+          weight: 500
+        - asset: assets/fonts/reader/Merriweather-600-Normal.ttf
+          weight: 600
+        - asset: assets/fonts/reader/Merriweather-700-Normal.ttf
+          weight: 700
+        - asset: assets/fonts/reader/Merriweather-800-Normal.ttf
+          weight: 800
+        - asset: assets/fonts/reader/Merriweather-900-Normal.ttf
+          weight: 900
+        - asset: assets/fonts/reader/Merriweather-300-Italic.ttf
+          weight: 300
+          style: italic
+        - asset: assets/fonts/reader/Merriweather-400-Italic.ttf
+          weight: 400
+          style: italic
+        - asset: assets/fonts/reader/Merriweather-500-Italic.ttf
+          weight: 500
+          style: italic
+        - asset: assets/fonts/reader/Merriweather-600-Italic.ttf
+          weight: 600
+          style: italic
+        - asset: assets/fonts/reader/Merriweather-700-Italic.ttf
+          weight: 700
+          style: italic
+    - family: NaloriReaderLora
+      fonts:
+        - asset: assets/fonts/reader/Lora-400-Normal.ttf
+          weight: 400
+        - asset: assets/fonts/reader/Lora-500-Normal.ttf
+          weight: 500
+        - asset: assets/fonts/reader/Lora-600-Normal.ttf
+          weight: 600
+        - asset: assets/fonts/reader/Lora-700-Normal.ttf
+          weight: 700
+        - asset: assets/fonts/reader/Lora-400-Italic.ttf
+          weight: 400
+          style: italic
+        - asset: assets/fonts/reader/Lora-500-Italic.ttf
+          weight: 500
+          style: italic
+        - asset: assets/fonts/reader/Lora-600-Italic.ttf
+          weight: 600
+          style: italic
+        - asset: assets/fonts/reader/Lora-700-Italic.ttf
+          weight: 700
+          style: italic
+    - family: NaloriReaderEBGaramond
+      fonts:
+        - asset: assets/fonts/reader/EBGaramond-400-Normal.ttf
+          weight: 400
+        - asset: assets/fonts/reader/EBGaramond-500-Normal.ttf
+          weight: 500
+        - asset: assets/fonts/reader/EBGaramond-600-Normal.ttf
+          weight: 600
+        - asset: assets/fonts/reader/EBGaramond-700-Normal.ttf
+          weight: 700
+        - asset: assets/fonts/reader/EBGaramond-800-Normal.ttf
+          weight: 800
+        - asset: assets/fonts/reader/EBGaramond-400-Italic.ttf
+          weight: 400
+          style: italic
+        - asset: assets/fonts/reader/EBGaramond-500-Italic.ttf
+          weight: 500
+          style: italic
+        - asset: assets/fonts/reader/EBGaramond-600-Italic.ttf
+          weight: 600
+          style: italic
+        - asset: assets/fonts/reader/EBGaramond-700-Italic.ttf
+          weight: 700
+          style: italic
+    - family: NaloriReaderLiterata
+      fonts:
+        - asset: assets/fonts/reader/Literata-300-Normal.ttf
+          weight: 300
+        - asset: assets/fonts/reader/Literata-400-Normal.ttf
+          weight: 400
+        - asset: assets/fonts/reader/Literata-500-Normal.ttf
+          weight: 500
+        - asset: assets/fonts/reader/Literata-600-Normal.ttf
+          weight: 600
+        - asset: assets/fonts/reader/Literata-700-Normal.ttf
+          weight: 700
+        - asset: assets/fonts/reader/Literata-800-Normal.ttf
+          weight: 800
+        - asset: assets/fonts/reader/Literata-900-Normal.ttf
+          weight: 900
+        - asset: assets/fonts/reader/Literata-300-Italic.ttf
+          weight: 300
+          style: italic
+        - asset: assets/fonts/reader/Literata-400-Italic.ttf
+          weight: 400
+          style: italic
+        - asset: assets/fonts/reader/Literata-500-Italic.ttf
+          weight: 500
+          style: italic
+        - asset: assets/fonts/reader/Literata-600-Italic.ttf
+          weight: 600
+          style: italic
+        - asset: assets/fonts/reader/Literata-700-Italic.ttf
+          weight: 700
+          style: italic
+    - family: NaloriReaderAtkinsonHyperlegible
+      fonts:
+        - asset: assets/fonts/reader/AtkinsonHyperlegible-400-Normal.ttf
+          weight: 400
+        - asset: assets/fonts/reader/AtkinsonHyperlegible-400-Italic.ttf
+          weight: 400
+          style: italic
+        - asset: assets/fonts/reader/AtkinsonHyperlegible-700-Normal.ttf
+          weight: 700
+        - asset: assets/fonts/reader/AtkinsonHyperlegible-700-Italic.ttf
+          weight: 700
+          style: italic
+    - family: NaloriReaderLexend
+      fonts:
+        - asset: assets/fonts/reader/Lexend-300-Normal.ttf
+          weight: 300
+        - asset: assets/fonts/reader/Lexend-400-Normal.ttf
+          weight: 400
+        - asset: assets/fonts/reader/Lexend-500-Normal.ttf
+          weight: 500
+        - asset: assets/fonts/reader/Lexend-600-Normal.ttf
+          weight: 600
+        - asset: assets/fonts/reader/Lexend-700-Normal.ttf
+          weight: 700
+        - asset: assets/fonts/reader/Lexend-800-Normal.ttf
+          weight: 800
+        - asset: assets/fonts/reader/Lexend-900-Normal.ttf
+          weight: 900

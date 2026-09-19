@@ -123,24 +123,164 @@ class ReaderTableBlock {
   }
 }
 
-String encodeReaderTableBlock(ReaderTableBlock table) {
-  final cellRows = table.cellRows.isNotEmpty
+final class ReaderTableNormalizationException implements FormatException {
+  const ReaderTableNormalizationException(this.message, [this.source]);
+
+  @override
+  final String message;
+  @override
+  final Object? source;
+  @override
+  int? get offset => null;
+
+  @override
+  String toString() => 'ReaderTableNormalizationException: $message';
+}
+
+ReaderTableBlock canonicalizeReaderTableBlock(ReaderTableBlock table) {
+  final sourceRows = table.cellRows.isNotEmpty
       ? table.cellRows
       : <List<ReaderTableCell>>[
           if (table.headers.isNotEmpty)
-            [
-              for (final cell in table.headers)
-                ReaderTableCell(text: cell, isHeader: true),
+            <ReaderTableCell>[
+              for (final value in table.headers)
+                ReaderTableCell(text: value, isHeader: true),
             ],
           for (final row in table.rows)
-            [for (final cell in row) ReaderTableCell(text: cell)],
+            <ReaderTableCell>[
+              for (final value in row) ReaderTableCell(text: value),
+            ],
         ];
+  final immutableRows = List<List<ReaderTableCell>>.unmodifiable(
+    sourceRows.map(
+      (row) => List<ReaderTableCell>.unmodifiable(
+        row.map(
+          (cell) => ReaderTableCell(
+            text: cell.text,
+            isHeader: cell.isHeader,
+            columnSpan: cell.columnSpan,
+            rowSpan: cell.rowSpan,
+          ),
+        ),
+      ),
+    ),
+  );
+  final normalized = ReaderTableBlock.fromCellRows(immutableRows);
+  if (normalized.columnCount < 2 ||
+      (normalized.headers.isEmpty && normalized.rows.isEmpty)) {
+    throw const ReaderTableNormalizationException(
+      'Table must contain at least one nonempty row and two columns.',
+    );
+  }
+  return ReaderTableBlock(
+    headers: List<String>.unmodifiable(normalized.headers),
+    rows: List<List<String>>.unmodifiable(
+      normalized.rows.map(List<String>.unmodifiable),
+    ),
+    cellRows: immutableRows,
+  );
+}
+
+String encodeReaderTableBlock(ReaderTableBlock table) {
+  final cellRows = canonicalizeReaderTableBlock(table).cellRows;
   final jsonText = jsonEncode({
     'rows': [
       for (final row in cellRows) [for (final cell in row) cell.toJson()],
     ],
   });
   return '$_encodedTablePrefix${base64Url.encode(utf8.encode(jsonText))}';
+}
+
+ReaderTableBlock? normalizedReaderTableFromText(String text) {
+  final blocks = parseReaderContentBlocks(text);
+  if (blocks.length != 1 ||
+      blocks.single.type != ReaderContentBlockType.table ||
+      blocks.single.table == null) {
+    return null;
+  }
+  try {
+    return canonicalizeReaderTableBlock(blocks.single.table!);
+  } on ReaderTableNormalizationException {
+    return null;
+  }
+}
+
+ReaderTableBlock requireNormalizedReaderTable(String text) {
+  final table = normalizedReaderTableFromText(text);
+  if (table == null) {
+    throw ReaderTableNormalizationException(
+      'Unsupported or malformed table block.',
+      text,
+    );
+  }
+  return table;
+}
+
+/// Returns a canonical fragment for a half-open interval of table body rows.
+///
+/// Header cells remain structural context. Native cell rows are retained so
+/// renderer-supported header/body roles and spans are not flattened through
+/// the derived string matrix when a canonical source slice is reconstructed.
+ReaderTableBlock sliceNormalizedReaderTableBodyRows(
+  ReaderTableBlock source,
+  int rowStart,
+  int rowEndExclusive,
+) {
+  final table = canonicalizeReaderTableBlock(source);
+  if (rowStart < 0 ||
+      rowEndExclusive <= rowStart ||
+      rowEndExclusive > table.rows.length) {
+    throw ReaderTableNormalizationException(
+      'Invalid table body-row interval [$rowStart, $rowEndExclusive).',
+      table,
+    );
+  }
+  final hasNativeHeader =
+      table.cellRows.isNotEmpty &&
+      table.cellRows.first.any((cell) => cell.isHeader);
+  final headerRows = hasNativeHeader ? 1 : 0;
+  final bodyCellRows = table.cellRows.skip(headerRows).toList(growable: false);
+  if (bodyCellRows.length != table.rows.length) {
+    return canonicalizeReaderTableBlock(
+      ReaderTableBlock(
+        headers: table.headers,
+        rows: table.rows.sublist(rowStart, rowEndExclusive),
+      ),
+    );
+  }
+
+  ReaderTableCell clipSpan(ReaderTableCell cell, int remainingRows) =>
+      ReaderTableCell(
+        text: cell.text,
+        isHeader: cell.isHeader,
+        columnSpan: cell.columnSpan,
+        rowSpan: cell.rowSpan.clamp(1, remainingRows),
+      );
+
+  final selectedRows = <List<ReaderTableCell>>[
+    if (hasNativeHeader)
+      <ReaderTableCell>[
+        for (final cell in table.cellRows.first)
+          ReaderTableCell(
+            text: cell.text,
+            isHeader: cell.isHeader,
+            columnSpan: cell.columnSpan,
+            // A header rowspan has already consumed [rowStart] body rows.
+            rowSpan: (cell.rowSpan - rowStart).clamp(
+              1,
+              1 + rowEndExclusive - rowStart,
+            ),
+          ),
+      ],
+    for (var index = rowStart; index < rowEndExclusive; index++)
+      <ReaderTableCell>[
+        for (final cell in bodyCellRows[index])
+          clipSpan(cell, rowEndExclusive - index),
+      ],
+  ];
+  return canonicalizeReaderTableBlock(
+    ReaderTableBlock.fromCellRows(selectedRows),
+  );
 }
 
 ReaderTableBlock? _decodeReaderTableBlock(String text) {
@@ -168,7 +308,10 @@ ReaderTableBlock? _decodeReaderTableBlock(String text) {
     if (cellRows.isEmpty) return null;
 
     final table = ReaderTableBlock.fromCellRows(cellRows);
-    if (table.columnCount < 2 || table.rows.isEmpty) return null;
+    if (table.columnCount < 2 ||
+        (table.headers.isEmpty && table.rows.isEmpty)) {
+      return null;
+    }
     return table;
   } catch (_) {
     return null;

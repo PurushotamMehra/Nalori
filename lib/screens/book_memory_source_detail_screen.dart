@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../models/book_memory_entry.dart';
+import '../models/derived_book_index.dart';
 import '../models/reading_settings.dart';
 import '../services/book_memory_entry_service.dart';
 import '../services/highlight_service.dart';
@@ -64,9 +65,11 @@ class _BookMemorySourceDetailScreenState
     int? overrideChunkIndex,
     int? originalStartOffset,
     String? sourceText,
+    DerivedSourceRange? sourceRange,
   }) async {
     final chunkIndex = overrideChunkIndex ?? _preview.originalChunkIndex;
-    if (chunkIndex == null) return;
+    final resolvedSourceRange = sourceRange ?? _preview.sourceRange;
+    if (chunkIndex == null && resolvedSourceRange == null) return;
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -81,6 +84,7 @@ class _BookMemorySourceDetailScreenState
               _preview.sourceText ??
               _preview.body ??
               _preview.title,
+          initialDerivedSourceRange: resolvedSourceRange,
         ),
       ),
     );
@@ -347,7 +351,9 @@ class _BookMemorySourceDetailScreenState
             const SizedBox(width: 10),
             Expanded(
               child: OutlinedButton.icon(
-                onPressed: _preview.originalChunkIndex == null
+                onPressed:
+                    _preview.originalChunkIndex == null &&
+                        _preview.sourceRange == null
                     ? null
                     : _goToText,
                 icon: const Icon(Icons.short_text_rounded, size: 18),
@@ -474,7 +480,7 @@ class _BookMemorySourceDetailScreenState
     final text = expanded ? displayText : _previewText(displayText);
     final canExpand = item.text.length > _detailPreviewLength;
     final canNavigate =
-        item.originalChunkIndex != null &&
+        (item.originalChunkIndex != null || item.sourceRange != null) &&
         (!item.spoilerProtected || spoilerRevealed);
     final trailingActions = <Widget>[
       if (item.spoilerProtected)
@@ -501,6 +507,7 @@ class _BookMemorySourceDetailScreenState
             overrideChunkIndex: item.originalChunkIndex,
             originalStartOffset: item.originalStartOffset,
             sourceText: item.sourceText ?? item.text,
+            sourceRange: item.sourceRange,
           ),
         ),
     ];

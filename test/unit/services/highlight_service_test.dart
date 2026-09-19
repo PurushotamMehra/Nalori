@@ -195,6 +195,34 @@ void main() {
       expect(updated, isEmpty);
     });
 
+    test('removes every segment of one character declaration by id', () async {
+      await highlightService.add(
+        createHighlight(
+          id: 'character-declaration',
+          originalChunkIndex: 0,
+          startOffset: 0,
+          endOffset: 4,
+          text: 'Mary',
+          type: HighlightType.character,
+        ),
+      );
+      await highlightService.add(
+        createHighlight(
+          id: 'character-declaration',
+          originalChunkIndex: 1,
+          startOffset: 0,
+          endOffset: 4,
+          text: 'Jane',
+          type: HighlightType.character,
+        ),
+      );
+
+      final updated = await highlightService.remove('character-declaration');
+
+      expect(updated, isEmpty);
+      expect(await highlightService.load(), isEmpty);
+    });
+
     test('filters highlights by original chunk', () async {
       await highlightService.add(createHighlight());
       await highlightService.add(

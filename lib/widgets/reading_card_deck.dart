@@ -12,11 +12,33 @@ typedef ReadingDeckCardBuilder =
       bool isCurrent,
     );
 
+class ReadingCardDeckNavigation {
+  const ReadingCardDeckNavigation({
+    required this.started,
+    required this.completed,
+  });
+
+  final bool started;
+  final Future<bool> completed;
+}
+
 class ReadingCardDeckController {
   _ReadingCardDeckState? _state;
 
   bool animateToIndex(int targetIndex, Duration duration, Curve curve) {
-    return _state?._animateToIndex(targetIndex, duration, curve) ?? false;
+    return startNavigation(targetIndex, duration, curve).started;
+  }
+
+  ReadingCardDeckNavigation startNavigation(
+    int targetIndex,
+    Duration duration,
+    Curve curve,
+  ) {
+    return _state?._startNavigation(targetIndex, duration, curve) ??
+        ReadingCardDeckNavigation(
+          started: false,
+          completed: Future<bool>.value(false),
+        );
   }
 
   void _attach(_ReadingCardDeckState state) {
@@ -79,6 +101,7 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
   Timer? _swipeStartTimer;
   final Map<_DeckCardCacheKey, Widget> _cardWidgetCache = {};
   bool _isDisposed = false;
+  Completer<bool>? _programmaticNavigationCompleter;
   double _lastLayoutExtent = 1;
 
   @override
@@ -98,6 +121,8 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
   void didUpdateWidget(covariant ReadingCardDeck oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.controller != widget.controller) {
+      _settleController.stop();
+      _cancelProgrammaticNavigation();
       oldWidget.controller?._detach(this);
       widget.controller?._attach(this);
     }
@@ -117,6 +142,7 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
       _settleController.stop();
       _settleAnimation = null;
       _dragOffset = 0;
+      _cancelProgrammaticNavigation();
     }
   }
 
@@ -127,6 +153,7 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
     _swipeStartTimer = null;
     _activePointer = null;
     _velocityTracker = null;
+    _cancelProgrammaticNavigation();
     widget.controller?._detach(this);
     _settleController.dispose();
     super.dispose();
@@ -221,6 +248,7 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
     }
 
     _settleController.stop();
+    _cancelProgrammaticNavigation();
     if (!mounted || _isDisposed) return;
     setState(() {
       _dragOffset = _resistedOffset(_dragOffset + _primaryDelta(delta));
@@ -299,11 +327,30 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
     );
   }
 
-  bool _animateToIndex(int targetIndex, Duration duration, Curve curve) {
-    if (!mounted || _isDisposed) return false;
-    if (widget.itemCount <= 1) return false;
-    if (targetIndex < 0 || targetIndex >= widget.itemCount) return false;
-    if ((targetIndex - widget.currentIndex).abs() != 1) return false;
+  ReadingCardDeckNavigation _startNavigation(
+    int targetIndex,
+    Duration duration,
+    Curve curve,
+  ) {
+    if (!mounted || _isDisposed) {
+      return ReadingCardDeckNavigation(
+        started: false,
+        completed: Future<bool>.value(false),
+      );
+    }
+    if (widget.itemCount <= 1 ||
+        targetIndex < 0 ||
+        targetIndex >= widget.itemCount ||
+        (targetIndex - widget.currentIndex).abs() != 1) {
+      return ReadingCardDeckNavigation(
+        started: false,
+        completed: Future<bool>.value(false),
+      );
+    }
+
+    _cancelProgrammaticNavigation();
+    final completer = Completer<bool>();
+    _programmaticNavigationCompleter = completer;
 
     final safeExtent = math.max(_lastLayoutExtent, 1).toDouble();
     final endOffset = targetIndex > widget.currentIndex
@@ -316,10 +363,25 @@ class _ReadingCardDeckState extends State<ReadingCardDeck>
       onComplete: () {
         if (!mounted) return;
         _dragOffset = 0;
+        if (identical(_programmaticNavigationCompleter, completer)) {
+          _programmaticNavigationCompleter = null;
+          completer.complete(true);
+        }
         widget.onIndexChanged(targetIndex);
       },
     );
-    return true;
+    return ReadingCardDeckNavigation(
+      started: true,
+      completed: completer.future,
+    );
+  }
+
+  void _cancelProgrammaticNavigation() {
+    final completer = _programmaticNavigationCompleter;
+    _programmaticNavigationCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.complete(false);
+    }
   }
 
   void _animateDragTo(

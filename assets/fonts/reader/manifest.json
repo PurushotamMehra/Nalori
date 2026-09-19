@@ -1,0 +1,1343 @@
+{
+  "descriptorSource": "google_fonts 8.0.2",
+  "families": [
+    {
+      "assets": [
+        {
+          "byteLength": 325724,
+          "path": "assets/fonts/reader/Inter-300-Normal.ttf",
+          "sha256": "8641cf8fd5e04d0f94062395a2d1ab1ba5467831af690069e8f3ea0efe640d70",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/8641cf8fd5e04d0f94062395a2d1ab1ba5467831af690069e8f3ea0efe640d70.ttf",
+          "weight": 300
+        },
+        {
+          "byteLength": 324796,
+          "path": "assets/fonts/reader/Inter-400-Normal.ttf",
+          "sha256": "15b294b67f2f8bbc04d990023ef4aec66502b87dc9040d84abe5f896ccb693de",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/15b294b67f2f8bbc04d990023ef4aec66502b87dc9040d84abe5f896ccb693de.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 325280,
+          "path": "assets/fonts/reader/Inter-500-Normal.ttf",
+          "sha256": "36a36ff7ac46dc2aeceac3a80a87a67e7b844b8fc936699259aac8fba9bcf734",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/36a36ff7ac46dc2aeceac3a80a87a67e7b844b8fc936699259aac8fba9bcf734.ttf",
+          "weight": 500
+        },
+        {
+          "byteLength": 326024,
+          "path": "assets/fonts/reader/Inter-600-Normal.ttf",
+          "sha256": "334bb2c51aeba5f566abac8d03a7e75ab3234d6926b52e92a85dc704129258b5",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/334bb2c51aeba5f566abac8d03a7e75ab3234d6926b52e92a85dc704129258b5.ttf",
+          "weight": 600
+        },
+        {
+          "byteLength": 326444,
+          "path": "assets/fonts/reader/Inter-700-Normal.ttf",
+          "sha256": "76121a34a606cc8a0e1ef5a47d2b9ba9678c41f5c852d63eb28f62069373bfad",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/76121a34a606cc8a0e1ef5a47d2b9ba9678c41f5c852d63eb28f62069373bfad.ttf",
+          "weight": 700
+        },
+        {
+          "byteLength": 327300,
+          "path": "assets/fonts/reader/Inter-800-Normal.ttf",
+          "sha256": "6af943899936fd3fd15a5889db4a384cec311c9bfe33d74bcfd3e0ae56f1b1d1",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/6af943899936fd3fd15a5889db4a384cec311c9bfe33d74bcfd3e0ae56f1b1d1.ttf",
+          "weight": 800
+        },
+        {
+          "byteLength": 327236,
+          "path": "assets/fonts/reader/Inter-900-Normal.ttf",
+          "sha256": "d892b18d080d1200aa41ea8851da84dd8c24c33843d491fa034ac57b16f22973",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/d892b18d080d1200aa41ea8851da84dd8c24c33843d491fa034ac57b16f22973.ttf",
+          "weight": 900
+        },
+        {
+          "byteLength": 329188,
+          "path": "assets/fonts/reader/Inter-300-Italic.ttf",
+          "sha256": "c5261dd4a04dd4db44151b40873e9c3e4b430e8c24fe1c644096299eaa02a055",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/c5261dd4a04dd4db44151b40873e9c3e4b430e8c24fe1c644096299eaa02a055.ttf",
+          "weight": 300
+        },
+        {
+          "byteLength": 328228,
+          "path": "assets/fonts/reader/Inter-400-Italic.ttf",
+          "sha256": "0e6e7a16caca2f42fb4966bf550abe48a84dc8de32d326797c8c03e6357c0133",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/0e6e7a16caca2f42fb4966bf550abe48a84dc8de32d326797c8c03e6357c0133.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 328740,
+          "path": "assets/fonts/reader/Inter-500-Italic.ttf",
+          "sha256": "9f84b48a486d84347767cb5ece2e783df7ebe8125afad8766bbf2e37a1d6f229",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/9f84b48a486d84347767cb5ece2e783df7ebe8125afad8766bbf2e37a1d6f229.ttf",
+          "weight": 500
+        },
+        {
+          "byteLength": 329596,
+          "path": "assets/fonts/reader/Inter-600-Italic.ttf",
+          "sha256": "177d819b8ba335a1bf59f59e34a53d679c0f755166f8afd396ade32048b36bbf",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/177d819b8ba335a1bf59f59e34a53d679c0f755166f8afd396ade32048b36bbf.ttf",
+          "weight": 600
+        },
+        {
+          "byteLength": 330108,
+          "path": "assets/fonts/reader/Inter-700-Italic.ttf",
+          "sha256": "cf34025c1822d7ccfe8836913810b34a92a3c41417a24c9aa5bac8dd717e08ea",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/cf34025c1822d7ccfe8836913810b34a92a3c41417a24c9aa5bac8dd717e08ea.ttf",
+          "weight": 700
+        }
+      ],
+      "family": "Inter",
+      "licensePath": "assets/fonts/reader/licenses/Inter-OFL.txt",
+      "localFamily": "NaloriReaderInter",
+      "mappings": [
+        {
+          "assetSha256": "8641cf8fd5e04d0f94062395a2d1ab1ba5467831af690069e8f3ea0efe640d70",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 300,
+          "requestedStyle": "normal",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "15b294b67f2f8bbc04d990023ef4aec66502b87dc9040d84abe5f896ccb693de",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 400,
+          "requestedStyle": "normal",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "36a36ff7ac46dc2aeceac3a80a87a67e7b844b8fc936699259aac8fba9bcf734",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 500,
+          "requestedStyle": "normal",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "334bb2c51aeba5f566abac8d03a7e75ab3234d6926b52e92a85dc704129258b5",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 600,
+          "requestedStyle": "normal",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "76121a34a606cc8a0e1ef5a47d2b9ba9678c41f5c852d63eb28f62069373bfad",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 700
+        },
+        {
+          "assetSha256": "6af943899936fd3fd15a5889db4a384cec311c9bfe33d74bcfd3e0ae56f1b1d1",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 800,
+          "requestedStyle": "normal",
+          "requestedWeight": 800
+        },
+        {
+          "assetSha256": "d892b18d080d1200aa41ea8851da84dd8c24c33843d491fa034ac57b16f22973",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 900,
+          "requestedStyle": "normal",
+          "requestedWeight": 900
+        },
+        {
+          "assetSha256": "c5261dd4a04dd4db44151b40873e9c3e4b430e8c24fe1c644096299eaa02a055",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 300,
+          "requestedStyle": "italic",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "0e6e7a16caca2f42fb4966bf550abe48a84dc8de32d326797c8c03e6357c0133",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 400,
+          "requestedStyle": "italic",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "9f84b48a486d84347767cb5ece2e783df7ebe8125afad8766bbf2e37a1d6f229",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 500,
+          "requestedStyle": "italic",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "177d819b8ba335a1bf59f59e34a53d679c0f755166f8afd396ade32048b36bbf",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 600,
+          "requestedStyle": "italic",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "cf34025c1822d7ccfe8836913810b34a92a3c41417a24c9aa5bac8dd717e08ea",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 700,
+          "requestedStyle": "italic",
+          "requestedWeight": 700
+        }
+      ]
+    },
+    {
+      "assets": [
+        {
+          "byteLength": 79684,
+          "path": "assets/fonts/reader/RobotoMono-300-Normal.ttf",
+          "sha256": "0707339daafe005a4f25ffb35c018208ac02f1c35b14405773f36d88a9aad07e",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/0707339daafe005a4f25ffb35c018208ac02f1c35b14405773f36d88a9aad07e.ttf",
+          "weight": 300
+        },
+        {
+          "byteLength": 78924,
+          "path": "assets/fonts/reader/RobotoMono-400-Normal.ttf",
+          "sha256": "c75c21ddc0cad53a5651e0cbb4a0184d71f0b72d05405d2e4121f637479da64e",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/c75c21ddc0cad53a5651e0cbb4a0184d71f0b72d05405d2e4121f637479da64e.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 78912,
+          "path": "assets/fonts/reader/RobotoMono-500-Normal.ttf",
+          "sha256": "54baeda3df34bf23cfdbdb1a5f162649b8c1ef120944956e9947df76748a384d",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/54baeda3df34bf23cfdbdb1a5f162649b8c1ef120944956e9947df76748a384d.ttf",
+          "weight": 500
+        },
+        {
+          "byteLength": 79180,
+          "path": "assets/fonts/reader/RobotoMono-600-Normal.ttf",
+          "sha256": "6693e9456a6412291b6ef0b72b5db1f562392e7f75a7e1665235c48687925d14",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/6693e9456a6412291b6ef0b72b5db1f562392e7f75a7e1665235c48687925d14.ttf",
+          "weight": 600
+        },
+        {
+          "byteLength": 79100,
+          "path": "assets/fonts/reader/RobotoMono-700-Normal.ttf",
+          "sha256": "45c45339ebd8a59b3fc2b1570f504590bb38c546a73d4fc5a98c3f113a0cedb6",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/45c45339ebd8a59b3fc2b1570f504590bb38c546a73d4fc5a98c3f113a0cedb6.ttf",
+          "weight": 700
+        },
+        {
+          "byteLength": 85556,
+          "path": "assets/fonts/reader/RobotoMono-300-Italic.ttf",
+          "sha256": "8add2d7b1ee8fca607961238f84c1bd980f5e817cb19d45b70f62b1f6399c25c",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/8add2d7b1ee8fca607961238f84c1bd980f5e817cb19d45b70f62b1f6399c25c.ttf",
+          "weight": 300
+        },
+        {
+          "byteLength": 85632,
+          "path": "assets/fonts/reader/RobotoMono-400-Italic.ttf",
+          "sha256": "fe328c08d828298532dac394416685cb4cd6d16dfc3d95e943e13f2683c40aee",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/fe328c08d828298532dac394416685cb4cd6d16dfc3d95e943e13f2683c40aee.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 85712,
+          "path": "assets/fonts/reader/RobotoMono-500-Italic.ttf",
+          "sha256": "faadce56c40af2eceb8c364613d8d5d987fe1ec50974af0c4be0a76c0b2a5992",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/faadce56c40af2eceb8c364613d8d5d987fe1ec50974af0c4be0a76c0b2a5992.ttf",
+          "weight": 500
+        },
+        {
+          "byteLength": 85752,
+          "path": "assets/fonts/reader/RobotoMono-600-Italic.ttf",
+          "sha256": "2f71241c7ea4c844055ff35acbeba8cab989e938551cbaa2d2adb7cbcc8d8ded",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/2f71241c7ea4c844055ff35acbeba8cab989e938551cbaa2d2adb7cbcc8d8ded.ttf",
+          "weight": 600
+        },
+        {
+          "byteLength": 85892,
+          "path": "assets/fonts/reader/RobotoMono-700-Italic.ttf",
+          "sha256": "3cd6f4b8ba5f447fafc30130d8c3277aa2f6b5ba5a7c23706ddb78394733a7cf",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/3cd6f4b8ba5f447fafc30130d8c3277aa2f6b5ba5a7c23706ddb78394733a7cf.ttf",
+          "weight": 700
+        }
+      ],
+      "family": "Roboto Mono",
+      "licensePath": "assets/fonts/reader/licenses/RobotoMono-OFL.txt",
+      "localFamily": "NaloriReaderRobotoMono",
+      "mappings": [
+        {
+          "assetSha256": "0707339daafe005a4f25ffb35c018208ac02f1c35b14405773f36d88a9aad07e",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 300,
+          "requestedStyle": "normal",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "c75c21ddc0cad53a5651e0cbb4a0184d71f0b72d05405d2e4121f637479da64e",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 400,
+          "requestedStyle": "normal",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "54baeda3df34bf23cfdbdb1a5f162649b8c1ef120944956e9947df76748a384d",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 500,
+          "requestedStyle": "normal",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "6693e9456a6412291b6ef0b72b5db1f562392e7f75a7e1665235c48687925d14",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 600,
+          "requestedStyle": "normal",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "45c45339ebd8a59b3fc2b1570f504590bb38c546a73d4fc5a98c3f113a0cedb6",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 700
+        },
+        {
+          "assetSha256": "45c45339ebd8a59b3fc2b1570f504590bb38c546a73d4fc5a98c3f113a0cedb6",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 800
+        },
+        {
+          "assetSha256": "45c45339ebd8a59b3fc2b1570f504590bb38c546a73d4fc5a98c3f113a0cedb6",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 900
+        },
+        {
+          "assetSha256": "8add2d7b1ee8fca607961238f84c1bd980f5e817cb19d45b70f62b1f6399c25c",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 300,
+          "requestedStyle": "italic",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "fe328c08d828298532dac394416685cb4cd6d16dfc3d95e943e13f2683c40aee",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 400,
+          "requestedStyle": "italic",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "faadce56c40af2eceb8c364613d8d5d987fe1ec50974af0c4be0a76c0b2a5992",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 500,
+          "requestedStyle": "italic",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "2f71241c7ea4c844055ff35acbeba8cab989e938551cbaa2d2adb7cbcc8d8ded",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 600,
+          "requestedStyle": "italic",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "3cd6f4b8ba5f447fafc30130d8c3277aa2f6b5ba5a7c23706ddb78394733a7cf",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 700,
+          "requestedStyle": "italic",
+          "requestedWeight": 700
+        }
+      ]
+    },
+    {
+      "assets": [
+        {
+          "byteLength": 585708,
+          "path": "assets/fonts/reader/Merriweather-300-Normal.ttf",
+          "sha256": "5ae778dd2e165be08d5979961e7f29a3198fd7e0f71bf61d1d8df2b824a9f43b",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/5ae778dd2e165be08d5979961e7f29a3198fd7e0f71bf61d1d8df2b824a9f43b.ttf",
+          "weight": 300
+        },
+        {
+          "byteLength": 585952,
+          "path": "assets/fonts/reader/Merriweather-400-Normal.ttf",
+          "sha256": "a05a93f3e8c90b815dbecae2f7cc3973dd5100a2494d3f2546cb4d3ef4f94c8a",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/a05a93f3e8c90b815dbecae2f7cc3973dd5100a2494d3f2546cb4d3ef4f94c8a.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 585996,
+          "path": "assets/fonts/reader/Merriweather-500-Normal.ttf",
+          "sha256": "49945dd5c14d52a34bcfcb07f7f9f4638d4f1be4a994aebe0155e5d3878076c1",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/49945dd5c14d52a34bcfcb07f7f9f4638d4f1be4a994aebe0155e5d3878076c1.ttf",
+          "weight": 500
+        },
+        {
+          "byteLength": 585996,
+          "path": "assets/fonts/reader/Merriweather-600-Normal.ttf",
+          "sha256": "c2427c08282955164796ecf059dc120d79f623ccdd5cd0b37578beda5073694d",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/c2427c08282955164796ecf059dc120d79f623ccdd5cd0b37578beda5073694d.ttf",
+          "weight": 600
+        },
+        {
+          "byteLength": 586028,
+          "path": "assets/fonts/reader/Merriweather-700-Normal.ttf",
+          "sha256": "f0b820b40d7da5bc762a3e7fcf1b719666a8091c07dcff8a29121d378d6f3cf2",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/f0b820b40d7da5bc762a3e7fcf1b719666a8091c07dcff8a29121d378d6f3cf2.ttf",
+          "weight": 700
+        },
+        {
+          "byteLength": 586060,
+          "path": "assets/fonts/reader/Merriweather-800-Normal.ttf",
+          "sha256": "8075f6c64bebff94b1ee64c1fa5ac9f17a11218359cd470292cd0fabe72f301f",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/8075f6c64bebff94b1ee64c1fa5ac9f17a11218359cd470292cd0fabe72f301f.ttf",
+          "weight": 800
+        },
+        {
+          "byteLength": 585608,
+          "path": "assets/fonts/reader/Merriweather-900-Normal.ttf",
+          "sha256": "0354c0b049ec53ab1a342cf391a8eacc1f6cd32037a82ff142a393b122134d82",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/0354c0b049ec53ab1a342cf391a8eacc1f6cd32037a82ff142a393b122134d82.ttf",
+          "weight": 900
+        },
+        {
+          "byteLength": 595484,
+          "path": "assets/fonts/reader/Merriweather-300-Italic.ttf",
+          "sha256": "8a8207a93ce6700bf12d7a3dbd61a94fb8e32a3944183e71702f9b3959346417",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/8a8207a93ce6700bf12d7a3dbd61a94fb8e32a3944183e71702f9b3959346417.ttf",
+          "weight": 300
+        },
+        {
+          "byteLength": 595628,
+          "path": "assets/fonts/reader/Merriweather-400-Italic.ttf",
+          "sha256": "3873f318261d58b606dba94e33a6367462f009553f054e0f6d2746cb67715548",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/3873f318261d58b606dba94e33a6367462f009553f054e0f6d2746cb67715548.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 599500,
+          "path": "assets/fonts/reader/Merriweather-500-Italic.ttf",
+          "sha256": "4fff2c4c664dee636688b6ce08356fd17771c98b0cfc8fbc39dd57e1c707c8db",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/4fff2c4c664dee636688b6ce08356fd17771c98b0cfc8fbc39dd57e1c707c8db.ttf",
+          "weight": 500
+        },
+        {
+          "byteLength": 595844,
+          "path": "assets/fonts/reader/Merriweather-600-Italic.ttf",
+          "sha256": "a61a15890ca10539b63d18e2f8265f0b281cd8932fdd486ed631969c599d235f",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/a61a15890ca10539b63d18e2f8265f0b281cd8932fdd486ed631969c599d235f.ttf",
+          "weight": 600
+        },
+        {
+          "byteLength": 599476,
+          "path": "assets/fonts/reader/Merriweather-700-Italic.ttf",
+          "sha256": "f425d224d1ec74852e96e0bdb3dfb0099f4a162bdcf8700b5fce69703db93c57",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/f425d224d1ec74852e96e0bdb3dfb0099f4a162bdcf8700b5fce69703db93c57.ttf",
+          "weight": 700
+        }
+      ],
+      "family": "Merriweather",
+      "licensePath": "assets/fonts/reader/licenses/Merriweather-OFL.txt",
+      "localFamily": "NaloriReaderMerriweather",
+      "mappings": [
+        {
+          "assetSha256": "5ae778dd2e165be08d5979961e7f29a3198fd7e0f71bf61d1d8df2b824a9f43b",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 300,
+          "requestedStyle": "normal",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "a05a93f3e8c90b815dbecae2f7cc3973dd5100a2494d3f2546cb4d3ef4f94c8a",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 400,
+          "requestedStyle": "normal",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "49945dd5c14d52a34bcfcb07f7f9f4638d4f1be4a994aebe0155e5d3878076c1",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 500,
+          "requestedStyle": "normal",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "c2427c08282955164796ecf059dc120d79f623ccdd5cd0b37578beda5073694d",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 600,
+          "requestedStyle": "normal",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "f0b820b40d7da5bc762a3e7fcf1b719666a8091c07dcff8a29121d378d6f3cf2",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 700
+        },
+        {
+          "assetSha256": "8075f6c64bebff94b1ee64c1fa5ac9f17a11218359cd470292cd0fabe72f301f",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 800,
+          "requestedStyle": "normal",
+          "requestedWeight": 800
+        },
+        {
+          "assetSha256": "0354c0b049ec53ab1a342cf391a8eacc1f6cd32037a82ff142a393b122134d82",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 900,
+          "requestedStyle": "normal",
+          "requestedWeight": 900
+        },
+        {
+          "assetSha256": "8a8207a93ce6700bf12d7a3dbd61a94fb8e32a3944183e71702f9b3959346417",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 300,
+          "requestedStyle": "italic",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "3873f318261d58b606dba94e33a6367462f009553f054e0f6d2746cb67715548",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 400,
+          "requestedStyle": "italic",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "4fff2c4c664dee636688b6ce08356fd17771c98b0cfc8fbc39dd57e1c707c8db",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 500,
+          "requestedStyle": "italic",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "a61a15890ca10539b63d18e2f8265f0b281cd8932fdd486ed631969c599d235f",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 600,
+          "requestedStyle": "italic",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "f425d224d1ec74852e96e0bdb3dfb0099f4a162bdcf8700b5fce69703db93c57",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 700,
+          "requestedStyle": "italic",
+          "requestedWeight": 700
+        }
+      ]
+    },
+    {
+      "assets": [
+        {
+          "byteLength": 132164,
+          "path": "assets/fonts/reader/Lora-400-Normal.ttf",
+          "sha256": "e9b4141f57f365b3de9be91123b343311c4c292f063635d38b4bce7f6b19c052",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/e9b4141f57f365b3de9be91123b343311c4c292f063635d38b4bce7f6b19c052.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 132296,
+          "path": "assets/fonts/reader/Lora-500-Normal.ttf",
+          "sha256": "9173dc957c855415544d0766f962a978285c7766161cb1d4ca68394fdb2e6201",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/9173dc957c855415544d0766f962a978285c7766161cb1d4ca68394fdb2e6201.ttf",
+          "weight": 500
+        },
+        {
+          "byteLength": 132648,
+          "path": "assets/fonts/reader/Lora-600-Normal.ttf",
+          "sha256": "6d8f94a1d0c946a7d97ce4ad3c6697c1251b108424375214e2d60b92231972a8",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/6d8f94a1d0c946a7d97ce4ad3c6697c1251b108424375214e2d60b92231972a8.ttf",
+          "weight": 600
+        },
+        {
+          "byteLength": 132100,
+          "path": "assets/fonts/reader/Lora-700-Normal.ttf",
+          "sha256": "ab1ab40116296c0df36bd1d714a4bc32f6d6d003868d01b4421106b55593d926",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/ab1ab40116296c0df36bd1d714a4bc32f6d6d003868d01b4421106b55593d926.ttf",
+          "weight": 700
+        },
+        {
+          "byteLength": 137304,
+          "path": "assets/fonts/reader/Lora-400-Italic.ttf",
+          "sha256": "a1c1b5ce4c23f967575ae2c3284d4a60960f9571f0ebe92b8a91e6c1408ac873",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/a1c1b5ce4c23f967575ae2c3284d4a60960f9571f0ebe92b8a91e6c1408ac873.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 138264,
+          "path": "assets/fonts/reader/Lora-500-Italic.ttf",
+          "sha256": "db8c608068c0b4bcbc75d33b69a75765fc4a99ac2f83f542c6cbbae9a02fe6c8",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/db8c608068c0b4bcbc75d33b69a75765fc4a99ac2f83f542c6cbbae9a02fe6c8.ttf",
+          "weight": 500
+        },
+        {
+          "byteLength": 138404,
+          "path": "assets/fonts/reader/Lora-600-Italic.ttf",
+          "sha256": "3e2fd2336ff19cad12a5b7153d9977b6daebe39c2d81f7c4673e93d909a2c090",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/3e2fd2336ff19cad12a5b7153d9977b6daebe39c2d81f7c4673e93d909a2c090.ttf",
+          "weight": 600
+        },
+        {
+          "byteLength": 138328,
+          "path": "assets/fonts/reader/Lora-700-Italic.ttf",
+          "sha256": "63f2549223fdb2319965cd17935c78aefcb609041770cf87d83e4914a4b2ca32",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/63f2549223fdb2319965cd17935c78aefcb609041770cf87d83e4914a4b2ca32.ttf",
+          "weight": 700
+        }
+      ],
+      "family": "Lora",
+      "licensePath": "assets/fonts/reader/licenses/Lora-OFL.txt",
+      "localFamily": "NaloriReaderLora",
+      "mappings": [
+        {
+          "assetSha256": "e9b4141f57f365b3de9be91123b343311c4c292f063635d38b4bce7f6b19c052",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 400,
+          "requestedStyle": "normal",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "e9b4141f57f365b3de9be91123b343311c4c292f063635d38b4bce7f6b19c052",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 400,
+          "requestedStyle": "normal",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "9173dc957c855415544d0766f962a978285c7766161cb1d4ca68394fdb2e6201",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 500,
+          "requestedStyle": "normal",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "6d8f94a1d0c946a7d97ce4ad3c6697c1251b108424375214e2d60b92231972a8",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 600,
+          "requestedStyle": "normal",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "ab1ab40116296c0df36bd1d714a4bc32f6d6d003868d01b4421106b55593d926",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 700
+        },
+        {
+          "assetSha256": "ab1ab40116296c0df36bd1d714a4bc32f6d6d003868d01b4421106b55593d926",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 800
+        },
+        {
+          "assetSha256": "ab1ab40116296c0df36bd1d714a4bc32f6d6d003868d01b4421106b55593d926",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 900
+        },
+        {
+          "assetSha256": "a1c1b5ce4c23f967575ae2c3284d4a60960f9571f0ebe92b8a91e6c1408ac873",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 400,
+          "requestedStyle": "italic",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "a1c1b5ce4c23f967575ae2c3284d4a60960f9571f0ebe92b8a91e6c1408ac873",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 400,
+          "requestedStyle": "italic",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "db8c608068c0b4bcbc75d33b69a75765fc4a99ac2f83f542c6cbbae9a02fe6c8",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 500,
+          "requestedStyle": "italic",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "3e2fd2336ff19cad12a5b7153d9977b6daebe39c2d81f7c4673e93d909a2c090",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 600,
+          "requestedStyle": "italic",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "63f2549223fdb2319965cd17935c78aefcb609041770cf87d83e4914a4b2ca32",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 700,
+          "requestedStyle": "italic",
+          "requestedWeight": 700
+        }
+      ]
+    },
+    {
+      "assets": [
+        {
+          "byteLength": 446108,
+          "path": "assets/fonts/reader/EBGaramond-400-Normal.ttf",
+          "sha256": "819316ad1be484e76ced5b6d58682e6a476116d26e5eb236cc8615d227080ffc",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/819316ad1be484e76ced5b6d58682e6a476116d26e5eb236cc8615d227080ffc.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 448388,
+          "path": "assets/fonts/reader/EBGaramond-500-Normal.ttf",
+          "sha256": "441d45e6797db8b91d3eb0527adf96d27d4a94bc4a7025e8ba787e84dc13164d",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/441d45e6797db8b91d3eb0527adf96d27d4a94bc4a7025e8ba787e84dc13164d.ttf",
+          "weight": 500
+        },
+        {
+          "byteLength": 448656,
+          "path": "assets/fonts/reader/EBGaramond-600-Normal.ttf",
+          "sha256": "3712fbb28842abd7600f63b82edf012231b26e02aebaadc86fd42706483e0920",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/3712fbb28842abd7600f63b82edf012231b26e02aebaadc86fd42706483e0920.ttf",
+          "weight": 600
+        },
+        {
+          "byteLength": 448340,
+          "path": "assets/fonts/reader/EBGaramond-700-Normal.ttf",
+          "sha256": "614975a480b637fc0008ab623b14878e5a84410f7a5dac91b5b0b22618bdc560",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/614975a480b637fc0008ab623b14878e5a84410f7a5dac91b5b0b22618bdc560.ttf",
+          "weight": 700
+        },
+        {
+          "byteLength": 447996,
+          "path": "assets/fonts/reader/EBGaramond-800-Normal.ttf",
+          "sha256": "4cd257307200007ee0ed4637de09290035377b801330175dc4149654d0fcbcc5",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/4cd257307200007ee0ed4637de09290035377b801330175dc4149654d0fcbcc5.ttf",
+          "weight": 800
+        },
+        {
+          "byteLength": 375212,
+          "path": "assets/fonts/reader/EBGaramond-400-Italic.ttf",
+          "sha256": "6f4a609be1f9d184b812223aa9bbf09a3c94d1ddd9e9ff7d48245814b7653d3e",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/6f4a609be1f9d184b812223aa9bbf09a3c94d1ddd9e9ff7d48245814b7653d3e.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 377632,
+          "path": "assets/fonts/reader/EBGaramond-500-Italic.ttf",
+          "sha256": "19657d7a0e0c1c0a0f0f8ddc1f40698ac9cb17c2632a7fb379afca99a8e33621",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/19657d7a0e0c1c0a0f0f8ddc1f40698ac9cb17c2632a7fb379afca99a8e33621.ttf",
+          "weight": 500
+        },
+        {
+          "byteLength": 378252,
+          "path": "assets/fonts/reader/EBGaramond-600-Italic.ttf",
+          "sha256": "751b898dff841a62d7923143586187f807b10a9e055c5839bd5e785ae9546adb",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/751b898dff841a62d7923143586187f807b10a9e055c5839bd5e785ae9546adb.ttf",
+          "weight": 600
+        },
+        {
+          "byteLength": 378072,
+          "path": "assets/fonts/reader/EBGaramond-700-Italic.ttf",
+          "sha256": "885d91253e5f97056bc213bc4977b30321735b0e4bb302be9c54cc9598e01b12",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/885d91253e5f97056bc213bc4977b30321735b0e4bb302be9c54cc9598e01b12.ttf",
+          "weight": 700
+        }
+      ],
+      "family": "EB Garamond",
+      "licensePath": "assets/fonts/reader/licenses/EBGaramond-OFL.txt",
+      "localFamily": "NaloriReaderEBGaramond",
+      "mappings": [
+        {
+          "assetSha256": "819316ad1be484e76ced5b6d58682e6a476116d26e5eb236cc8615d227080ffc",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 400,
+          "requestedStyle": "normal",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "819316ad1be484e76ced5b6d58682e6a476116d26e5eb236cc8615d227080ffc",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 400,
+          "requestedStyle": "normal",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "441d45e6797db8b91d3eb0527adf96d27d4a94bc4a7025e8ba787e84dc13164d",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 500,
+          "requestedStyle": "normal",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "3712fbb28842abd7600f63b82edf012231b26e02aebaadc86fd42706483e0920",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 600,
+          "requestedStyle": "normal",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "614975a480b637fc0008ab623b14878e5a84410f7a5dac91b5b0b22618bdc560",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 700
+        },
+        {
+          "assetSha256": "4cd257307200007ee0ed4637de09290035377b801330175dc4149654d0fcbcc5",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 800,
+          "requestedStyle": "normal",
+          "requestedWeight": 800
+        },
+        {
+          "assetSha256": "4cd257307200007ee0ed4637de09290035377b801330175dc4149654d0fcbcc5",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 800,
+          "requestedStyle": "normal",
+          "requestedWeight": 900
+        },
+        {
+          "assetSha256": "6f4a609be1f9d184b812223aa9bbf09a3c94d1ddd9e9ff7d48245814b7653d3e",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 400,
+          "requestedStyle": "italic",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "6f4a609be1f9d184b812223aa9bbf09a3c94d1ddd9e9ff7d48245814b7653d3e",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 400,
+          "requestedStyle": "italic",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "19657d7a0e0c1c0a0f0f8ddc1f40698ac9cb17c2632a7fb379afca99a8e33621",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 500,
+          "requestedStyle": "italic",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "751b898dff841a62d7923143586187f807b10a9e055c5839bd5e785ae9546adb",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 600,
+          "requestedStyle": "italic",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "885d91253e5f97056bc213bc4977b30321735b0e4bb302be9c54cc9598e01b12",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 700,
+          "requestedStyle": "italic",
+          "requestedWeight": 700
+        }
+      ]
+    },
+    {
+      "assets": [
+        {
+          "byteLength": 170776,
+          "path": "assets/fonts/reader/Literata-300-Normal.ttf",
+          "sha256": "c931f2b9b919d3ae38fe01097ad64038a3fb3ee3600cc2f508d0f6bc85a88931",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/c931f2b9b919d3ae38fe01097ad64038a3fb3ee3600cc2f508d0f6bc85a88931.ttf",
+          "weight": 300
+        },
+        {
+          "byteLength": 170644,
+          "path": "assets/fonts/reader/Literata-400-Normal.ttf",
+          "sha256": "df89561f5555d0674cee91736ee18d6f85ca50e6a280e53bec37507eae5706da",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/df89561f5555d0674cee91736ee18d6f85ca50e6a280e53bec37507eae5706da.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 170788,
+          "path": "assets/fonts/reader/Literata-500-Normal.ttf",
+          "sha256": "6df469837bc38531ffc4d60ce7106d9116eea96a8777a826cf6e854e00b629c6",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/6df469837bc38531ffc4d60ce7106d9116eea96a8777a826cf6e854e00b629c6.ttf",
+          "weight": 500
+        },
+        {
+          "byteLength": 170924,
+          "path": "assets/fonts/reader/Literata-600-Normal.ttf",
+          "sha256": "17885579f0905bb96274e0b20c13cc97f849775d6724989d3d430ecc9b995dec",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/17885579f0905bb96274e0b20c13cc97f849775d6724989d3d430ecc9b995dec.ttf",
+          "weight": 600
+        },
+        {
+          "byteLength": 173924,
+          "path": "assets/fonts/reader/Literata-700-Normal.ttf",
+          "sha256": "ffa4a76cffe8c3dcdaf5ecd1737f9921907aa4d6fd5d866d1fd99f1adb46c452",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/ffa4a76cffe8c3dcdaf5ecd1737f9921907aa4d6fd5d866d1fd99f1adb46c452.ttf",
+          "weight": 700
+        },
+        {
+          "byteLength": 173980,
+          "path": "assets/fonts/reader/Literata-800-Normal.ttf",
+          "sha256": "fd7176ddbbce5bdc0e05e8baec43a2328856b87f5d6b0558877eba1464a07720",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/fd7176ddbbce5bdc0e05e8baec43a2328856b87f5d6b0558877eba1464a07720.ttf",
+          "weight": 800
+        },
+        {
+          "byteLength": 173588,
+          "path": "assets/fonts/reader/Literata-900-Normal.ttf",
+          "sha256": "d84158e9827d4d775cd9828a66c44d0936c7dc38aae3de0d4e1df9a8b84128f3",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/d84158e9827d4d775cd9828a66c44d0936c7dc38aae3de0d4e1df9a8b84128f3.ttf",
+          "weight": 900
+        },
+        {
+          "byteLength": 166316,
+          "path": "assets/fonts/reader/Literata-300-Italic.ttf",
+          "sha256": "0734389bde6c75576e8f4ac0dddef84b0cebf58a7afe084a41def372544e57d8",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/0734389bde6c75576e8f4ac0dddef84b0cebf58a7afe084a41def372544e57d8.ttf",
+          "weight": 300
+        },
+        {
+          "byteLength": 166048,
+          "path": "assets/fonts/reader/Literata-400-Italic.ttf",
+          "sha256": "b26c41661f3ddfd20dfa1f40864fe346e83485bbfa4afbafc390297c5214aeea",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/b26c41661f3ddfd20dfa1f40864fe346e83485bbfa4afbafc390297c5214aeea.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 166416,
+          "path": "assets/fonts/reader/Literata-500-Italic.ttf",
+          "sha256": "f361bdd122c137e029eaa5ee65d9d655123b59d9a87ea456900fe51a42dfed88",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/f361bdd122c137e029eaa5ee65d9d655123b59d9a87ea456900fe51a42dfed88.ttf",
+          "weight": 500
+        },
+        {
+          "byteLength": 166456,
+          "path": "assets/fonts/reader/Literata-600-Italic.ttf",
+          "sha256": "e186b0a2f2ee9d79b5f2d908e15eedf1e986737ce425a46f969cc69c29f9f3b2",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/e186b0a2f2ee9d79b5f2d908e15eedf1e986737ce425a46f969cc69c29f9f3b2.ttf",
+          "weight": 600
+        },
+        {
+          "byteLength": 169332,
+          "path": "assets/fonts/reader/Literata-700-Italic.ttf",
+          "sha256": "ba482755c5209e7c36a4342e8930332efa1f66b0455baceb6f6d8f60423c6e81",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/ba482755c5209e7c36a4342e8930332efa1f66b0455baceb6f6d8f60423c6e81.ttf",
+          "weight": 700
+        }
+      ],
+      "family": "Literata",
+      "licensePath": "assets/fonts/reader/licenses/Literata-OFL.txt",
+      "localFamily": "NaloriReaderLiterata",
+      "mappings": [
+        {
+          "assetSha256": "c931f2b9b919d3ae38fe01097ad64038a3fb3ee3600cc2f508d0f6bc85a88931",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 300,
+          "requestedStyle": "normal",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "df89561f5555d0674cee91736ee18d6f85ca50e6a280e53bec37507eae5706da",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 400,
+          "requestedStyle": "normal",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "6df469837bc38531ffc4d60ce7106d9116eea96a8777a826cf6e854e00b629c6",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 500,
+          "requestedStyle": "normal",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "17885579f0905bb96274e0b20c13cc97f849775d6724989d3d430ecc9b995dec",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 600,
+          "requestedStyle": "normal",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "ffa4a76cffe8c3dcdaf5ecd1737f9921907aa4d6fd5d866d1fd99f1adb46c452",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 700
+        },
+        {
+          "assetSha256": "fd7176ddbbce5bdc0e05e8baec43a2328856b87f5d6b0558877eba1464a07720",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 800,
+          "requestedStyle": "normal",
+          "requestedWeight": 800
+        },
+        {
+          "assetSha256": "d84158e9827d4d775cd9828a66c44d0936c7dc38aae3de0d4e1df9a8b84128f3",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 900,
+          "requestedStyle": "normal",
+          "requestedWeight": 900
+        },
+        {
+          "assetSha256": "0734389bde6c75576e8f4ac0dddef84b0cebf58a7afe084a41def372544e57d8",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 300,
+          "requestedStyle": "italic",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "b26c41661f3ddfd20dfa1f40864fe346e83485bbfa4afbafc390297c5214aeea",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 400,
+          "requestedStyle": "italic",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "f361bdd122c137e029eaa5ee65d9d655123b59d9a87ea456900fe51a42dfed88",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 500,
+          "requestedStyle": "italic",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "e186b0a2f2ee9d79b5f2d908e15eedf1e986737ce425a46f969cc69c29f9f3b2",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 600,
+          "requestedStyle": "italic",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "ba482755c5209e7c36a4342e8930332efa1f66b0455baceb6f6d8f60423c6e81",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 700,
+          "requestedStyle": "italic",
+          "requestedWeight": 700
+        }
+      ]
+    },
+    {
+      "assets": [
+        {
+          "byteLength": 35304,
+          "path": "assets/fonts/reader/AtkinsonHyperlegible-400-Normal.ttf",
+          "sha256": "59af8e391e1f34618ec8ddc9332f59a6ebd1666a59760bd150e0c948dc11e525",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/59af8e391e1f34618ec8ddc9332f59a6ebd1666a59760bd150e0c948dc11e525.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 35728,
+          "path": "assets/fonts/reader/AtkinsonHyperlegible-400-Italic.ttf",
+          "sha256": "492078a229552c35dc34884a308a051eeb096ca46cd76e45bdc64ab983386915",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/492078a229552c35dc34884a308a051eeb096ca46cd76e45bdc64ab983386915.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 35496,
+          "path": "assets/fonts/reader/AtkinsonHyperlegible-700-Normal.ttf",
+          "sha256": "0619cfaec31b7d6f171b15a30e49b8e1b7c9f76eefe51ace21d8c032fc9e544c",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/0619cfaec31b7d6f171b15a30e49b8e1b7c9f76eefe51ace21d8c032fc9e544c.ttf",
+          "weight": 700
+        },
+        {
+          "byteLength": 36056,
+          "path": "assets/fonts/reader/AtkinsonHyperlegible-700-Italic.ttf",
+          "sha256": "65deb73de0190860defdeb79f802e3026e7ccc784adde01b039328ca879db28f",
+          "style": "italic",
+          "url": "https://fonts.gstatic.com/s/a/65deb73de0190860defdeb79f802e3026e7ccc784adde01b039328ca879db28f.ttf",
+          "weight": 700
+        }
+      ],
+      "family": "Atkinson Hyperlegible",
+      "licensePath": "assets/fonts/reader/licenses/AtkinsonHyperlegible-OFL.txt",
+      "localFamily": "NaloriReaderAtkinsonHyperlegible",
+      "mappings": [
+        {
+          "assetSha256": "59af8e391e1f34618ec8ddc9332f59a6ebd1666a59760bd150e0c948dc11e525",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 400,
+          "requestedStyle": "normal",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "59af8e391e1f34618ec8ddc9332f59a6ebd1666a59760bd150e0c948dc11e525",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 400,
+          "requestedStyle": "normal",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "59af8e391e1f34618ec8ddc9332f59a6ebd1666a59760bd150e0c948dc11e525",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 400,
+          "requestedStyle": "normal",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "0619cfaec31b7d6f171b15a30e49b8e1b7c9f76eefe51ace21d8c032fc9e544c",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "0619cfaec31b7d6f171b15a30e49b8e1b7c9f76eefe51ace21d8c032fc9e544c",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 700
+        },
+        {
+          "assetSha256": "0619cfaec31b7d6f171b15a30e49b8e1b7c9f76eefe51ace21d8c032fc9e544c",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 800
+        },
+        {
+          "assetSha256": "0619cfaec31b7d6f171b15a30e49b8e1b7c9f76eefe51ace21d8c032fc9e544c",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 900
+        },
+        {
+          "assetSha256": "492078a229552c35dc34884a308a051eeb096ca46cd76e45bdc64ab983386915",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 400,
+          "requestedStyle": "italic",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "492078a229552c35dc34884a308a051eeb096ca46cd76e45bdc64ab983386915",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 400,
+          "requestedStyle": "italic",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "492078a229552c35dc34884a308a051eeb096ca46cd76e45bdc64ab983386915",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 400,
+          "requestedStyle": "italic",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "65deb73de0190860defdeb79f802e3026e7ccc784adde01b039328ca879db28f",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 700,
+          "requestedStyle": "italic",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "65deb73de0190860defdeb79f802e3026e7ccc784adde01b039328ca879db28f",
+          "deliveredStyle": "italic",
+          "deliveredWeight": 700,
+          "requestedStyle": "italic",
+          "requestedWeight": 700
+        }
+      ]
+    },
+    {
+      "assets": [
+        {
+          "byteLength": 70996,
+          "path": "assets/fonts/reader/Lexend-300-Normal.ttf",
+          "sha256": "d0405fde47f27becb1286303ca91ad3d2a43e4b3e7943597ab5cb8116e9057ec",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/d0405fde47f27becb1286303ca91ad3d2a43e4b3e7943597ab5cb8116e9057ec.ttf",
+          "weight": 300
+        },
+        {
+          "byteLength": 70676,
+          "path": "assets/fonts/reader/Lexend-400-Normal.ttf",
+          "sha256": "e92ff07c5686aee1cf71ba2aaf8b3afcab70db722680d082dd2fc496e65fe383",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/e92ff07c5686aee1cf71ba2aaf8b3afcab70db722680d082dd2fc496e65fe383.ttf",
+          "weight": 400
+        },
+        {
+          "byteLength": 71012,
+          "path": "assets/fonts/reader/Lexend-500-Normal.ttf",
+          "sha256": "798e5451286179b70e81c23fdb5d92732b93b2450eaae3f3557377806954e1ef",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/798e5451286179b70e81c23fdb5d92732b93b2450eaae3f3557377806954e1ef.ttf",
+          "weight": 500
+        },
+        {
+          "byteLength": 71056,
+          "path": "assets/fonts/reader/Lexend-600-Normal.ttf",
+          "sha256": "bcac18cdf67555e75f7d747fa6055c11fc58a61ea8cc68af0ade707717018908",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/bcac18cdf67555e75f7d747fa6055c11fc58a61ea8cc68af0ade707717018908.ttf",
+          "weight": 600
+        },
+        {
+          "byteLength": 70928,
+          "path": "assets/fonts/reader/Lexend-700-Normal.ttf",
+          "sha256": "fe323c8e142d5f92b974a48973bac235966aa3a76cf0e6d76ea89d03f7a2aa3d",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/fe323c8e142d5f92b974a48973bac235966aa3a76cf0e6d76ea89d03f7a2aa3d.ttf",
+          "weight": 700
+        },
+        {
+          "byteLength": 71044,
+          "path": "assets/fonts/reader/Lexend-800-Normal.ttf",
+          "sha256": "9a53493984e6820fbcff2c4fe35927f11397911054cc73ccac5ff76dcb77dc31",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/9a53493984e6820fbcff2c4fe35927f11397911054cc73ccac5ff76dcb77dc31.ttf",
+          "weight": 800
+        },
+        {
+          "byteLength": 70828,
+          "path": "assets/fonts/reader/Lexend-900-Normal.ttf",
+          "sha256": "6c3c72060a805613a735fdb9523152f880e1cca7577bacfe751cfa7d5ece2053",
+          "style": "normal",
+          "url": "https://fonts.gstatic.com/s/a/6c3c72060a805613a735fdb9523152f880e1cca7577bacfe751cfa7d5ece2053.ttf",
+          "weight": 900
+        }
+      ],
+      "family": "Lexend",
+      "licensePath": "assets/fonts/reader/licenses/Lexend-OFL.txt",
+      "localFamily": "NaloriReaderLexend",
+      "mappings": [
+        {
+          "assetSha256": "d0405fde47f27becb1286303ca91ad3d2a43e4b3e7943597ab5cb8116e9057ec",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 300,
+          "requestedStyle": "normal",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "e92ff07c5686aee1cf71ba2aaf8b3afcab70db722680d082dd2fc496e65fe383",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 400,
+          "requestedStyle": "normal",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "798e5451286179b70e81c23fdb5d92732b93b2450eaae3f3557377806954e1ef",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 500,
+          "requestedStyle": "normal",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "bcac18cdf67555e75f7d747fa6055c11fc58a61ea8cc68af0ade707717018908",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 600,
+          "requestedStyle": "normal",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "fe323c8e142d5f92b974a48973bac235966aa3a76cf0e6d76ea89d03f7a2aa3d",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "normal",
+          "requestedWeight": 700
+        },
+        {
+          "assetSha256": "9a53493984e6820fbcff2c4fe35927f11397911054cc73ccac5ff76dcb77dc31",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 800,
+          "requestedStyle": "normal",
+          "requestedWeight": 800
+        },
+        {
+          "assetSha256": "6c3c72060a805613a735fdb9523152f880e1cca7577bacfe751cfa7d5ece2053",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 900,
+          "requestedStyle": "normal",
+          "requestedWeight": 900
+        },
+        {
+          "assetSha256": "d0405fde47f27becb1286303ca91ad3d2a43e4b3e7943597ab5cb8116e9057ec",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 300,
+          "requestedStyle": "italic",
+          "requestedWeight": 300
+        },
+        {
+          "assetSha256": "e92ff07c5686aee1cf71ba2aaf8b3afcab70db722680d082dd2fc496e65fe383",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 400,
+          "requestedStyle": "italic",
+          "requestedWeight": 400
+        },
+        {
+          "assetSha256": "798e5451286179b70e81c23fdb5d92732b93b2450eaae3f3557377806954e1ef",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 500,
+          "requestedStyle": "italic",
+          "requestedWeight": 500
+        },
+        {
+          "assetSha256": "bcac18cdf67555e75f7d747fa6055c11fc58a61ea8cc68af0ade707717018908",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 600,
+          "requestedStyle": "italic",
+          "requestedWeight": 600
+        },
+        {
+          "assetSha256": "fe323c8e142d5f92b974a48973bac235966aa3a76cf0e6d76ea89d03f7a2aa3d",
+          "deliveredStyle": "normal",
+          "deliveredWeight": 700,
+          "requestedStyle": "italic",
+          "requestedWeight": 700
+        }
+      ]
+    }
+  ],
+  "license": "SIL Open Font License 1.1",
+  "schema": "nalori.reader_font_assets.v1"
+}

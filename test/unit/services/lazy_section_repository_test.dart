@@ -258,6 +258,57 @@ void main() {
 
     expect(parserInvocations, 0);
   });
+
+  test(
+    'interaction cancels active background parse before retention or cache write',
+    () async {
+      final file = File(p.join(tempDir.path, 'repo.epub'));
+      await file.writeAsBytes(_buildRepositoryFixture(), flush: true);
+      final parserStarted = Completer<void>();
+      final parserGate = Completer<void>();
+      var parserInvocations = 0;
+      final repository = LazySectionRepository(
+        cache: ParsedSectionCacheService(
+          rootDirectory: Directory(p.join(tempDir.path, 'preempt_cache')),
+        ),
+        workCoordinator: SharedLazySectionWorkCoordinator(),
+        parser: (request) async {
+          parserInvocations++;
+          if (parserInvocations == 1) {
+            parserStarted.complete();
+            await parserGate.future;
+          }
+          return ParsedSection(
+            identity: request.identity,
+            chunks: const [
+              BookChunk(index: 0, type: BookChunkType.text, text: 'bounded'),
+            ],
+            anchorMap: const {},
+            chapters: const [],
+            wordCount: 1,
+            textCharCount: 7,
+            resourceHrefs: const [],
+            parserVersion: request.identity.parserVersion,
+          );
+        },
+      );
+      addTearDown(repository.close);
+      await repository.open(file);
+
+      final hydration = repository.hydrateParsedSectionsAround(
+        centerSpineIndex: 0,
+      );
+      await parserStarted.future;
+      repository.cancelBackgroundWork();
+      parserGate.complete();
+      await hydration;
+
+      expect(repository.retainedSectionCount, 0);
+      await repository.loadSection(0);
+      expect(parserInvocations, 2);
+      expect(repository.retainedSpineIndices, [0]);
+    },
+  );
 }
 
 String _sectionText(Iterable<BookChunk> chunks) {

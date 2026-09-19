@@ -6,6 +6,7 @@ import 'package:archive/archive.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/book_chunk.dart';
 import 'package:nalori/services/epub_parser.dart';
+import 'package:nalori/services/lazy_parsed_book.dart';
 import 'package:nalori/utils/reader_content_parser.dart';
 
 void main() {
@@ -36,7 +37,7 @@ void main() {
   });
 
   group('EpubParserService dialogue detection', () {
-    test('splits and marks a long quoted paragraph as dialogue', () async {
+    test('keeps and marks a long quoted paragraph as dialogue', () async {
       final dir = await Directory.systemTemp.createTemp('epub_dialogue_');
       addTearDown(() => dir.delete(recursive: true));
 
@@ -54,8 +55,9 @@ void main() {
           .toList();
 
       expect(dialogueChunks, isNotEmpty);
-      expect(dialogueChunks.length, greaterThan(1));
+      expect(dialogueChunks, hasLength(1));
       expect(dialogueChunks.every((chunk) => chunk.isDialogue), isTrue);
+      expect(dialogueChunks.single.logicalParagraphId, isNotNull);
     });
 
     test('treats long spoken paragraphs as dialogue even with low quote ratio', () {
@@ -70,6 +72,61 @@ void main() {
 
       expect(isLikelyDialogueText(longDialogue), isTrue);
       expect(isLikelyDialogueText(quotedProse), isFalse);
+    });
+  });
+
+  group('EpubParserService structural paragraphs', () {
+    const identity = LazySectionIdentity(
+      bookId: 'boundary-test',
+      publicationFingerprint: 'publication',
+      spineIndex: 0,
+      href: 'chapter.xhtml',
+      normalizedHref: 'chapter.xhtml',
+      fullPath: 'chapter.xhtml',
+      sourceChecksum: 'checksum',
+      parserVersion: lazyParsedSectionParserVersion,
+      dependencySignature: 'dependencies',
+      dependencySchemaVersion: lazyParsedSectionDependencySchemaVersion,
+    );
+
+    test('keeps a long paragraph containing A.M. structurally whole', () {
+      final filler = List<String>.filled(82, 'word').join(' ');
+      final expected = '$filler At about 1 A.M., as Shackleton was returning.';
+
+      final section = EpubParserService().parseLazySection(
+        identity: identity,
+        html: '<html><body><p>$expected</p></body></html>',
+      );
+
+      expect(section.chunks, hasLength(1));
+      final chunk = section.chunks.single;
+      expect(chunk.text, expected);
+      expect(chunk.logicalParagraphId, 'chapter.xhtml#paragraph-0');
+      expect(chunk.logicalParagraphStartOffset, 0);
+      expect(chunk.logicalParagraphEndOffset, expected.length);
+      expect(chunk.isLogicalParagraphStart, isTrue);
+      expect(chunk.isLogicalParagraphEnd, isTrue);
+      expect(chunk.effectiveSourceRanges.single.paragraphStartOffset, 0);
+      expect(
+        chunk.effectiveSourceRanges.single.paragraphEndOffset,
+        expected.length,
+      );
+    });
+
+    test('does not synthesize spaces across adjacent inline markup', () {
+      final filler = List<String>.filled(82, 'word').join(' ');
+      final expected = '$filler At about 1 A.M., as Shackleton was returning.';
+
+      final section = EpubParserService().parseLazySection(
+        identity: identity,
+        html:
+            '<html><body><p>$filler At about 1 '
+            '<span>A.</span><span>M.</span>, as Shackleton was returning.'
+            '</p></body></html>',
+      );
+
+      expect(section.chunks, hasLength(1));
+      expect(section.chunks.single.text, expected);
     });
   });
 

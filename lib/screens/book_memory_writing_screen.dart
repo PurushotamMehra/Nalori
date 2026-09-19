@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../models/book_memory_entry.dart';
+import '../models/derived_book_index.dart';
 import '../models/reading_settings.dart';
 import '../services/book_memory_entry_service.dart';
 import '../ui/app_visuals.dart';
@@ -21,6 +22,7 @@ class BookMemorySourcePreview {
   final int? originalStartOffset;
   final List<String> details;
   final List<BookMemoryDetailItem> detailItems;
+  final DerivedSourceRange? sourceRange;
 
   const BookMemorySourcePreview({
     required this.sourceType,
@@ -35,6 +37,7 @@ class BookMemorySourcePreview {
     this.originalStartOffset,
     this.details = const [],
     this.detailItems = const [],
+    this.sourceRange,
   });
 }
 
@@ -49,6 +52,7 @@ class BookMemoryDetailItem {
   final String? sourceText;
   final BookMemorySourcePreview? sourcePreview;
   final bool spoilerProtected;
+  final DerivedSourceRange? sourceRange;
 
   const BookMemoryDetailItem({
     required this.section,
@@ -61,6 +65,7 @@ class BookMemoryDetailItem {
     this.sourceText,
     this.sourcePreview,
     this.spoilerProtected = false,
+    this.sourceRange,
   });
 }
 

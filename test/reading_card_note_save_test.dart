@@ -148,7 +148,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tapAt(tester.getCenter(find.byType(SelectableText).first));
+    await tester.tapAt(_readerTextPoint(tester));
     await tester.pump(const Duration(milliseconds: 500));
     await tester.pumpAndSettle();
 
@@ -163,6 +163,61 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Reader saved note'), findsNothing);
+  });
+
+  testWidgets('note preview uses the resolved source segment after reflow', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 520,
+              height: 820,
+              child: ReadingCard(
+                chunk: const BookChunk(
+                  index: 0,
+                  type: BookChunkType.text,
+                  text: 'segment',
+                  sourceRanges: <ChunkSourceRange>[
+                    ChunkSourceRange(
+                      originalChunkIndex: 0,
+                      originalStartOffset: 7,
+                      originalEndOffset: 14,
+                      displayStartOffset: 0,
+                      displayEndOffset: 7,
+                    ),
+                  ],
+                ),
+                settings: const ReadingSettings(),
+                highlights: <Highlight>[
+                  Highlight(
+                    id: 'reflowed-note',
+                    originalChunkIndex: 0,
+                    startOffset: 7,
+                    endOffset: 14,
+                    text: 'unrelated whole display selection',
+                    type: HighlightType.highlight,
+                    note: 'Resolved note',
+                    createdAt: DateTime(2026, 7, 31),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(_readerTextPoint(tester));
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Resolved note'), findsOneWidget);
+    expect(find.text('segment'), findsOneWidget);
+    expect(find.text('unrelated whole display selection'), findsNothing);
   });
 
   testWidgets('long selected note text starts collapsed and can expand', (
@@ -304,7 +359,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      final selectableText = find.byType(SelectableText).first;
+      final selectableText = _readerRichText().first;
       final selectionPoint =
           tester.getTopLeft(selectableText) + const Offset(80, 18);
 
@@ -385,7 +440,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    final selectableText = find.byType(SelectableText).first;
+    final selectableText = _readerRichText().first;
     final selectionPoint =
         tester.getTopLeft(selectableText) + const Offset(80, 18);
 
@@ -416,4 +471,19 @@ void main() {
     expect(capturedEnd! > capturedStart!, isTrue);
     expect(capturedText, isNotEmpty);
   });
+}
+
+Finder _readerRichText() {
+  return find.descendant(
+    of: find.byType(SelectionArea),
+    matching: find.byWidgetPredicate(
+      (widget) => widget is Text && widget.textSpan != null,
+    ),
+  );
+}
+
+Offset _readerTextPoint(WidgetTester tester) {
+  final paragraph = _readerRichText().first;
+  return tester.getTopLeft(paragraph) +
+      Offset(8, tester.getSize(paragraph).height / 2);
 }

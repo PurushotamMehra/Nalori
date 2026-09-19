@@ -1,4 +1,5 @@
 import 'book_cache_service.dart';
+import 'derived_book_index_service.dart';
 import 'lazy_epub_index_service.dart';
 import 'lazy_section_repository.dart';
 import 'parsed_section_cache_service.dart';
@@ -18,6 +19,7 @@ final class LazyReaderCacheCleanupService {
     LazyEpubIndexStore? indexStore,
     SharedLazySectionWorkCoordinator? workCoordinator,
     SegmentedDisplayCacheFactory? segmentedDisplayCacheFactory,
+    DerivedBookIndexStore? derivedIndexStore,
   }) : _bookCache = bookCache ?? BookCacheService(),
        _parsedSectionCache = parsedSectionCache ?? ParsedSectionCacheService(),
        _indexStore = indexStore ?? LazyEpubIndexStore(),
@@ -25,13 +27,15 @@ final class LazyReaderCacheCleanupService {
            workCoordinator ?? SharedLazySectionWorkCoordinator.instance,
        _segmentedDisplayCacheFactory =
            segmentedDisplayCacheFactory ??
-           SegmentedDisplayCacheService.createDefault;
+           SegmentedDisplayCacheService.createDefault,
+       _derivedIndexStore = derivedIndexStore ?? DerivedBookIndexStore();
 
   final BookCacheService _bookCache;
   final ParsedSectionCacheService _parsedSectionCache;
   final LazyEpubIndexStore _indexStore;
   final SharedLazySectionWorkCoordinator _workCoordinator;
   final SegmentedDisplayCacheFactory _segmentedDisplayCacheFactory;
+  final DerivedBookIndexStore _derivedIndexStore;
 
   Future<void> deleteDerivativesForBook(String bookId) async {
     _workCoordinator.invalidateBook(bookId);
@@ -44,6 +48,7 @@ final class LazyReaderCacheCleanupService {
       parsedDeletion,
       segmented.deleteForBook(bookId),
       _indexStore.deleteForBook(bookId),
+      _derivedIndexStore.removeBook(bookId),
     ]);
     await _bookCache.deleteDisplayChunks(bookId);
     await _bookCache.deleteCachedBook(bookId);
@@ -57,6 +62,7 @@ final class LazyReaderCacheCleanupService {
       parsedReset,
       segmented.clearAll(),
       _indexStore.clearAll(),
+      _derivedIndexStore.clearAll(),
     ]);
     await _bookCache.clearAll();
   }

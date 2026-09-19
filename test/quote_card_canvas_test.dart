@@ -160,7 +160,8 @@ void main() {
           find.byWidgetPredicate(
             (widget) =>
                 widget is Text &&
-                widget.data?.replaceAll('\u2060', '') == payload.quote,
+                widget.data?.replaceAll('\u2060', '') ==
+                    QuoteSharePayload.normalizeQuote(payload.quote),
           ),
           findsOneWidget,
         );

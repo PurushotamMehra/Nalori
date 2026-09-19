@@ -299,7 +299,6 @@ Future<void> _pumpSpeedReadCard(
   SpeedReadController controller, {
   ReadingSettings settings = const ReadingSettings(),
   List<Highlight> highlights = const [],
-  Map<String, Color> characterNames = const {},
 }) {
   return tester.pumpWidget(
     MaterialApp(
@@ -312,7 +311,6 @@ Future<void> _pumpSpeedReadCard(
             settings: settings,
             speedReadController: controller,
             highlights: highlights,
-            characterNames: characterNames,
           ),
         ),
       ),
@@ -347,14 +345,14 @@ Future<void> _tapToken(
   required int startOffset,
   required int endOffset,
 }) async {
-  final selectableText = tester.widget<SelectableText>(
-    find.byType(SelectableText).first,
-  );
+  final textWidget = tester.widget<Text>(_readerRichText().first);
   final textPainter = TextPainter(
-    text: selectableText.textSpan,
+    text: textWidget.textSpan,
     textDirection: TextDirection.ltr,
-    textAlign: selectableText.textAlign ?? TextAlign.start,
-    strutStyle: selectableText.strutStyle,
+    textAlign: textWidget.textAlign ?? TextAlign.start,
+    textScaler: textWidget.textScaler ?? TextScaler.noScaling,
+    strutStyle: textWidget.strutStyle,
+    textHeightBehavior: textWidget.textHeightBehavior,
   );
   final box = _selectableTextBox(tester);
   textPainter.layout(maxWidth: box.size.width);
@@ -368,19 +366,28 @@ Future<void> _tapToken(
 }
 
 RenderBox _selectableTextBox(WidgetTester tester) {
-  final element = tester.element(find.byType(SelectableText).first);
-  final renderObject = element.findRenderObject();
+  final richText = find.descendant(
+    of: _readerRichText().first,
+    matching: find.byType(RichText),
+  );
+  final renderObject = tester.renderObject<RenderBox>(richText);
   expect(renderObject, isA<RenderBox>());
-  return renderObject! as RenderBox;
+  return renderObject;
 }
 
 List<TextSpan> _flattenSelectableTextSpans(WidgetTester tester) {
-  final selectableText = tester.widget<SelectableText>(
-    find.byType(SelectableText).first,
-  );
-  final root = selectableText.textSpan;
+  final root = tester.widget<Text>(_readerRichText().first).textSpan;
   expect(root, isNotNull);
   return _flattenTextSpan(root!).toList();
+}
+
+Finder _readerRichText() {
+  return find.descendant(
+    of: find.byType(SelectionArea),
+    matching: find.byWidgetPredicate(
+      (widget) => widget is Text && widget.textSpan != null,
+    ),
+  );
 }
 
 Iterable<TextSpan> _flattenTextSpan(InlineSpan span) sync* {

@@ -405,6 +405,80 @@ void main() {
       });
     });
 
+    group('reader typography normalization', () {
+      test('uses Lexend as the versioned optical reference', () {
+        const settings = ReadingSettings();
+
+        expect(settings.fontFamily, ReaderFontFamily.lexend);
+        expect(settings.fontSizeMultiplier, 1);
+        expect(
+          settings.fontMetricIdentity,
+          contains(readerTypographyNormalizationVersion),
+        );
+      });
+
+      test('known fonts have comparable perceived height', () {
+        final reference = readerFontMetricProfiles[ReaderFontFamily.lexend]!;
+        const xWeight = 0.85;
+        const capWeight = 0.15;
+        final referenceScore =
+            (reference.xHeightRatio * xWeight) +
+            (reference.capHeightRatio * capWeight);
+
+        for (final family in ReaderFontFamily.values) {
+          final settings = ReadingSettings(fontFamily: family);
+          final profile = settings.fontMetricProfile;
+          final effectiveScore =
+              ((profile.xHeightRatio * xWeight) +
+                  (profile.capHeightRatio * capWeight)) *
+              settings.fontSizeMultiplier;
+          expect(
+            effectiveScore / referenceScore,
+            inInclusiveRange(0.94, 1.06),
+            reason: family.name,
+          );
+        }
+      });
+
+      test('line boxes are normalized with a safe glyph envelope', () {
+        final lineBoxes = <double>[];
+        for (final family in ReaderFontFamily.values) {
+          final settings = ReadingSettings(fontFamily: family);
+          final minimumSafeHeight =
+              settings.semanticFontSize *
+              ((settings.fontSizeMultiplier *
+                      settings.fontMetricProfile.safeInkHeightRatio) +
+                  0.04);
+          expect(
+            settings.effectiveLineBoxHeight,
+            greaterThanOrEqualTo(minimumSafeHeight),
+            reason: family.name,
+          );
+          lineBoxes.add(settings.effectiveLineBoxHeight);
+        }
+
+        final smallest = lineBoxes.reduce((a, b) => a < b ? a : b);
+        final largest = lineBoxes.reduce((a, b) => a > b ? a : b);
+        expect(largest / smallest, lessThanOrEqualTo(1.10));
+      });
+
+      test('resolved metric identity changes with every weight', () {
+        for (final family in ReaderFontFamily.values) {
+          final identities = <String>{};
+          for (final weight in ReaderFontWeight.values) {
+            final settings = ReadingSettings(
+              fontFamily: family,
+              fontWeight: weight,
+            );
+            identities.add(settings.fontMetricIdentity);
+            expect(settings.fontWeightValue, isNotNull);
+            expect(settings.effectiveLineHeight, greaterThan(0));
+          }
+          expect(identities.length, ReaderFontWeight.values.length);
+        }
+      });
+    });
+
     group('resolvedTextAlign', () {
       test('should return TextAlign.left for left', () {
         const settings = ReadingSettings(textAlign: ReaderTextAlign.left);

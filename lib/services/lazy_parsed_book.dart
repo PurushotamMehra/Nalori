@@ -5,8 +5,8 @@ import '../models/bookmark.dart';
 import '../models/stable_book_location.dart';
 import 'lazy_epub_index_service.dart';
 
-const int lazyParsedSectionCacheFormatVersion = 2;
-const String lazyParsedSectionParserVersion = 'section_v2';
+const int lazyParsedSectionCacheFormatVersion = 3;
+const String lazyParsedSectionParserVersion = 'section_v4_lists';
 const int lazyParsedSectionDependencySchemaVersion = 1;
 
 typedef StableContentAnchor = StableBookLocation;

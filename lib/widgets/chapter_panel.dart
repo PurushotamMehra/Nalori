@@ -858,85 +858,89 @@ class _ChapterPanelState extends State<ChapterPanel>
             primary: _colors.accent,
           ),
         ),
-        child: Container(
+        child: Padding(
           key: chapter == null ? null : _keyForChapter(chapter),
-          margin: const EdgeInsets.symmetric(vertical: 2),
-          decoration: BoxDecoration(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Material(
             color: state == _ChapterReadState.current
                 ? _colors.accent.withValues(alpha: 0.09)
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
-          ),
-          child: ExpansionTile(
-            leading: _ChapterStateIndicator(
-              color: _stateColor(state),
-              active: state == _ChapterReadState.current,
-              completed: state == _ChapterReadState.completed,
-              child: Icon(icon, color: iconColor, size: 21),
-            ),
-            title: GestureDetector(
-              onTap: onHeaderTap,
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: state == _ChapterReadState.current
-                      ? FontWeight.w800
-                      : FontWeight.w700,
-                  color: titleColor,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+            clipBehavior: Clip.antiAlias,
+            child: ExpansionTile(
+              leading: _ChapterStateIndicator(
+                color: _stateColor(state),
+                active: state == _ChapterReadState.current,
+                completed: state == _ChapterReadState.completed,
+                child: Icon(icon, color: iconColor, size: 21),
               ),
-            ),
-            subtitle: chapter == null
-                ? null
-                : Text(
-                    _displayPageLabel(chapter.chunkIndex),
-                    style: TextStyle(fontSize: 11, color: _colors.tertiaryText),
+              title: GestureDetector(
+                onTap: onHeaderTap,
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: state == _ChapterReadState.current
+                        ? FontWeight.w800
+                        : FontWeight.w700,
+                    color: titleColor,
                   ),
-            initiallyExpanded: expanded,
-            onExpansionChanged: (value) {
-              setState(() {
-                if (value) {
-                  _expandedSectionKeys.add(sectionKey);
-                  _expandedSectionKeys.remove('closed:$sectionKey');
-                } else {
-                  _expandedSectionKeys.remove(sectionKey);
-                  _expandedSectionKeys.add('closed:$sectionKey');
-                }
-              });
-            },
-            tilePadding: const EdgeInsets.only(left: 8, right: 6),
-            childrenPadding: const EdgeInsets.only(left: 18, bottom: 4),
-            iconColor: _colors.secondaryText,
-            collapsedIconColor: _colors.secondaryText,
-            dense: true,
-            visualDensity: VisualDensity.compact,
-            children: children.map((ch) {
-              if (ch.children.isNotEmpty) {
-                return _buildChapterEntry(context, ch);
-              }
-              final childState = _chapterReadState(ch);
-              return _buildNavTile(
-                context,
-                icon: Icons.article_outlined,
-                iconColor: _stateColor(childState),
-                title: ch.title,
-                subtitle: _displayPageLabel(ch.chunkIndex),
-                state: childState,
-                depth: ch.depth,
-                itemKey: _keyForChapter(ch),
-                onTap: () {
-                  final chapterCallback = widget.onNavigateChapter;
-                  if (chapterCallback != null) {
-                    chapterCallback(ch);
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              subtitle: chapter == null
+                  ? null
+                  : Text(
+                      _displayPageLabel(chapter.chunkIndex),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: _colors.tertiaryText,
+                      ),
+                    ),
+              initiallyExpanded: expanded,
+              onExpansionChanged: (value) {
+                setState(() {
+                  if (value) {
+                    _expandedSectionKeys.add(sectionKey);
+                    _expandedSectionKeys.remove('closed:$sectionKey');
                   } else {
-                    widget.onNavigate(ch.chunkIndex);
+                    _expandedSectionKeys.remove(sectionKey);
+                    _expandedSectionKeys.add('closed:$sectionKey');
                   }
-                },
-              );
-            }).toList(),
+                });
+              },
+              tilePadding: const EdgeInsets.only(left: 8, right: 6),
+              childrenPadding: const EdgeInsets.only(left: 18, bottom: 4),
+              iconColor: _colors.secondaryText,
+              collapsedIconColor: _colors.secondaryText,
+              dense: true,
+              visualDensity: VisualDensity.compact,
+              children: children.map((ch) {
+                if (ch.children.isNotEmpty) {
+                  return _buildChapterEntry(context, ch);
+                }
+                final childState = _chapterReadState(ch);
+                return _buildNavTile(
+                  context,
+                  icon: Icons.article_outlined,
+                  iconColor: _stateColor(childState),
+                  title: ch.title,
+                  subtitle: _displayPageLabel(ch.chunkIndex),
+                  state: childState,
+                  depth: ch.depth,
+                  itemKey: _keyForChapter(ch),
+                  onTap: () {
+                    final chapterCallback = widget.onNavigateChapter;
+                    if (chapterCallback != null) {
+                      chapterCallback(ch);
+                    } else {
+                      widget.onNavigate(ch.chunkIndex);
+                    }
+                  },
+                );
+              }).toList(),
+            ),
           ),
         ),
       ),
@@ -968,60 +972,63 @@ class _ChapterPanelState extends State<ChapterPanel>
       selected: isCurrent,
       label: title,
       hint: subtitle,
-      child: Container(
+      child: Padding(
         key: itemKey,
-        margin: EdgeInsets.only(
+        padding: EdgeInsets.only(
           left: depth > 1 ? (depth - 1) * 4.0 : 0,
           top: 1,
           bottom: 1,
         ),
-        decoration: BoxDecoration(
+        child: Material(
           color: isCurrent
               ? _colors.accent.withValues(alpha: 0.13)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
-        ),
-        child: ListTile(
-          minLeadingWidth: 32,
-          horizontalTitleGap: 10,
-          contentPadding: const EdgeInsets.only(left: 8, right: 6),
-          leading: _ChapterStateIndicator(
-            color: _stateColor(state),
-            active: isCurrent,
-            completed: isCompleted,
-            child: Icon(icon, color: iconColor, size: 20),
-          ),
-          title: ExcludeSemantics(
-            child: Text(
-              title,
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: titleWeight,
-                color: textColor,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+          clipBehavior: Clip.antiAlias,
+          child: ListTile(
+            minLeadingWidth: 32,
+            horizontalTitleGap: 10,
+            contentPadding: const EdgeInsets.only(left: 8, right: 6),
+            leading: _ChapterStateIndicator(
+              color: _stateColor(state),
+              active: isCurrent,
+              completed: isCompleted,
+              child: Icon(icon, color: iconColor, size: 20),
             ),
-          ),
-          subtitle: subtitle != null
-              ? ExcludeSemantics(
-                  child: Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: isCurrent ? _colors.accent : _colors.tertiaryText,
+            title: ExcludeSemantics(
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: titleWeight,
+                  color: textColor,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            subtitle: subtitle != null
+                ? ExcludeSemantics(
+                    child: Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: isCurrent
+                            ? _colors.accent
+                            : _colors.tertiaryText,
+                      ),
                     ),
-                  ),
-                )
-              : null,
-          trailing: Icon(
-            Icons.chevron_right,
-            color: isCurrent ? _colors.accent : _colors.tertiaryText,
-            size: 19,
+                  )
+                : null,
+            trailing: Icon(
+              Icons.chevron_right,
+              color: isCurrent ? _colors.accent : _colors.tertiaryText,
+              size: 19,
+            ),
+            dense: true,
+            visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
+            onTap: onTap,
           ),
-          dense: true,
-          visualDensity: const VisualDensity(horizontal: -2, vertical: -2),
-          onTap: onTap,
         ),
       ),
     );

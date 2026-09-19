@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/book_chunk.dart';
+import 'package:nalori/models/reader_text_boundary.dart';
 import 'package:nalori/models/stable_book_location.dart';
 import 'package:nalori/services/book_cache_service.dart';
 import 'package:nalori/services/chapter_card_layout_service.dart';
@@ -27,7 +28,7 @@ void main() {
 
   DisplayGenerationSignature signature({
     String bookId = 'book.epub',
-    String cacheKey = 'book_dc_v11_settings_viewport',
+    String cacheKey = 'book_dc_v14_settings_viewport',
     int parsedVersion = BookCacheService.parsedBookCacheFormatVersion,
     String layout = BookCacheService.displayLayoutVersion,
     String settings = 'settings',
@@ -190,6 +191,42 @@ void main() {
     expect(manifestText.length, lessThan(2000));
   });
 
+  test('segment round-trips paragraph identity and packing seams', () async {
+    final key = cacheKey(sourceChunkCount: 1);
+    const displayChunk = BookChunk(
+      index: 0,
+      type: BookChunkType.text,
+      text: 'First. Second.',
+      logicalParagraphId: 'chapter.xhtml#paragraph-0',
+      logicalParagraphEndOffset: 14,
+      textBoundaries: [
+        DisplayTextBoundary(offset: 7, kind: ReaderTextBoundaryKind.sentence),
+      ],
+    );
+    await service.writeSegment(
+      key: key,
+      result: result(
+        start: 0,
+        end: 1,
+        generationId: 1,
+        displayChunks: const [displayChunk],
+        displayToOriginal: const [
+          [0],
+        ],
+        originalToDisplay: const {0: 0},
+      ),
+      generationId: 1,
+    );
+
+    final loaded = await service.loadAroundSource(key: key, sourceIndex: 0);
+    final restored = loaded.center!.displayChunks.single;
+    expect(restored.logicalParagraphId, displayChunk.logicalParagraphId);
+    expect(
+      restored.textBoundaries!.single.kind,
+      ReaderTextBoundaryKind.sentence,
+    );
+  });
+
   test('loads center segment and adjacent cached segments lazily', () async {
     final key = cacheKey();
     await service.writeSegment(
@@ -301,6 +338,24 @@ void main() {
 
     expect(await service.loadManifest(changed), isNull);
   });
+
+  test(
+    'v13 display segments are rejected by the v14 layout identity',
+    () async {
+      final oldKey = cacheKey(
+        sig: signature(cacheKey: 'book-shared-layout-key', layout: 'v13'),
+      );
+      await service.writeSegment(
+        key: oldKey,
+        result: result(start: 0, end: 96, generationId: 1),
+        generationId: 1,
+      );
+
+      final currentKey = cacheKey(sig: signature(cacheKey: oldKey.cacheKey));
+      expect(BookCacheService.displayLayoutVersion, 'v14');
+      expect(await service.loadManifest(currentKey), isNull);
+    },
+  );
 
   test('repeated compatible loads preserve validated manifest state', () async {
     final key = cacheKey();

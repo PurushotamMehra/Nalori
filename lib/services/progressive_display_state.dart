@@ -1,5 +1,185 @@
+import 'package:flutter/foundation.dart';
+
 import '../models/book_chunk.dart';
+import '../models/canonical_display_segment.dart';
+import '../models/canonical_pagination.dart';
+import '../models/reader_checkpoint.dart';
+import '../utils/reader_content_parser.dart';
 import 'display_generation_coordinator.dart';
+
+enum CanonicalDisplayPublicationOperation {
+  initial,
+  append,
+  prepend,
+  replacement,
+}
+
+enum CanonicalDisplayPublicationOutcomeKind {
+  acceptedInitialPublication,
+  acceptedAppend,
+  acceptedPrepend,
+  acceptedReplacement,
+  idempotentAlreadyApplied,
+  provisionalResultRejected,
+  staleGenerationOrSession,
+  incompatiblePublication,
+  incompatibleSourceSnapshot,
+  incompatibleLayout,
+  incompatiblePagination,
+  missingOrInvalidContinuation,
+  seamGap,
+  seamOverlap,
+  duplicatedOwnership,
+  reorderedOwnership,
+  crossSectionOwnership,
+  publishedCardIdentityMismatch,
+  committedCardMismatch,
+  boundViolation,
+  cancellationBeforeCommit,
+  validationError,
+  canonicalRegenerationRequired,
+}
+
+@immutable
+final class CanonicalDisplayPrependEvidence {
+  const CanonicalDisplayPrependEvidence({
+    required this.acceptedPublishedPrefix,
+    required this.regeneratedPublishedPrefix,
+    required this.acceptedCommittedCard,
+    required this.regeneratedCommittedCard,
+    required this.predecessorEndCursor,
+    required this.currentStartCursor,
+    required this.currentEndCursor,
+    required this.successorStartCursor,
+  });
+
+  final CanonicalFinalizedReaderCard acceptedPublishedPrefix;
+  final CanonicalFinalizedReaderCard regeneratedPublishedPrefix;
+  final CanonicalFinalizedReaderCard acceptedCommittedCard;
+  final CanonicalFinalizedReaderCard regeneratedCommittedCard;
+  final CanonicalPaginationCursor predecessorEndCursor;
+  final CanonicalPaginationCursor currentStartCursor;
+  final CanonicalPaginationCursor currentEndCursor;
+  final CanonicalPaginationCursor successorStartCursor;
+}
+
+@immutable
+final class CanonicalDisplayPublicationRequest {
+  CanonicalDisplayPublicationRequest({
+    required this.operation,
+    required this.sessionIdentity,
+    required this.generationIdentity,
+    required this.currentGenerationIdentity,
+    required this.sourceSnapshot,
+    required this.controlledLayoutIdentity,
+    required this.paginationAlgorithmIdentity,
+    required List<CanonicalFinalizedReaderCard> finalizedCards,
+    required this.continuation,
+    required this.isCancelled,
+    this.predecessorContinuation,
+    this.targetContainment,
+    this.prependEvidence,
+    this.committedCard,
+    this.beforeCommit,
+  }) : finalizedCards = List<CanonicalFinalizedReaderCard>.unmodifiable(
+         finalizedCards,
+       );
+
+  final CanonicalDisplayPublicationOperation operation;
+  final String sessionIdentity;
+  final int generationIdentity;
+  final int Function() currentGenerationIdentity;
+  final CanonicalPaginationSourceSnapshot sourceSnapshot;
+  final String controlledLayoutIdentity;
+  final String paginationAlgorithmIdentity;
+  final List<CanonicalFinalizedReaderCard> finalizedCards;
+  final CanonicalPaginationContinuation continuation;
+  final CanonicalPaginationContinuation? predecessorContinuation;
+  final CanonicalPaginationTargetContainmentEvidence? targetContainment;
+  final CanonicalDisplayPrependEvidence? prependEvidence;
+  final CanonicalFinalizedReaderCard? committedCard;
+  final bool Function() isCancelled;
+
+  /// Synchronous test seam at the final validation/commit boundary.
+  @visibleForTesting
+  final void Function()? beforeCommit;
+}
+
+sealed class CanonicalDisplayPublicationResult {
+  const CanonicalDisplayPublicationResult({required this.kind});
+
+  final CanonicalDisplayPublicationOutcomeKind kind;
+  bool get accepted => false;
+  List<CanonicalFinalizedReaderCard> get publishableCards => const [];
+  CanonicalPaginationContinuation? get acceptedContinuation => null;
+  bool get hasCacheWriteAuthority => false;
+  bool get hasCheckpointOrSettlementAuthority => false;
+}
+
+final class CanonicalDisplayPublicationAccepted
+    extends CanonicalDisplayPublicationResult {
+  CanonicalDisplayPublicationAccepted({
+    required super.kind,
+    required List<CanonicalFinalizedReaderCard> cards,
+    required this.continuation,
+    required this.insertedBefore,
+    required this.committedDisplayIndex,
+    required this.targetDisplayIndex,
+  }) : _cards = List<CanonicalFinalizedReaderCard>.unmodifiable(cards);
+
+  final List<CanonicalFinalizedReaderCard> _cards;
+  final CanonicalPaginationContinuation continuation;
+  final int insertedBefore;
+  final int? committedDisplayIndex;
+  final int? targetDisplayIndex;
+
+  @override
+  bool get accepted => true;
+  @override
+  List<CanonicalFinalizedReaderCard> get publishableCards => _cards;
+  @override
+  CanonicalPaginationContinuation get acceptedContinuation => continuation;
+  @override
+  bool get hasCacheWriteAuthority => true;
+  @override
+  bool get hasCheckpointOrSettlementAuthority => true;
+}
+
+final class CanonicalDisplayPublicationRejected
+    extends CanonicalDisplayPublicationResult {
+  const CanonicalDisplayPublicationRejected({
+    required super.kind,
+    required this.message,
+  });
+
+  final String message;
+}
+
+/// Private capability proving that one canonical record was derived from the
+/// currently accepted P04 publication. Cache residence never creates this
+/// capability and the cache service cannot manufacture it.
+@immutable
+final class CanonicalDisplayCacheWriteAuthorization {
+  const CanonicalDisplayCacheWriteAuthorization._({
+    required this.keyDigest,
+    required this.recordDigest,
+    required this.sourceSnapshotDigest,
+  });
+
+  final String keyDigest;
+  final String recordDigest;
+  final String sourceSnapshotDigest;
+}
+
+/// Stable-identity-only retention metadata minted from accepted publication
+/// state. It deliberately contains no display/card/window index.
+@immutable
+final class CanonicalDisplayCacheRetentionAuthorization {
+  CanonicalDisplayCacheRetentionAuthorization._(Iterable<String> digests)
+    : pinnedKeyDigests = Set<String>.unmodifiable(digests);
+
+  final Set<String> pinnedKeyDigests;
+}
 
 enum DisplayRangeDirection { initial, forward, backward, target }
 
@@ -37,6 +217,7 @@ final class DisplayRangeRequest {
     required this.generationId,
     required this.reason,
     this.targetOriginalIndex,
+    this.targetTextOffset,
   });
 
   final DisplayRangeDirection direction;
@@ -44,6 +225,7 @@ final class DisplayRangeRequest {
   final int generationId;
   final String reason;
   final int? targetOriginalIndex;
+  final int? targetTextOffset;
 }
 
 final class DisplayRangeResult {
@@ -244,6 +426,11 @@ BookChunk? _remapDisplayChunkSourceIndexes(
         originalEndOffset: range.originalEndOffset,
         displayStartOffset: range.displayStartOffset,
         displayEndOffset: range.displayEndOffset,
+        logicalParagraphId: range.logicalParagraphId,
+        paragraphStartOffset: range.paragraphStartOffset,
+        paragraphEndOffset: range.paragraphEndOffset,
+        isParagraphStart: range.isParagraphStart,
+        isParagraphEnd: range.isParagraphEnd,
       ),
     );
   }
@@ -258,10 +445,121 @@ final class ProgressiveDisplayState {
 
   final DisplayGenerationSignature signature;
   int sourceChunkCount;
-  final List<PreparedDisplayRange> ranges = [];
-  final List<BookChunk> displayChunks = [];
-  final List<List<int>> displayToOriginal = [];
-  final Map<int, int> originalToDisplay = {};
+  List<PreparedDisplayRange> _ranges = [];
+  List<BookChunk> _displayChunks = [];
+  List<List<int>> _displayToOriginal = [];
+  Map<int, int> _originalToDisplay = {};
+  List<CanonicalFinalizedReaderCard> _canonicalCards = [];
+  CanonicalPaginationContinuation? _acceptedCanonicalContinuation;
+  CanonicalPaginationSourceSnapshot? _acceptedSourceSnapshot;
+  String? _acceptedSessionIdentity;
+  String? _acceptedLayoutIdentity;
+  String? _acceptedPaginationIdentity;
+  bool _canonicalCacheWriteAuthority = false;
+
+  List<PreparedDisplayRange> get ranges => _ranges;
+  List<BookChunk> get displayChunks => _displayChunks;
+  List<List<int>> get displayToOriginal => _displayToOriginal;
+  Map<int, int> get originalToDisplay => _originalToDisplay;
+  List<CanonicalFinalizedReaderCard> get canonicalCards =>
+      List<CanonicalFinalizedReaderCard>.unmodifiable(_canonicalCards);
+  CanonicalPaginationContinuation? get acceptedCanonicalContinuation =>
+      _acceptedCanonicalContinuation;
+  bool get hasCanonicalCacheWriteAuthority => _canonicalCacheWriteAuthority;
+
+  CanonicalDisplayCacheWriteAuthorization? authorizeCanonicalCacheWrite(
+    CanonicalDisplaySegmentRecord record,
+  ) {
+    final snapshot = _acceptedSourceSnapshot;
+    if (!_canonicalCacheWriteAuthority ||
+        snapshot == null ||
+        record.sourceSnapshotLink.snapshotDigest != snapshot.snapshotDigest ||
+        !_recordCardsAreAccepted(record)) {
+      return null;
+    }
+    return CanonicalDisplayCacheWriteAuthorization._(
+      keyDigest: record.keyDigest,
+      recordDigest: record.checksumDigest,
+      sourceSnapshotDigest: snapshot.snapshotDigest,
+    );
+  }
+
+  CanonicalDisplayCacheRetentionAuthorization?
+  authorizeCanonicalCacheRetention({
+    required String currentCardSignature,
+    required Iterable<CanonicalDisplaySegmentRecord> residentRecords,
+  }) {
+    if (!_canonicalCacheWriteAuthority ||
+        !_canonicalCards.any(
+          (card) => card.identity.signature == currentCardSignature,
+        )) {
+      return null;
+    }
+    final records = residentRecords
+        .where(_recordCardsAreAccepted)
+        .toList(growable: false);
+    final current =
+        records
+            .where(
+              (record) => record.orderedFinalizedCards.any(
+                (card) => card.physicalCardSignature == currentCardSignature,
+              ),
+            )
+            .toList(growable: false)
+          ..sort((left, right) => left.keyDigest.compareTo(right.keyDigest));
+    if (current.isEmpty) return null;
+    final selected = <String>{current.first.keyDigest};
+    final currentRecord = current.first;
+    final predecessors =
+        records
+            .where(
+              (record) => record.stableEndCursor.samePositionAs(
+                currentRecord.stableStartCursor,
+              ),
+            )
+            .toList(growable: false)
+          ..sort((left, right) => left.keyDigest.compareTo(right.keyDigest));
+    final successors =
+        records
+            .where(
+              (record) => record.stableStartCursor.samePositionAs(
+                currentRecord.stableEndCursor,
+              ),
+            )
+            .toList(growable: false)
+          ..sort((left, right) => left.keyDigest.compareTo(right.keyDigest));
+    if (predecessors.isNotEmpty) selected.add(predecessors.first.keyDigest);
+    if (successors.isNotEmpty) selected.add(successors.first.keyDigest);
+    return CanonicalDisplayCacheRetentionAuthorization._(selected);
+  }
+
+  bool _recordCardsAreAccepted(CanonicalDisplaySegmentRecord record) {
+    if (record.orderedFinalizedCards.isEmpty || _canonicalCards.isEmpty) {
+      return false;
+    }
+    final accepted = _canonicalCards
+        .map((card) => card.identity.signature)
+        .toList(growable: false);
+    final candidate = record.orderedFinalizedCards
+        .map((card) => card.physicalCardSignature)
+        .toList(growable: false);
+    for (
+      var start = 0;
+      start + candidate.length <= accepted.length;
+      start += 1
+    ) {
+      var matches = true;
+      for (var offset = 0; offset < candidate.length; offset += 1) {
+        if (accepted[start + offset] != candidate[offset]) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) return true;
+    }
+    return false;
+  }
+
   DisplayRangeRequest? foregroundRequest;
   DisplayRangeRequest? lookaheadRequest;
   DisplayRangeRequest? failedRequest;
@@ -275,9 +573,16 @@ final class ProgressiveDisplayState {
   bool get hasPreparedContent => ranges.isNotEmpty;
   bool get hasUnavailableBefore =>
       externalUnavailableBefore ||
+      (_canonicalCards.isNotEmpty &&
+          (_canonicalCards.first.sourceSlices.first.sourceOrdinalHint > 0 ||
+              (_canonicalCards.first.sourceSlices.first.startUtf16 ?? 0) > 0 ||
+              (_canonicalCards.first.sourceSlices.first.tableRowStart ?? 0) >
+                  0)) ||
       (ranges.isNotEmpty && ranges.first.sourceRange.start > 0);
   bool get hasUnavailableAfter =>
       externalUnavailableAfter ||
+      (_acceptedCanonicalContinuation != null &&
+          !_acceptedCanonicalContinuation!.terminal) ||
       (ranges.isNotEmpty &&
           ranges.last.sourceRange.endExclusive < sourceChunkCount);
 
@@ -318,7 +623,10 @@ final class ProgressiveDisplayState {
 
   SourceChunkRange? nextForwardRange(int rangeSize) {
     if (ranges.isEmpty) return null;
-    final start = ranges.last.sourceRange.endExclusive;
+    final canonicalCursor = _acceptedCanonicalContinuation?.nextSourceCursor;
+    final start = canonicalCursor != null && !canonicalCursor.isLogicalEnd
+        ? canonicalCursor.sourceOrdinalHint
+        : ranges.last.sourceRange.endExclusive;
     if (start >= sourceChunkCount) return null;
     return SourceChunkRange(
       start,
@@ -396,6 +704,7 @@ final class ProgressiveDisplayState {
     foregroundRequest = null;
     failedRequest = null;
     failure = null;
+    _clearCanonicalAuthority();
   }
 
   int append(DisplayRangeResult result) {
@@ -428,6 +737,7 @@ final class ProgressiveDisplayState {
     lookaheadRequest = null;
     failedRequest = null;
     failure = null;
+    _clearCanonicalAuthority();
     return result.displayChunks.length;
   }
 
@@ -466,7 +776,912 @@ final class ProgressiveDisplayState {
     foregroundRequest = null;
     failedRequest = null;
     failure = null;
+    _clearCanonicalAuthority();
     return inserted;
+  }
+
+  CanonicalDisplayPublicationResult rejectNonCanonicalCachePublication({
+    required String cacheKind,
+  }) {
+    return CanonicalDisplayPublicationRejected(
+      kind:
+          CanonicalDisplayPublicationOutcomeKind.canonicalRegenerationRequired,
+      message:
+          '$cacheKind cache data has no finalized canonical identity and continuation authority.',
+    );
+  }
+
+  CanonicalDisplayPublicationResult publishCanonical(
+    CanonicalDisplayPublicationRequest request,
+  ) {
+    final rejection = _validateCanonicalRequest(request);
+    if (rejection != null) return rejection;
+
+    try {
+      final candidate = _buildCanonicalCandidate(request);
+      if (candidate is CanonicalDisplayPublicationRejected) return candidate;
+      final prepared = candidate as _CanonicalDisplayCandidate;
+      if (request.isCancelled()) {
+        return const CanonicalDisplayPublicationRejected(
+          kind: CanonicalDisplayPublicationOutcomeKind.cancellationBeforeCommit,
+          message: 'Canonical publication was cancelled before commit.',
+        );
+      }
+      if (request.currentGenerationIdentity() != request.generationIdentity) {
+        return const CanonicalDisplayPublicationRejected(
+          kind: CanonicalDisplayPublicationOutcomeKind.staleGenerationOrSession,
+          message: 'Canonical publication generation became stale.',
+        );
+      }
+      request.beforeCommit?.call();
+      if (request.isCancelled()) {
+        return const CanonicalDisplayPublicationRejected(
+          kind: CanonicalDisplayPublicationOutcomeKind.cancellationBeforeCommit,
+          message: 'Canonical publication was cancelled at commit.',
+        );
+      }
+      if (request.currentGenerationIdentity() != request.generationIdentity) {
+        return const CanonicalDisplayPublicationRejected(
+          kind: CanonicalDisplayPublicationOutcomeKind.staleGenerationOrSession,
+          message: 'Canonical publication generation changed at commit.',
+        );
+      }
+
+      // All values are complete private candidates. No validation, allocation,
+      // callback, or throwing operation follows these synchronous swaps.
+      _ranges = prepared.ranges;
+      _displayChunks = prepared.displayChunks;
+      _displayToOriginal = prepared.displayToOriginal;
+      _originalToDisplay = prepared.originalToDisplay;
+      _canonicalCards = prepared.canonicalCards;
+      _acceptedCanonicalContinuation = prepared.continuation;
+      _acceptedSourceSnapshot = request.sourceSnapshot;
+      _acceptedSessionIdentity = request.sessionIdentity;
+      _acceptedLayoutIdentity = request.controlledLayoutIdentity;
+      _acceptedPaginationIdentity = request.paginationAlgorithmIdentity;
+      _canonicalCacheWriteAuthority = true;
+      initialWindowReady = true;
+      generationComplete = prepared.generationComplete;
+      foregroundRequest = null;
+      lookaheadRequest = null;
+      failedRequest = null;
+      failure = null;
+
+      return CanonicalDisplayPublicationAccepted(
+        kind: prepared.kind,
+        cards: request.finalizedCards,
+        continuation: prepared.continuation,
+        insertedBefore: prepared.insertedBefore,
+        committedDisplayIndex: prepared.committedDisplayIndex,
+        targetDisplayIndex: prepared.targetDisplayIndex,
+      );
+    } on Object catch (error) {
+      return CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.validationError,
+        message: 'Canonical publication validation failed: $error',
+      );
+    }
+  }
+
+  CanonicalDisplayPublicationRejected? _validateCanonicalRequest(
+    CanonicalDisplayPublicationRequest request,
+  ) {
+    if (request.isCancelled()) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.cancellationBeforeCommit,
+        message: 'Canonical publication was already cancelled.',
+      );
+    }
+    if (request.currentGenerationIdentity() != request.generationIdentity) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.staleGenerationOrSession,
+        message: 'Canonical publication generation is stale.',
+      );
+    }
+    if (request.sessionIdentity.isEmpty ||
+        request.sourceSnapshot.bookId != signature.bookId ||
+        request.continuation.key.bookId != signature.bookId ||
+        request.continuation.key.publicationFingerprint !=
+            request.sourceSnapshot.publicationFingerprint) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.incompatiblePublication,
+        message: 'Book/publication identity is incompatible.',
+      );
+    }
+    if (request.continuation.key.parserSourceIdentity !=
+            request.sourceSnapshot.parserSourceIdentity ||
+        request.continuation.key.sourceRevision !=
+            request.sourceSnapshot.sourceRevision ||
+        request.continuation.key.sourceSnapshotDigest !=
+            request.sourceSnapshot.snapshotDigest) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.incompatibleSourceSnapshot,
+        message: 'Parser/source snapshot identity is incompatible.',
+      );
+    }
+    if (request.continuation.key.controlledLayoutIdentity !=
+        request.controlledLayoutIdentity) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.incompatibleLayout,
+        message: 'Controlled layout identity is incompatible.',
+      );
+    }
+    if (request.continuation.key.paginationAlgorithmIdentity !=
+        request.paginationAlgorithmIdentity) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.incompatiblePagination,
+        message: 'Pagination identity is incompatible.',
+      );
+    }
+    final decoded = CanonicalPaginationContinuationCodec.decode(
+      CanonicalPaginationContinuationCodec.encode(request.continuation),
+    );
+    if (decoded is! CanonicalPaginationContinuationAccepted) {
+      return const CanonicalDisplayPublicationRejected(
+        kind:
+            CanonicalDisplayPublicationOutcomeKind.missingOrInvalidContinuation,
+        message: 'Canonical continuation integrity validation failed.',
+      );
+    }
+    if (request.finalizedCards.isEmpty) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.provisionalResultRejected,
+        message: 'No finalized canonical card is publishable.',
+      );
+    }
+    if (request.operation != CanonicalDisplayPublicationOperation.initial &&
+        request.operation != CanonicalDisplayPublicationOperation.replacement) {
+      if (_acceptedSourceSnapshot == null ||
+          _acceptedSessionIdentity != request.sessionIdentity ||
+          _acceptedSourceSnapshot!.snapshotDigest !=
+              request.sourceSnapshot.snapshotDigest) {
+        return const CanonicalDisplayPublicationRejected(
+          kind: CanonicalDisplayPublicationOutcomeKind.staleGenerationOrSession,
+          message: 'Extension does not belong to the accepted session.',
+        );
+      }
+      if (_acceptedLayoutIdentity != request.controlledLayoutIdentity) {
+        return const CanonicalDisplayPublicationRejected(
+          kind: CanonicalDisplayPublicationOutcomeKind.incompatibleLayout,
+          message: 'Extension layout differs from the accepted snapshot.',
+        );
+      }
+      if (_acceptedPaginationIdentity != request.paginationAlgorithmIdentity) {
+        return const CanonicalDisplayPublicationRejected(
+          kind: CanonicalDisplayPublicationOutcomeKind.incompatiblePagination,
+          message: 'Extension pagination identity differs.',
+        );
+      }
+    }
+    return null;
+  }
+
+  Object _buildCanonicalCandidate(CanonicalDisplayPublicationRequest request) {
+    final incoming = request.finalizedCards;
+    for (final card in incoming) {
+      final cardRejection = _validateCanonicalCard(card, request);
+      if (cardRejection != null) return cardRejection;
+    }
+
+    final existing = _canonicalCards;
+    if ((request.operation == CanonicalDisplayPublicationOperation.initial ||
+            request.operation ==
+                CanonicalDisplayPublicationOperation.replacement) &&
+        !_boundaryOwnsCard(
+          request.continuation.previousFinalizedBoundary,
+          incoming.last,
+        )) {
+      return const CanonicalDisplayPublicationRejected(
+        kind:
+            CanonicalDisplayPublicationOutcomeKind.missingOrInvalidContinuation,
+        message:
+            'Initial/replacement continuation does not own its final card.',
+      );
+    }
+    final acceptedContinuationMatches =
+        request.operation == CanonicalDisplayPublicationOperation.prepend
+        ? request.predecessorContinuation?.integrityDigest ==
+              _acceptedCanonicalContinuation?.integrityDigest
+        : _acceptedCanonicalContinuation?.integrityDigest ==
+              request.continuation.integrityDigest;
+    if (existing.isNotEmpty &&
+        acceptedContinuationMatches &&
+        _isAlreadyApplied(request.operation, existing, incoming)) {
+      if (request.committedCard != null &&
+          !existing.any(
+            (card) => _sameFinalizedCard(card, request.committedCard!),
+          )) {
+        return const CanonicalDisplayPublicationRejected(
+          kind: CanonicalDisplayPublicationOutcomeKind.committedCardMismatch,
+          message: 'The stable committed card is absent from the snapshot.',
+        );
+      }
+      if (request.targetContainment != null) {
+        final targetRejection = _validateTarget(request, existing);
+        if (targetRejection != null) return targetRejection;
+      }
+      return _candidateFromAcceptedSnapshot(request);
+    }
+    late final List<CanonicalFinalizedReaderCard> candidateCards;
+    late final CanonicalDisplayPublicationOutcomeKind acceptedKind;
+    var insertedBefore = 0;
+    switch (request.operation) {
+      case CanonicalDisplayPublicationOperation.initial:
+        candidateCards = List.of(incoming);
+        acceptedKind =
+            CanonicalDisplayPublicationOutcomeKind.acceptedInitialPublication;
+        if (request.targetContainment != null) {
+          final targetRejection = _validateTarget(request, candidateCards);
+          if (targetRejection != null) return targetRejection;
+        }
+      case CanonicalDisplayPublicationOperation.replacement:
+        candidateCards = List.of(incoming);
+        acceptedKind =
+            CanonicalDisplayPublicationOutcomeKind.acceptedReplacement;
+        if (request.targetContainment != null) {
+          final targetRejection = _validateTarget(request, candidateCards);
+          if (targetRejection != null) return targetRejection;
+        }
+      case CanonicalDisplayPublicationOperation.append:
+        if (existing.isEmpty) {
+          return const CanonicalDisplayPublicationRejected(
+            kind: CanonicalDisplayPublicationOutcomeKind
+                .publishedCardIdentityMismatch,
+            message: 'Append requires an accepted canonical prefix.',
+          );
+        }
+        final predecessor = request.predecessorContinuation;
+        if (predecessor == null ||
+            _acceptedCanonicalContinuation?.integrityDigest !=
+                predecessor.integrityDigest ||
+            request.continuation.parentDigest != predecessor.integrityDigest ||
+            !_boundaryOwnsCard(
+              predecessor.previousFinalizedBoundary,
+              existing.last,
+            )) {
+          return const CanonicalDisplayPublicationRejected(
+            kind: CanonicalDisplayPublicationOutcomeKind
+                .missingOrInvalidContinuation,
+            message: 'Append continuation does not own the accepted suffix.',
+          );
+        }
+        final seam = _classifyCursorSeam(
+          predecessor.previousFinalizedBoundary.endCursor,
+          _cardStartCursor(incoming.first),
+        );
+        if (seam != null) return seam;
+        if (!_boundaryOwnsCard(
+          request.continuation.previousFinalizedBoundary,
+          incoming.last,
+        )) {
+          return const CanonicalDisplayPublicationRejected(
+            kind: CanonicalDisplayPublicationOutcomeKind
+                .missingOrInvalidContinuation,
+            message: 'Append result continuation does not own its final card.',
+          );
+        }
+        candidateCards = <CanonicalFinalizedReaderCard>[
+          ...existing,
+          ...incoming,
+        ];
+        acceptedKind = CanonicalDisplayPublicationOutcomeKind.acceptedAppend;
+      case CanonicalDisplayPublicationOperation.prepend:
+        if (existing.isEmpty || request.prependEvidence == null) {
+          return const CanonicalDisplayPublicationRejected(
+            kind: CanonicalDisplayPublicationOutcomeKind
+                .missingOrInvalidContinuation,
+            message: 'Prepend requires canonical overlap/current evidence.',
+          );
+        }
+        final evidence = request.prependEvidence!;
+        final acceptedContinuation = _acceptedCanonicalContinuation;
+        final predecessorContinuation = request.predecessorContinuation;
+        if (acceptedContinuation == null ||
+            predecessorContinuation == null ||
+            acceptedContinuation.integrityDigest !=
+                predecessorContinuation.integrityDigest) {
+          return const CanonicalDisplayPublicationRejected(
+            kind: CanonicalDisplayPublicationOutcomeKind
+                .missingOrInvalidContinuation,
+            message: 'Prepend must preserve the accepted continuation state.',
+          );
+        }
+        if (!_sameStableFinalizedCard(
+              existing.first,
+              evidence.acceptedPublishedPrefix,
+            ) ||
+            !_sameStableFinalizedCard(
+              evidence.acceptedPublishedPrefix,
+              evidence.regeneratedPublishedPrefix,
+            )) {
+          return const CanonicalDisplayPublicationRejected(
+            kind: CanonicalDisplayPublicationOutcomeKind
+                .publishedCardIdentityMismatch,
+            message: 'Regenerated prefix does not equal the accepted prefix.',
+          );
+        }
+        final committedIndex = existing.indexWhere(
+          (card) =>
+              _sameStableFinalizedCard(card, evidence.acceptedCommittedCard),
+        );
+        final regenerationBoundary =
+            request.continuation.previousFinalizedBoundary;
+        final regenerationSpansCurrent =
+            _cursorBelongsToSnapshot(
+              request.continuation.startSourceCursor,
+              request.sourceSnapshot,
+            ) &&
+            _cursorBelongsToSnapshot(
+              regenerationBoundary.endCursor,
+              request.sourceSnapshot,
+            ) &&
+            _compareCursor(
+                  request.continuation.startSourceCursor,
+                  evidence.currentStartCursor,
+                ) <=
+                0 &&
+            _compareCursor(
+                  regenerationBoundary.endCursor,
+                  evidence.currentEndCursor,
+                ) >=
+                0;
+        if (committedIndex < 0 ||
+            request.committedCard == null ||
+            !_sameStableFinalizedCard(
+              evidence.acceptedCommittedCard,
+              request.committedCard!,
+            ) ||
+            !_sameStableFinalizedCard(
+              evidence.acceptedCommittedCard,
+              evidence.regeneratedCommittedCard,
+            ) ||
+            !_sameStableCursorPosition(
+              evidence.predecessorEndCursor,
+              evidence.currentStartCursor,
+            ) ||
+            !_sameStableCursorPosition(
+              evidence.currentEndCursor,
+              evidence.successorStartCursor,
+            ) ||
+            regenerationBoundary.kind !=
+                CanonicalPaginationBoundaryKind.finalizedCard ||
+            regenerationBoundary.cardIdentity == null ||
+            !regenerationSpansCurrent) {
+          return const CanonicalDisplayPublicationRejected(
+            kind: CanonicalDisplayPublicationOutcomeKind.committedCardMismatch,
+            message: 'Prepend committed/current overlap evidence differs.',
+          );
+        }
+        final seam = _classifyCursorSeam(
+          _cardEndCursor(incoming.last, request.sourceSnapshot),
+          _cardStartCursor(existing.first),
+        );
+        if (seam != null) return seam;
+        candidateCards = <CanonicalFinalizedReaderCard>[
+          ...incoming,
+          ...existing,
+        ];
+        insertedBefore = incoming.length;
+        acceptedKind = CanonicalDisplayPublicationOutcomeKind.acceptedPrepend;
+    }
+
+    if (candidateCards.length > CanonicalPaginationBounds.activeCardCeiling) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.boundViolation,
+        message: 'Canonical publication exceeds the resident card bound.',
+      );
+    }
+    final coverageRejection = _validateOrderedCoverage(
+      candidateCards,
+      request.sourceSnapshot,
+    );
+    if (coverageRejection != null) return coverageRejection;
+
+    final current = request.committedCard;
+    final committedIndex = current == null
+        ? null
+        : candidateCards.indexWhere(
+            (card) => _sameFinalizedCard(card, current),
+          );
+    if (current != null && committedIndex! < 0) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.committedCardMismatch,
+        message: 'The stable committed card is absent from the candidate.',
+      );
+    }
+    final targetIdentity = request.targetContainment?.cardIdentity;
+    final targetIndex = targetIdentity == null
+        ? null
+        : candidateCards.indexWhere(
+            (card) => card.identity.signature == targetIdentity.signature,
+          );
+
+    final displayChunks = <BookChunk>[
+      for (final card in candidateCards) card.card,
+    ];
+    final displayToOriginal = <List<int>>[
+      for (final card in candidateCards)
+        card.sourceSlices
+            .map((slice) => slice.sourceOrdinalHint)
+            .toSet()
+            .toList(growable: false),
+    ];
+    final originalToDisplay = <int, int>{};
+    for (var display = 0; display < displayToOriginal.length; display++) {
+      for (final source in displayToOriginal[display]) {
+        originalToDisplay[source] = display;
+      }
+    }
+    final incomingStart = incoming.first.sourceSlices.first.sourceOrdinalHint;
+    final incomingEnd = incoming.last.sourceSlices.last.sourceOrdinalHint + 1;
+    late final List<PreparedDisplayRange> ranges;
+    if (request.operation == CanonicalDisplayPublicationOperation.append) {
+      ranges = <PreparedDisplayRange>[
+        ..._ranges,
+        PreparedDisplayRange(
+          sourceRange: SourceChunkRange(incomingStart, incomingEnd),
+          displayStart: existing.length,
+          displayEndExclusive: candidateCards.length,
+        ),
+      ];
+    } else if (request.operation ==
+        CanonicalDisplayPublicationOperation.prepend) {
+      ranges = <PreparedDisplayRange>[
+        PreparedDisplayRange(
+          sourceRange: SourceChunkRange(incomingStart, incomingEnd),
+          displayStart: 0,
+          displayEndExclusive: incoming.length,
+        ),
+        for (final range in _ranges) range.shiftDisplay(incoming.length),
+      ];
+    } else {
+      ranges = <PreparedDisplayRange>[
+        PreparedDisplayRange(
+          sourceRange: SourceChunkRange(incomingStart, incomingEnd),
+          displayStart: 0,
+          displayEndExclusive: incoming.length,
+        ),
+      ];
+    }
+
+    final candidateContinuation =
+        request.operation == CanonicalDisplayPublicationOperation.prepend
+        ? _acceptedCanonicalContinuation!
+        : request.continuation;
+    final idempotent =
+        _sameCardSequence(candidateCards, existing) &&
+        _acceptedCanonicalContinuation?.integrityDigest ==
+            candidateContinuation.integrityDigest;
+    return _CanonicalDisplayCandidate(
+      kind: idempotent
+          ? CanonicalDisplayPublicationOutcomeKind.idempotentAlreadyApplied
+          : acceptedKind,
+      ranges: List<PreparedDisplayRange>.unmodifiable(ranges),
+      displayChunks: List<BookChunk>.unmodifiable(displayChunks),
+      displayToOriginal: List<List<int>>.unmodifiable(
+        displayToOriginal.map(List<int>.unmodifiable),
+      ),
+      originalToDisplay: Map<int, int>.unmodifiable(originalToDisplay),
+      canonicalCards: List<CanonicalFinalizedReaderCard>.unmodifiable(
+        candidateCards,
+      ),
+      generationComplete:
+          !externalUnavailableBefore &&
+          !externalUnavailableAfter &&
+          candidateCards.first.sourceSlices.first.sourceOrdinalHint == 0 &&
+          candidateContinuation.terminal,
+      insertedBefore: insertedBefore,
+      committedDisplayIndex: committedIndex,
+      targetDisplayIndex: targetIndex,
+      continuation: candidateContinuation,
+    );
+  }
+
+  CanonicalDisplayPublicationRejected? _validateCanonicalCard(
+    CanonicalFinalizedReaderCard card,
+    CanonicalDisplayPublicationRequest request,
+  ) {
+    if (card.identity.publicationFingerprint !=
+        request.sourceSnapshot.publicationFingerprint) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.incompatiblePublication,
+        message: 'Published card belongs to another publication.',
+      );
+    }
+    if (card.identity.layoutFingerprint != request.controlledLayoutIdentity) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.incompatibleLayout,
+        message: 'Published card belongs to another layout.',
+      );
+    }
+    if (card.identity.paginationVersion !=
+        request.paginationAlgorithmIdentity) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.incompatiblePagination,
+        message: 'Published card belongs to another pagination algorithm.',
+      );
+    }
+    for (final slice in card.sourceSlices) {
+      final ordinal = request.sourceSnapshot.resolveOrdinal(
+        sourceIdentity: slice.sourceIdentity,
+        ordinalHint: slice.sourceOrdinalHint,
+      );
+      if (ordinal == null ||
+          request.sourceSnapshot.ownerAt(ordinal).sectionIdentity !=
+              slice.sectionIdentity ||
+          request.sourceSnapshot.ownerAt(ordinal).spineIdentity !=
+              slice.spineIdentity ||
+          request.sourceSnapshot.ownerAt(ordinal).sourceDigest !=
+              slice.sourceDigest) {
+        return const CanonicalDisplayPublicationRejected(
+          kind:
+              CanonicalDisplayPublicationOutcomeKind.incompatibleSourceSnapshot,
+          message: 'Published slice is not owned by the pinned snapshot.',
+        );
+      }
+    }
+    try {
+      final rebuilt = CanonicalReaderCardIdentityBuilder.build(
+        publicationFingerprint: request.sourceSnapshot.publicationFingerprint,
+        controlledLayoutIdentity: request.controlledLayoutIdentity,
+        paginationAlgorithmIdentity: request.paginationAlgorithmIdentity,
+        orderedSourceSlices: card.sourceSlices,
+      );
+      if (canonicalJsonEncode(rebuilt.toJson()) !=
+          canonicalJsonEncode(card.identity.toJson())) {
+        return const CanonicalDisplayPublicationRejected(
+          kind: CanonicalDisplayPublicationOutcomeKind
+              .publishedCardIdentityMismatch,
+          message: 'Published-card identity is not canonical for its slices.',
+        );
+      }
+    } on FormatException catch (error) {
+      return CanonicalDisplayPublicationRejected(
+        kind: error.message.toString().contains('section/spine')
+            ? CanonicalDisplayPublicationOutcomeKind.crossSectionOwnership
+            : CanonicalDisplayPublicationOutcomeKind
+                  .publishedCardIdentityMismatch,
+        message: error.message.toString(),
+      );
+    }
+    return null;
+  }
+
+  CanonicalDisplayPublicationRejected? _validateTarget(
+    CanonicalDisplayPublicationRequest request,
+    List<CanonicalFinalizedReaderCard> cards,
+  ) {
+    final evidence = request.targetContainment!;
+    final matching = cards.where(
+      (card) => card.identity.signature == evidence.cardIdentity.signature,
+    );
+    if (matching.length != 1 ||
+        !matching.single.sourceSlices.any(
+          (slice) =>
+              canonicalJsonEncode(slice.toCanonicalJson()) ==
+              canonicalJsonEncode(evidence.containingSlice.toCanonicalJson()),
+        )) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.committedCardMismatch,
+        message: 'Stable target is not contained by exactly one final card.',
+      );
+    }
+    final slice = evidence.containingSlice;
+    final offset = evidence.target.textOffsetUtf16;
+    if ((slice.startUtf16 != null &&
+            (offset < slice.startUtf16! || offset >= slice.endUtf16!)) ||
+        (slice.startUtf16 == null && offset != 0)) {
+      return const CanonicalDisplayPublicationRejected(
+        kind: CanonicalDisplayPublicationOutcomeKind.committedCardMismatch,
+        message: 'Stable target containment is approximate or invalid.',
+      );
+    }
+    return null;
+  }
+
+  CanonicalDisplayPublicationRejected? _validateOrderedCoverage(
+    List<CanonicalFinalizedReaderCard> cards,
+    CanonicalPaginationSourceSnapshot snapshot,
+  ) {
+    final slices = cards.expand((card) => card.sourceSlices).toList();
+    final seen = <String>{};
+    CanonicalPaginationSourceSlice? previous;
+    for (final slice in slices) {
+      final key = canonicalJsonEncode(slice.toCanonicalJson());
+      if (!seen.add(key)) {
+        return const CanonicalDisplayPublicationRejected(
+          kind: CanonicalDisplayPublicationOutcomeKind.duplicatedOwnership,
+          message: 'Canonical ownership is duplicated.',
+        );
+      }
+      final prior = previous;
+      if (prior != null) {
+        if (slice.sourceOrdinalHint < prior.sourceOrdinalHint) {
+          return const CanonicalDisplayPublicationRejected(
+            kind: CanonicalDisplayPublicationOutcomeKind.reorderedOwnership,
+            message: 'Canonical ownership is reordered.',
+          );
+        }
+        if (slice.sourceOrdinalHint == prior.sourceOrdinalHint) {
+          final priorEnd = prior.endUtf16 ?? prior.tableRowEndExclusive;
+          final nextStart = slice.startUtf16 ?? slice.tableRowStart;
+          if (priorEnd == null || nextStart == null || priorEnd != nextStart) {
+            return CanonicalDisplayPublicationRejected(
+              kind:
+                  priorEnd != null && nextStart != null && priorEnd > nextStart
+                  ? CanonicalDisplayPublicationOutcomeKind.seamOverlap
+                  : CanonicalDisplayPublicationOutcomeKind.seamGap,
+              message: 'Adjacent canonical intervals do not meet exactly.',
+            );
+          }
+        } else {
+          final priorSource = snapshot.resolveOrdinalSource(
+            prior.sourceOrdinalHint,
+          );
+          final priorReachedEnd = prior.tableRowEndExclusive != null
+              ? prior.tableRowEndExclusive == _tableRowCount(priorSource)
+              : prior.endUtf16 == (priorSource.text?.length ?? 0);
+          final nextStartsAtBeginning = slice.tableRowStart != null
+              ? slice.tableRowStart == 0
+              : slice.startUtf16 == 0;
+          if (!priorReachedEnd || !nextStartsAtBeginning) {
+            return const CanonicalDisplayPublicationRejected(
+              kind: CanonicalDisplayPublicationOutcomeKind.seamGap,
+              message: 'Canonical source boundary is not fully covered.',
+            );
+          }
+          for (
+            var ordinal = prior.sourceOrdinalHint + 1;
+            ordinal < slice.sourceOrdinalHint;
+            ordinal++
+          ) {
+            final source = snapshot.resolveOrdinalSource(ordinal);
+            if ((source.text?.isNotEmpty ?? false) ||
+                (source.imageBytes?.isNotEmpty ?? false)) {
+              return const CanonicalDisplayPublicationRejected(
+                kind: CanonicalDisplayPublicationOutcomeKind.seamGap,
+                message: 'Canonical publication skips readable ownership.',
+              );
+            }
+          }
+        }
+      }
+      previous = slice;
+    }
+    return null;
+  }
+
+  CanonicalDisplayPublicationRejected? _classifyCursorSeam(
+    CanonicalPaginationCursor expected,
+    CanonicalPaginationCursor actual,
+  ) {
+    if (expected.samePositionAs(actual)) return null;
+    final comparison = _compareCursor(actual, expected);
+    return CanonicalDisplayPublicationRejected(
+      kind: comparison > 0
+          ? CanonicalDisplayPublicationOutcomeKind.seamGap
+          : CanonicalDisplayPublicationOutcomeKind.seamOverlap,
+      message: 'Canonical seam cursors do not meet exactly.',
+    );
+  }
+
+  int _compareCursor(
+    CanonicalPaginationCursor first,
+    CanonicalPaginationCursor second,
+  ) {
+    if (first.isLogicalEnd) return second.isLogicalEnd ? 0 : 1;
+    if (second.isLogicalEnd) return -1;
+    var comparison = first.sourceOrdinalHint.compareTo(
+      second.sourceOrdinalHint,
+    );
+    if (comparison != 0) return comparison;
+    comparison = first.tableRowIndex.compareTo(second.tableRowIndex);
+    if (comparison != 0) return comparison;
+    return first.textOffsetUtf16.compareTo(second.textOffsetUtf16);
+  }
+
+  CanonicalPaginationCursor _cardStartCursor(
+    CanonicalFinalizedReaderCard card,
+  ) {
+    final slice = card.sourceSlices.first;
+    return CanonicalPaginationCursor(
+      kind: slice.tableRowStart != null
+          ? (slice.tableRowStart == 0
+                ? CanonicalPaginationCursorKind.wholeSource
+                : CanonicalPaginationCursorKind.tableRow)
+          : (slice.startUtf16 ?? 0) == 0
+          ? CanonicalPaginationCursorKind.wholeSource
+          : CanonicalPaginationCursorKind.sourceText,
+      sourceIdentity: slice.sourceIdentity,
+      sectionIdentity: slice.sectionIdentity,
+      sourceOrdinalHint: slice.sourceOrdinalHint,
+      textOffsetUtf16: slice.startUtf16 ?? 0,
+      tableRowIndex: slice.tableRowStart ?? 0,
+    );
+  }
+
+  CanonicalPaginationCursor _cardEndCursor(
+    CanonicalFinalizedReaderCard card,
+    CanonicalPaginationSourceSnapshot snapshot,
+  ) {
+    final slice = card.sourceSlices.last;
+    final source = snapshot.resolveOrdinalSource(slice.sourceOrdinalHint);
+    if (slice.tableRowEndExclusive != null &&
+        slice.tableRowEndExclusive! < _tableRowCount(source)) {
+      return CanonicalPaginationCursor(
+        kind: CanonicalPaginationCursorKind.tableRow,
+        sourceIdentity: slice.sourceIdentity,
+        sectionIdentity: slice.sectionIdentity,
+        sourceOrdinalHint: slice.sourceOrdinalHint,
+        tableRowIndex: slice.tableRowEndExclusive!,
+      );
+    }
+    if (slice.tableRowEndExclusive == null &&
+        slice.endUtf16 != null &&
+        slice.endUtf16! < (source.text?.length ?? 0)) {
+      return CanonicalPaginationCursor(
+        kind: CanonicalPaginationCursorKind.sourceText,
+        sourceIdentity: slice.sourceIdentity,
+        sectionIdentity: slice.sectionIdentity,
+        sourceOrdinalHint: slice.sourceOrdinalHint,
+        textOffsetUtf16: slice.endUtf16!,
+      );
+    }
+    if (slice.sourceOrdinalHint + 1 < snapshot.sourceCount) {
+      final next = snapshot.ownerAt(slice.sourceOrdinalHint + 1);
+      return CanonicalPaginationCursor(
+        kind: CanonicalPaginationCursorKind.wholeSource,
+        sourceIdentity: next.sourceIdentity,
+        sectionIdentity: next.sectionIdentity,
+        sourceOrdinalHint: next.sourceOrdinalHint,
+      );
+    }
+    return const CanonicalPaginationCursor.logicalEnd();
+  }
+
+  int _tableRowCount(BookChunk source) =>
+      parseReaderContentBlocks(source.text ?? '')
+          .where((block) => block.type == ReaderContentBlockType.table)
+          .firstOrNull
+          ?.table
+          ?.rows
+          .length ??
+      0;
+
+  bool _isAlreadyApplied(
+    CanonicalDisplayPublicationOperation operation,
+    List<CanonicalFinalizedReaderCard> existing,
+    List<CanonicalFinalizedReaderCard> incoming,
+  ) {
+    if (operation == CanonicalDisplayPublicationOperation.initial ||
+        operation == CanonicalDisplayPublicationOperation.replacement) {
+      return _sameCardSequence(existing, incoming);
+    }
+    if (incoming.length > existing.length) return false;
+    final offset = operation == CanonicalDisplayPublicationOperation.append
+        ? existing.length - incoming.length
+        : 0;
+    return Iterable<int>.generate(incoming.length).every(
+      (index) => _sameFinalizedCard(existing[offset + index], incoming[index]),
+    );
+  }
+
+  _CanonicalDisplayCandidate _candidateFromAcceptedSnapshot(
+    CanonicalDisplayPublicationRequest request,
+  ) {
+    final committed = request.committedCard;
+    final committedIndex = committed == null
+        ? null
+        : _canonicalCards.indexWhere(
+            (card) => _sameFinalizedCard(card, committed),
+          );
+    final targetIdentity = request.targetContainment?.cardIdentity;
+    final targetIndex = targetIdentity == null
+        ? null
+        : _canonicalCards.indexWhere(
+            (card) => card.identity.signature == targetIdentity.signature,
+          );
+    return _CanonicalDisplayCandidate(
+      kind: CanonicalDisplayPublicationOutcomeKind.idempotentAlreadyApplied,
+      ranges: _ranges,
+      displayChunks: _displayChunks,
+      displayToOriginal: _displayToOriginal,
+      originalToDisplay: _originalToDisplay,
+      canonicalCards: _canonicalCards,
+      generationComplete: generationComplete,
+      insertedBefore: 0,
+      committedDisplayIndex: committedIndex,
+      targetDisplayIndex: targetIndex,
+      continuation: _acceptedCanonicalContinuation!,
+    );
+  }
+
+  bool _boundaryOwnsCard(
+    CanonicalPaginationFinalizedBoundary boundary,
+    CanonicalFinalizedReaderCard card,
+  ) =>
+      boundary.kind == CanonicalPaginationBoundaryKind.finalizedCard &&
+      canonicalJsonEncode(boundary.cardIdentity?.toJson()) ==
+          canonicalJsonEncode(card.identity.toJson());
+
+  bool _cursorBelongsToSnapshot(
+    CanonicalPaginationCursor cursor,
+    CanonicalPaginationSourceSnapshot snapshot,
+  ) {
+    if (cursor.isLogicalEnd) return true;
+    final ordinal = snapshot.resolveOrdinal(
+      sourceIdentity: cursor.sourceIdentity,
+      ordinalHint: cursor.sourceOrdinalHint,
+    );
+    return ordinal != null &&
+        snapshot.ownerAt(ordinal).sectionIdentity == cursor.sectionIdentity;
+  }
+
+  bool _sameStableCursorPosition(
+    CanonicalPaginationCursor first,
+    CanonicalPaginationCursor second,
+  ) =>
+      first.kind == second.kind &&
+      first.sourceIdentity == second.sourceIdentity &&
+      first.sectionIdentity == second.sectionIdentity &&
+      first.textOffsetUtf16 == second.textOffsetUtf16 &&
+      first.tableRowIndex == second.tableRowIndex;
+
+  bool _sameStableFinalizedCard(
+    CanonicalFinalizedReaderCard first,
+    CanonicalFinalizedReaderCard second,
+  ) =>
+      canonicalJsonEncode(first.identity.toJson()) ==
+          canonicalJsonEncode(second.identity.toJson()) &&
+      canonicalBookChunkOwnershipDigest(first.card) ==
+          canonicalBookChunkOwnershipDigest(second.card) &&
+      canonicalJsonEncode(
+            first.sourceSlices.map(_stableSliceProof).toList(growable: false),
+          ) ==
+          canonicalJsonEncode(
+            second.sourceSlices.map(_stableSliceProof).toList(growable: false),
+          );
+
+  Map<String, Object?> _stableSliceProof(
+    CanonicalPaginationSourceSlice slice,
+  ) =>
+      Map<String, Object?>.from(slice.toCanonicalJson())
+        ..remove('sourceOrdinalHint');
+
+  bool _sameFinalizedCard(
+    CanonicalFinalizedReaderCard first,
+    CanonicalFinalizedReaderCard second,
+  ) =>
+      canonicalJsonEncode(first.identity.toJson()) ==
+          canonicalJsonEncode(second.identity.toJson()) &&
+      canonicalJsonEncode(first.card.toJson()) ==
+          canonicalJsonEncode(second.card.toJson()) &&
+      canonicalJsonEncode(
+            first.sourceSlices.map((slice) => slice.toCanonicalJson()).toList(),
+          ) ==
+          canonicalJsonEncode(
+            second.sourceSlices
+                .map((slice) => slice.toCanonicalJson())
+                .toList(),
+          );
+
+  bool _sameCardSequence(
+    List<CanonicalFinalizedReaderCard> first,
+    List<CanonicalFinalizedReaderCard> second,
+  ) =>
+      first.length == second.length &&
+      Iterable<int>.generate(
+        first.length,
+      ).every((index) => _sameFinalizedCard(first[index], second[index]));
+
+  void _clearCanonicalAuthority() {
+    _canonicalCards = [];
+    _acceptedCanonicalContinuation = null;
+    _acceptedSourceSnapshot = null;
+    _acceptedSessionIdentity = null;
+    _acceptedLayoutIdentity = null;
+    _acceptedPaginationIdentity = null;
+    _canonicalCacheWriteAuthority = false;
   }
 
   void markRequest(DisplayRangeRequest request) {
@@ -537,6 +1752,34 @@ final class ProgressiveDisplayState {
   }
 }
 
+final class _CanonicalDisplayCandidate {
+  const _CanonicalDisplayCandidate({
+    required this.kind,
+    required this.ranges,
+    required this.displayChunks,
+    required this.displayToOriginal,
+    required this.originalToDisplay,
+    required this.canonicalCards,
+    required this.generationComplete,
+    required this.insertedBefore,
+    required this.committedDisplayIndex,
+    required this.targetDisplayIndex,
+    required this.continuation,
+  });
+
+  final CanonicalDisplayPublicationOutcomeKind kind;
+  final List<PreparedDisplayRange> ranges;
+  final List<BookChunk> displayChunks;
+  final List<List<int>> displayToOriginal;
+  final Map<int, int> originalToDisplay;
+  final List<CanonicalFinalizedReaderCard> canonicalCards;
+  final bool generationComplete;
+  final int insertedBefore;
+  final int? committedDisplayIndex;
+  final int? targetDisplayIndex;
+  final CanonicalPaginationContinuation continuation;
+}
+
 BookChunk _shiftDisplayChunkSourceIndexes(BookChunk chunk, int delta) {
   final ranges = chunk.sourceRanges;
   if (ranges == null || ranges.isEmpty) {
@@ -551,6 +1794,11 @@ BookChunk _shiftDisplayChunkSourceIndexes(BookChunk chunk, int delta) {
           originalEndOffset: range.originalEndOffset,
           displayStartOffset: range.displayStartOffset,
           displayEndOffset: range.displayEndOffset,
+          logicalParagraphId: range.logicalParagraphId,
+          paragraphStartOffset: range.paragraphStartOffset,
+          paragraphEndOffset: range.paragraphEndOffset,
+          isParagraphStart: range.isParagraphStart,
+          isParagraphEnd: range.isParagraphEnd,
         ),
     ],
   );

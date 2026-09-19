@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../models/reader_text_boundary.dart';
+
 class FinalLayoutParagraphSegment {
   final String text;
   final int startOffset;
@@ -25,8 +27,48 @@ final RegExp finalLayoutParagraphSeparatorPattern = RegExp(
 );
 
 List<FinalLayoutParagraphSegment> splitFinalLayoutParagraphSegments(
-  String text,
-) {
+  String text, {
+  List<DisplayTextBoundary>? boundaries,
+}) {
+  if (boundaries != null) {
+    final structural =
+        boundaries
+            .where(
+              (boundary) => boundary.kind == ReaderTextBoundaryKind.structural,
+            )
+            .toList()
+          ..sort((a, b) => a.offset.compareTo(b.offset));
+    if (structural.isEmpty) {
+      return [FinalLayoutParagraphSegment(text: text, startOffset: 0)];
+    }
+
+    final segments = <FinalLayoutParagraphSegment>[];
+    var cursor = 0;
+    for (final boundary in structural) {
+      final end = boundary.offset.clamp(cursor, text.length);
+      if (end > cursor) {
+        segments.add(
+          FinalLayoutParagraphSegment(
+            text: text.substring(cursor, end),
+            startOffset: cursor,
+          ),
+        );
+      }
+      cursor = (end + boundary.synthesizedTextLength).clamp(0, text.length);
+    }
+    if (cursor < text.length) {
+      segments.add(
+        FinalLayoutParagraphSegment(
+          text: text.substring(cursor),
+          startOffset: cursor,
+        ),
+      );
+    }
+    return segments.isEmpty
+        ? [FinalLayoutParagraphSegment(text: text, startOffset: 0)]
+        : segments;
+  }
+
   final matches = finalLayoutParagraphSeparatorPattern.allMatches(text);
   if (matches.isEmpty) {
     return [FinalLayoutParagraphSegment(text: text, startOffset: 0)];
@@ -158,8 +200,13 @@ double measureFinalLayoutParagraphTextHeight({
   required double fallbackFontSize,
   required double fallbackLineHeight,
   required double paragraphSpacing,
+  List<DisplayTextBoundary>? boundaries,
+  TextHeightBehavior textHeightBehavior = const TextHeightBehavior(),
 }) {
-  final segments = splitFinalLayoutParagraphSegments(text);
+  final segments = splitFinalLayoutParagraphSegments(
+    text,
+    boundaries: boundaries,
+  );
   if (segments.length == 1) {
     return _measureTextPainterHeight(
       text: text,
@@ -169,6 +216,7 @@ double measureFinalLayoutParagraphTextHeight({
       textAlign: textAlign,
       textScaler: textScaler,
       strutStyle: strutStyle,
+      textHeightBehavior: textHeightBehavior,
     );
   }
 
@@ -189,6 +237,7 @@ double measureFinalLayoutParagraphTextHeight({
       textAlign: textAlign,
       textScaler: textScaler,
       strutStyle: strutStyle,
+      textHeightBehavior: textHeightBehavior,
     );
   }
   return height;
@@ -202,13 +251,16 @@ double _measureTextPainterHeight({
   required TextAlign textAlign,
   required TextScaler textScaler,
   required StrutStyle? strutStyle,
+  required TextHeightBehavior textHeightBehavior,
 }) {
   final tp = TextPainter(
     text: TextSpan(text: text, style: style),
     textDirection: textDirection,
+    locale: style.locale,
     textAlign: textAlign,
     textScaler: textScaler,
     strutStyle: strutStyle,
+    textHeightBehavior: textHeightBehavior,
   );
   tp.layout(maxWidth: maxWidth);
   final height = tp.height;

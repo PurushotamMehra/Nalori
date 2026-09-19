@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nalori/models/book_chunk.dart';
+import 'package:nalori/models/reader_text_boundary.dart';
 
 void main() {
   group('BookChunk source range mapping', () {
@@ -114,5 +115,46 @@ void main() {
       expect(decoded.preserveLineBreaks, isTrue);
       expect(decoded.usesPublisherLayout, isTrue);
     });
+  });
+
+  test('round-trips logical paragraph and explicit boundary metadata', () {
+    const chunk = BookChunk(
+      index: 8,
+      type: BookChunkType.text,
+      text: 'First. Second.',
+      logicalParagraphId: 'chapter.xhtml#paragraph-4',
+      logicalParagraphStartOffset: 20,
+      logicalParagraphEndOffset: 34,
+      isLogicalParagraphStart: false,
+      textBoundaries: [
+        DisplayTextBoundary(offset: 7, kind: ReaderTextBoundaryKind.sentence),
+      ],
+      sourceRanges: [
+        ChunkSourceRange(
+          originalChunkIndex: 8,
+          originalStartOffset: 0,
+          originalEndOffset: 14,
+          displayStartOffset: 0,
+          displayEndOffset: 14,
+          logicalParagraphId: 'chapter.xhtml#paragraph-4',
+          paragraphStartOffset: 20,
+          paragraphEndOffset: 34,
+          isParagraphEnd: true,
+        ),
+      ],
+    );
+
+    final decoded = BookChunk.fromJson(chunk.toJson());
+
+    expect(decoded.logicalParagraphId, chunk.logicalParagraphId);
+    expect(decoded.logicalParagraphStartOffset, 20);
+    expect(decoded.logicalParagraphEndOffset, 34);
+    expect(decoded.isLogicalParagraphStart, isFalse);
+    expect(
+      decoded.textBoundaries!.single.kind,
+      ReaderTextBoundaryKind.sentence,
+    );
+    expect(decoded.sourceRanges!.single.paragraphStartOffset, 20);
+    expect(decoded.sourceRanges!.single.isParagraphEnd, isTrue);
   });
 }

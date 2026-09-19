@@ -67,3 +67,9 @@ analyzer:
     - ".dart_tool/**"
     - "packages/epubx/**"
     - "test/**"
+    - android/**
+    - ios/**
+    - web/**
+    - windows/**
+    - macos/**
+    - linux/**

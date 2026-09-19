@@ -1,13 +1,16 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/book_memory_entry.dart';
+import '../models/derived_book_index.dart';
 import '../models/bookmark.dart';
 import '../models/highlight.dart';
 import '../models/reading_settings.dart';
 import '../models/saved_word.dart';
+import '../models/stable_book_location.dart';
 import '../services/book_character_occurrence_service.dart';
 import '../services/book_memory_export_service.dart';
 import '../services/book_memory_service.dart';
@@ -42,6 +45,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
   _MemorySort _memorySort = _MemorySort.newest;
   int? _selectedColorValue;
   _MemoryCategory? _activeCategory;
+  Timer? _coverageRefreshTimer;
 
   ReadingSettings get _s => widget.settings;
 
@@ -53,6 +57,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
 
   @override
   void dispose() {
+    _coverageRefreshTimer?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -61,6 +66,18 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
     _memoryFuture =
         widget.memoryFuture ??
         _memoryService.load(widget.bookId, bookFile: widget.bookFile);
+    _scheduleCoverageRefresh();
+  }
+
+  void _scheduleCoverageRefresh() {
+    if (widget.memoryFuture != null) return;
+    _coverageRefreshTimer?.cancel();
+    _coverageRefreshTimer = Timer(const Duration(seconds: 1), () async {
+      if (!mounted) return;
+      final memory = await _memoryFuture;
+      if (!mounted || memory.derivedIndexComplete) return;
+      setState(_reloadMemory);
+    });
   }
 
   void _refreshMemory() {
@@ -85,8 +102,9 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
     int? originalChunkIndex, {
     int? originalStartOffset,
     String? sourceText,
+    DerivedSourceRange? sourceRange,
   }) async {
-    if (originalChunkIndex == null) return;
+    if (originalChunkIndex == null && sourceRange == null) return;
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -96,6 +114,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
           initialOriginalChunkIndex: originalChunkIndex,
           initialOriginalStartOffset: originalStartOffset,
           initialSourceText: sourceText,
+          initialDerivedSourceRange: sourceRange,
         ),
       ),
     );
@@ -417,6 +436,19 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
                     fontWeight: FontWeight.w700,
                   ),
                 ),
+                if (memory.totalIndexSectionCount > 0) ...[
+                  const SizedBox(height: 5),
+                  Text(
+                    memory.derivedIndexComplete
+                        ? 'Book text indexed'
+                        : '${(memory.indexedCoverage * 100).round()}% of book text indexed',
+                    style: _s.uiText(
+                      color: _s.mutedColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -735,6 +767,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
             bookmark.chunkIndex,
             originalStartOffset: bookmark.originalStartOffset,
             sourceText: bookmark.previewText,
+            sourceRange: preview.sourceRange,
           ),
           onWrite: () => _openWriting(
             sourceType: BookMemorySourceType.bookmark,
@@ -937,6 +970,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
             character.firstMarked.originalChunkIndex,
             originalStartOffset: character.firstMarked.startOffset,
             sourceText: character.firstMarked.text,
+            sourceRange: preview.sourceRange,
           ),
           onWrite: () => _openWriting(
             sourceType: BookMemorySourceType.character,
@@ -978,6 +1012,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
         highlight.originalChunkIndex,
         originalStartOffset: highlight.startOffset,
         sourceText: highlight.text,
+        sourceRange: preview.sourceRange,
       ),
       onWrite: () => _openWriting(
         sourceType: type,
@@ -1007,6 +1042,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
               word.originalChunkIndex,
               originalStartOffset: word.originalStartOffset,
               sourceText: word.word,
+              sourceRange: preview.sourceRange,
             )
           : null,
       onWrite: () => _openWriting(
@@ -1289,6 +1325,33 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
       color: bookmark.color,
       originalChunkIndex: bookmark.chunkIndex,
       originalStartOffset: bookmark.originalStartOffset,
+      sourceRange: _sourceRangeForStableLocation(
+        bookmark.stableLocation,
+        text: bookmark.previewText,
+        startOffset: bookmark.originalStartOffset,
+      ),
+    );
+  }
+
+  DerivedSourceRange? _sourceRangeForStableLocation(
+    StableBookLocation? location, {
+    required String? text,
+    required int? startOffset,
+  }) {
+    if (location == null) return null;
+    final matchText = text ?? location.contextText ?? '';
+    final start = startOffset ?? location.textOffset;
+    final paragraphId =
+        location.internalSegmentId ??
+        '${location.normalizedHref ?? location.href}#chunk-${location.localChunkIndex ?? 0}';
+    return DerivedSourceRange(
+      indexGeneration: 0,
+      location: location.copyWith(textOffset: start, contextText: matchText),
+      logicalParagraphId: paragraphId,
+      paragraphChecksum: 'annotation',
+      paragraphStart: start,
+      paragraphEnd: start + matchText.length,
+      matchText: matchText,
     );
   }
 
@@ -1310,6 +1373,11 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
       color: highlight.color,
       originalChunkIndex: highlight.originalChunkIndex,
       originalStartOffset: highlight.startOffset,
+      sourceRange: _sourceRangeForStableLocation(
+        highlight.stableLocation,
+        text: highlight.text,
+        startOffset: highlight.startOffset,
+      ),
       details: sourceType == BookMemorySourceType.note
           ? ['Selected text: ${highlight.text}']
           : const [],
@@ -1336,6 +1404,11 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
       color: _s.accentColor,
       originalChunkIndex: word.originalChunkIndex,
       originalStartOffset: word.originalStartOffset,
+      sourceRange: _sourceRangeForStableLocation(
+        word.stableLocation,
+        text: word.word,
+        startOffset: word.originalStartOffset,
+      ),
     );
   }
 
@@ -1358,6 +1431,11 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
       color: character.first.color,
       originalChunkIndex: character.firstMarked.originalChunkIndex,
       originalStartOffset: character.firstMarked.startOffset,
+      sourceRange: _sourceRangeForStableLocation(
+        character.firstMarked.stableLocation,
+        text: character.firstMarked.text,
+        startOffset: character.firstMarked.startOffset,
+      ),
       details: [
         'Occurrences',
         'First occurrence: ${_characterOccurrenceLabel(memory, character.firstOccurrence)}',
@@ -1398,6 +1476,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
         ),
         originalStartOffset: character.firstOccurrence?.startOffset,
         sourceText: character.firstOccurrence?.text,
+        sourceRange: character.firstOccurrence?.sourceRange,
         spoilerProtected: _isFutureOccurrence(
           memory,
           character.firstOccurrence,
@@ -1431,6 +1510,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
         originalChunkIndex: character.lastOccurrence?.chunkIndex,
         originalStartOffset: character.lastOccurrence?.startOffset,
         sourceText: character.lastOccurrence?.text,
+        sourceRange: character.lastOccurrence?.sourceRange,
         spoilerProtected: character.lastOccurrence != null,
       ),
       ...character.linkedHighlights.map(
@@ -1491,9 +1571,11 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
     CharacterOccurrencePosition? position,
   ) {
     if (position == null) return 'Not found in cached text';
-    if (position.chunkIndex > memory.lastReadIndex) {
+    if (memory.isAfterLastRead(position)) {
       return 'Found later in the book';
     }
+    final stable = position.sourceRange?.location;
+    if (stable != null) return 'Section ${stable.spineIndex + 1}';
     return memory.locationLabel(position.chunkIndex);
   }
 
@@ -1501,7 +1583,7 @@ class _BookMemoryScreenState extends State<BookMemoryScreen> {
     BookMemorySnapshot memory,
     CharacterOccurrencePosition? position,
   ) {
-    return position != null && position.chunkIndex > memory.lastReadIndex;
+    return position != null && memory.isAfterLastRead(position);
   }
 
   int? _visibleOccurrenceChunk(

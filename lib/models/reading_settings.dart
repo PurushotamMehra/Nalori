@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -12,9 +14,88 @@ enum ReaderFontFamily {
   lexend,
 }
 
+/// Production reader families declared in pubspec.yaml. These aliases are
+/// intentionally distinct from Google Fonts' runtime/cache aliases.
+const Map<ReaderFontFamily, String> readerBundledFontFamilies = {
+  ReaderFontFamily.inter: 'NaloriReaderInter',
+  ReaderFontFamily.robotoMono: 'NaloriReaderRobotoMono',
+  ReaderFontFamily.merriweather: 'NaloriReaderMerriweather',
+  ReaderFontFamily.lora: 'NaloriReaderLora',
+  ReaderFontFamily.ebGaramond: 'NaloriReaderEBGaramond',
+  ReaderFontFamily.literata: 'NaloriReaderLiterata',
+  ReaderFontFamily.atkinsonHyperlegible: 'NaloriReaderAtkinsonHyperlegible',
+  ReaderFontFamily.lexend: 'NaloriReaderLexend',
+};
+
 enum ReaderFontWeight { light, regular, medium, semiBold, bold }
 
 enum ReaderFontSize { xs, s, m, l, xl }
+
+/// Versioned static metrics for the reader fonts shipped through Google Fonts.
+///
+/// Flutter exposes line metrics but not reliable glyph ink/x-height metrics at
+/// runtime. These profiles therefore use the fonts' OS/2 x-height and capital
+/// height values, with representative accent/descender bounds checked from the
+/// same font files. Lexend, the default reader font, is the reference.
+const String readerTypographyNormalizationVersion = 'reader_typography_v1';
+const TextHeightBehavior readerTextHeightBehavior = TextHeightBehavior();
+
+@immutable
+class ReaderFontMetricProfile {
+  const ReaderFontMetricProfile({
+    required this.xHeightRatio,
+    required this.capHeightRatio,
+    required this.safeInkHeightRatio,
+  });
+
+  final double xHeightRatio;
+  final double capHeightRatio;
+  final double safeInkHeightRatio;
+}
+
+const Map<ReaderFontFamily, ReaderFontMetricProfile> readerFontMetricProfiles =
+    {
+      ReaderFontFamily.inter: ReaderFontMetricProfile(
+        xHeightRatio: 0.5459,
+        capHeightRatio: 0.7275,
+        safeInkHeightRatio: 1.213,
+      ),
+      ReaderFontFamily.robotoMono: ReaderFontMetricProfile(
+        xHeightRatio: 0.5283,
+        capHeightRatio: 0.7109,
+        safeInkHeightRatio: 1.157,
+      ),
+      ReaderFontFamily.merriweather: ReaderFontMetricProfile(
+        xHeightRatio: 0.5555,
+        capHeightRatio: 0.743,
+        safeInkHeightRatio: 1.31,
+      ),
+      ReaderFontFamily.lora: ReaderFontMetricProfile(
+        xHeightRatio: 0.5,
+        capHeightRatio: 0.7,
+        safeInkHeightRatio: 1.207,
+      ),
+      ReaderFontFamily.ebGaramond: ReaderFontMetricProfile(
+        xHeightRatio: 0.4,
+        capHeightRatio: 0.65,
+        safeInkHeightRatio: 1.15,
+      ),
+      ReaderFontFamily.literata: ReaderFontMetricProfile(
+        xHeightRatio: 0.507,
+        capHeightRatio: 0.701,
+        safeInkHeightRatio: 1.181,
+      ),
+      ReaderFontFamily.atkinsonHyperlegible: ReaderFontMetricProfile(
+        xHeightRatio: 0.496,
+        capHeightRatio: 0.668,
+        safeInkHeightRatio: 1.062,
+      ),
+      ReaderFontFamily.lexend: ReaderFontMetricProfile(
+        xHeightRatio: 0.525,
+        capHeightRatio: 0.7,
+        safeInkHeightRatio: 1.165,
+      ),
+    };
 
 enum ReaderTextAlign { left, center, right, justify }
 
@@ -940,29 +1021,14 @@ class ReadingSettings {
     final baseStyle = TextStyle(
       fontSize: isHeading ? fSize + (14 * fontSizeMultiplier) : fSize,
       fontWeight: isHeading ? FontWeight.w900 : fWeight,
-      height: isHeading ? headingLineHeight : lineHeight,
+      height: isHeading ? headingLineHeight : effectiveLineHeight,
       color: color,
       letterSpacing: isHeading ? 2.0 : 0,
     );
 
-    switch (fontFamily) {
-      case ReaderFontFamily.inter:
-        return GoogleFonts.inter(textStyle: baseStyle);
-      case ReaderFontFamily.robotoMono:
-        return GoogleFonts.robotoMono(textStyle: baseStyle);
-      case ReaderFontFamily.merriweather:
-        return GoogleFonts.merriweather(textStyle: baseStyle);
-      case ReaderFontFamily.lora:
-        return GoogleFonts.lora(textStyle: baseStyle);
-      case ReaderFontFamily.ebGaramond:
-        return GoogleFonts.ebGaramond(textStyle: baseStyle);
-      case ReaderFontFamily.literata:
-        return GoogleFonts.literata(textStyle: baseStyle);
-      case ReaderFontFamily.atkinsonHyperlegible:
-        return GoogleFonts.atkinsonHyperlegible(textStyle: baseStyle);
-      case ReaderFontFamily.lexend:
-        return GoogleFonts.lexend(textStyle: baseStyle);
-    }
+    return baseStyle.copyWith(
+      fontFamily: readerBundledFontFamilies[fontFamily],
+    );
   }
 
   TextStyle getAppTextStyle(TextStyle baseStyle) {
@@ -1021,48 +1087,58 @@ class ReadingSettings {
     return GoogleFonts.getTextTheme(appFontFamily.googleFontName, baseTheme);
   }
 
+  ReaderFontMetricProfile get fontMetricProfile =>
+      readerFontMetricProfiles[fontFamily]!;
+
+  /// Uniform optical scale derived primarily from x-height (85%) and
+  /// secondarily from capital height (15%). The cap prevents the unusually
+  /// small EB Garamond x-height from producing an unsafe oversized face.
   double get fontSizeMultiplier {
-    switch (fontFamily) {
-      case ReaderFontFamily.inter:
-        return 0.95; // Large x-height
-      case ReaderFontFamily.robotoMono:
-        return 0.95; // Large x-height monospaced
-      case ReaderFontFamily.merriweather:
-        return 1.0; // Sturdy baseline
-      case ReaderFontFamily.lora:
-        return 1.05; // Slightly condensed
-      case ReaderFontFamily.ebGaramond:
-        return 1.25; // Small x-height, needs significant scaling
-      case ReaderFontFamily.literata:
-        return 1.0; // Baseline
-      case ReaderFontFamily.atkinsonHyperlegible:
-        return 0.95; // Designed for high legibility, slightly larger visual glyphs
-      case ReaderFontFamily.lexend:
-        return 1.0; // Pretty accurately sized standard
-    }
+    final reference = readerFontMetricProfiles[ReaderFontFamily.lexend]!;
+    const xHeightWeight = 0.85;
+    const capHeightWeight = 0.15;
+    final referenceScore =
+        (reference.xHeightRatio * xHeightWeight) +
+        (reference.capHeightRatio * capHeightWeight);
+    final profileScore =
+        (fontMetricProfile.xHeightRatio * xHeightWeight) +
+        (fontMetricProfile.capHeightRatio * capHeightWeight);
+    return (referenceScore / profileScore).clamp(0.94, 1.20).toDouble();
+  }
+
+  double get semanticFontSize {
+    return switch (fontSize) {
+      ReaderFontSize.xs => 14.0,
+      ReaderFontSize.s => 16.0,
+      ReaderFontSize.m => 18.0,
+      ReaderFontSize.l => 22.0,
+      ReaderFontSize.xl => 26.0,
+    };
   }
 
   double get fontSizeValue {
-    double baseSize;
-    switch (fontSize) {
-      case ReaderFontSize.xs:
-        baseSize = 14.0;
-        break;
-      case ReaderFontSize.s:
-        baseSize = 16.0;
-        break;
-      case ReaderFontSize.m:
-        baseSize = 18.0;
-        break;
-      case ReaderFontSize.l:
-        baseSize = 22.0;
-        break;
-      case ReaderFontSize.xl:
-        baseSize = 26.0;
-        break;
-    }
-    return baseSize * fontSizeMultiplier;
+    return semanticFontSize * fontSizeMultiplier;
   }
+
+  /// Physical line-box height in logical pixels before system text scaling.
+  /// The 0.04em guard covers rounding and the modest ink growth of bold and
+  /// italic variants. It is only used when the requested line height would be
+  /// smaller than the profiled accent/descender envelope.
+  double get effectiveLineBoxHeight {
+    final requested = semanticFontSize * lineHeight;
+    final safe =
+        semanticFontSize *
+        ((fontSizeMultiplier * fontMetricProfile.safeInkHeightRatio) + 0.04);
+    return math.max(requested, safe);
+  }
+
+  double get effectiveLineHeight => effectiveLineBoxHeight / fontSizeValue;
+
+  String get fontMetricIdentity =>
+      '$readerTypographyNormalizationVersion:${fontFamily.name}:'
+      '${fontWeight.name}:'
+      '${fontMetricProfile.xHeightRatio}:${fontMetricProfile.capHeightRatio}:'
+      '${fontMetricProfile.safeInkHeightRatio}';
 
   FontWeight get fontWeightValue {
     switch (fontWeight) {
@@ -1083,7 +1159,8 @@ class ReadingSettings {
     return StrutStyle(
       fontFamily: getTextStyle().fontFamily,
       fontSize: fontSizeValue,
-      height: lineHeight,
+      fontWeight: fontWeightValue,
+      height: effectiveLineHeight,
       forceStrutHeight: true,
       leading: 0,
     );

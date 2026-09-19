@@ -1,22 +1,29 @@
+import 'dart:async';
 import 'dart:io';
 
 import '../models/book_memory_entry.dart';
 import '../models/book_chunk.dart';
+import '../models/derived_book_index.dart';
 import '../models/book_metadata.dart';
 import '../models/bookmark.dart';
 import '../models/highlight.dart';
 import '../models/saved_word.dart';
+import '../models/stable_book_location.dart';
 import '../utils/character_name_utils.dart';
 import 'book_character_occurrence_service.dart';
+import 'book_authoritative_text_service.dart';
 import 'book_cache_service.dart';
 import 'book_memory_entry_service.dart';
 import 'book_metadata_service.dart';
 import 'book_preparse_service.dart';
+import 'derived_book_index_service.dart';
 import 'bookmark_service.dart';
 import 'dictionary_service.dart';
 import 'highlight_service.dart';
+import 'lazy_book_session.dart';
 
 class BookMemoryService {
+  static final Map<String, Future<void>> _activeDerivedBuilds = {};
   final BookMetadataService _metadataService;
   final BookCacheService _cacheService;
   final Future<BookPreparationResult> Function(File file)? _prepareBook;
@@ -38,11 +45,37 @@ class BookMemoryService {
     final words = await DictionaryService(bookId: bookId).loadWords();
     final entries = await BookMemoryEntryService(bookId: bookId).loadForBook();
     CachedBook? cached;
+    DerivedIndexSnapshot? derivedSnapshot;
+    List<ChapterInfo> derivedChapters = const [];
     if (bookFile != null) {
-      final prepareBook =
-          _prepareBook ?? BookPreparseService.instance.ensureParsed;
-      final preparation = await prepareBook(bookFile);
-      cached = preparation.cachedBook;
+      if (_prepareBook != null) {
+        cached = (await _prepareBook(bookFile)).cachedBook;
+      } else {
+        final active = _activeDerivedBuilds[bookId];
+        if (active != null) {
+          derivedSnapshot = await DerivedBookIndexStore().loadForBook(bookId);
+        } else {
+          final lazySession = LazyBookSession();
+          await lazySession.open(bookFile);
+          final indexSession = DerivedBookIndexSession(source: lazySession);
+          derivedSnapshot = await indexSession.initialize();
+          if (derivedSnapshot.segments.isEmpty && !derivedSnapshot.isComplete) {
+            await indexSession.indexNextSection();
+            derivedSnapshot = indexSession.snapshot;
+          }
+          derivedChapters = lazySession.loadedWindow().chapters;
+          if (!(derivedSnapshot?.isComplete ?? true)) {
+            _startDerivedBuild(
+              bookId: bookId,
+              source: lazySession,
+              indexSession: indexSession,
+            );
+          } else {
+            await indexSession.dispose();
+            await lazySession.close();
+          }
+        }
+      }
     } else {
       cached = await _cacheService.loadCachedBook(bookId);
     }
@@ -57,15 +90,27 @@ class BookMemoryService {
       words: words,
       entries: entries,
       occurrenceIndex: occurrenceIndex,
-      chapters: cached?.chapters ?? const [],
+      chapters: derivedChapters.isNotEmpty
+          ? derivedChapters
+          : cached?.chapters ?? const [],
+      indexedSectionCount: derivedSnapshot?.manifest.records.length ?? 0,
+      totalIndexSectionCount: derivedSnapshot?.manifest.totalSections ?? 0,
+      derivedIndexComplete: derivedSnapshot?.isComplete ?? cached != null,
     );
 
-    if (cached != null && snapshot.characters.isNotEmpty) {
-      final updated = _updateOccurrenceIndex(
-        occurrenceIndex,
-        snapshot.characters,
-        cached.chunks,
-      );
+    if ((cached != null || derivedSnapshot != null) &&
+        snapshot.characters.isNotEmpty) {
+      final updated = derivedSnapshot != null
+          ? _updateOccurrenceIndexFromDerived(
+              occurrenceIndex,
+              snapshot.characters,
+              derivedSnapshot,
+            )
+          : _updateOccurrenceIndex(
+              occurrenceIndex,
+              snapshot.characters,
+              cached!.chunks,
+            );
       if (!identical(updated, occurrenceIndex)) {
         occurrenceIndex = updated;
         await occurrenceService.save(occurrenceIndex);
@@ -77,12 +122,203 @@ class BookMemoryService {
           words: words,
           entries: entries,
           occurrenceIndex: occurrenceIndex,
-          chapters: cached.chapters,
+          chapters: derivedChapters.isNotEmpty
+              ? derivedChapters
+              : cached?.chapters ?? const [],
+          indexedSectionCount: derivedSnapshot?.manifest.records.length ?? 0,
+          totalIndexSectionCount: derivedSnapshot?.manifest.totalSections ?? 0,
+          derivedIndexComplete: derivedSnapshot?.isComplete ?? cached != null,
         );
       }
     }
 
     return snapshot;
+  }
+
+  void _startDerivedBuild({
+    required String bookId,
+    required LazyBookSession source,
+    required DerivedBookIndexSession indexSession,
+  }) {
+    final completer = Completer<void>();
+    _activeDerivedBuilds[bookId] = completer.future;
+    late final StreamSubscription<DerivedIndexSnapshot> subscription;
+    subscription = indexSession.changes.listen(
+      (snapshot) {
+        if (snapshot.isComplete && !completer.isCompleted) {
+          completer.complete();
+        }
+      },
+      onError: (Object error, StackTrace stack) {
+        if (!completer.isCompleted) completer.completeError(error, stack);
+      },
+    );
+    indexSession.start();
+    unawaited(
+      completer.future.catchError((_) {}).whenComplete(() async {
+        await subscription.cancel();
+        await indexSession.dispose();
+        await source.close();
+        _activeDerivedBuilds.remove(bookId);
+      }),
+    );
+  }
+
+  StoredCharacterOccurrenceIndex _updateOccurrenceIndexFromDerived(
+    StoredCharacterOccurrenceIndex current,
+    List<CharacterMemoryGroup> characters,
+    DerivedIndexSnapshot snapshot,
+  ) {
+    final updated = Map<String, StoredCharacterOccurrence>.from(
+      current.occurrences,
+    );
+    final activeIds = characters.map((item) => item.sourceId).toSet();
+    updated.removeWhere((key, _) => !activeIds.contains(key));
+    var changed = updated.length != current.occurrences.length;
+    final signature = [
+      'derived-v1',
+      snapshot.manifest.publicationFingerprint,
+      snapshot.manifest.generation,
+      ...snapshot.manifest.records.map(
+        (record) => '${record.spineIndex}:${record.fileChecksum}',
+      ),
+    ].join('|');
+    for (final character in characters) {
+      final stored = current[character.sourceId];
+      if (stored != null &&
+          stored.isFresh(
+            expectedAliases: character.aliases,
+            expectedSourceSignature: signature,
+          )) {
+        continue;
+      }
+      updated[character.sourceId] = _scanDerivedCharacterOccurrences(
+        aliases: character.aliases,
+        snapshot: snapshot,
+        sourceSignature: signature,
+      );
+      changed = true;
+    }
+    return changed ? current.copyWith(updated) : current;
+  }
+
+  StoredCharacterOccurrenceIndex updateDerivedOccurrenceIndexForTesting(
+    StoredCharacterOccurrenceIndex current,
+    List<CharacterMemoryGroup> characters,
+    DerivedIndexSnapshot snapshot,
+  ) {
+    return _updateOccurrenceIndexFromDerived(current, characters, snapshot);
+  }
+
+  StoredCharacterOccurrence _scanDerivedCharacterOccurrences({
+    required List<String> aliases,
+    required DerivedIndexSnapshot snapshot,
+    required String sourceSignature,
+  }) {
+    CharacterOccurrencePosition? first;
+    CharacterOccurrencePosition? last;
+    var count = 0;
+    var structuralOrdinal = 0;
+    final sortedAliases = List<String>.from(aliases)
+      ..sort((a, b) => b.length.compareTo(a.length));
+    final segments = snapshot.segments.values.toList()
+      ..sort((a, b) => a.spineIndex.compareTo(b.spineIndex));
+    story:
+    for (final segment in segments) {
+      for (final paragraph in segment.paragraphs) {
+        if (paragraph.section != ChunkSection.content) continue;
+        if (_isPostStoryMarker(paragraph.text) ||
+            (paragraph.isHeading && _isBackMatterHeadingText(paragraph.text))) {
+          break story;
+        }
+        final matches = <_CharacterTextMatch>[];
+        for (final alias in sortedAliases) {
+          for (final match in BookMemorySnapshot._characterMatches(
+            paragraph.text,
+            alias,
+          )) {
+            if (!matches.any(
+              (existing) =>
+                  existing.start < match.end && match.start < existing.end,
+            )) {
+              matches.add(match);
+            }
+          }
+        }
+        matches.sort((a, b) => a.start.compareTo(b.start));
+        for (final match in matches) {
+          final sourceSegment = paragraph.sourceSegments.firstWhere(
+            (item) =>
+                match.start >= item.paragraphStart &&
+                match.start < item.paragraphEnd,
+            orElse: () => paragraph.sourceSegments.first,
+          );
+          final text = paragraph.text.substring(match.start, match.end);
+          final location = StableBookLocation(
+            bookId: segment.bookId,
+            spineIndex: segment.spineIndex,
+            href: segment.href,
+            normalizedHref: segment.normalizedHref,
+            sourceChecksum: segment.sourceChecksum,
+            publicationFingerprint: segment.publicationFingerprint,
+            sourceParserVersion: segment.parserVersion,
+            internalSegmentId: paragraph.logicalParagraphId,
+            localChunkIndex: sourceSegment.localChunkIndex,
+            textOffset:
+                match.start -
+                sourceSegment.paragraphStart +
+                sourceSegment.chunkStart,
+            contextText: text,
+          );
+          final range = DerivedSourceRange(
+            indexGeneration: snapshot.manifest.generation,
+            location: location,
+            logicalParagraphId: paragraph.logicalParagraphId,
+            paragraphChecksum: paragraph.checksum,
+            paragraphStart: match.start,
+            paragraphEnd: match.end,
+            matchText: text,
+          );
+          final position = CharacterOccurrencePosition(
+            chunkIndex: structuralOrdinal,
+            startOffset: location.textOffset,
+            endOffset: location.textOffset + text.length,
+            text: text,
+            sourceRange: range,
+          );
+          first ??= position;
+          last = position;
+          count++;
+        }
+        structuralOrdinal++;
+      }
+    }
+    return StoredCharacterOccurrence(
+      aliases: aliases,
+      first: first,
+      last: last,
+      count: count,
+      sourceSignature: sourceSignature,
+    );
+  }
+
+  bool _isBackMatterHeadingText(String text) {
+    const headings = {
+      'about the author',
+      'acknowledgments',
+      'acknowledgements',
+      'also by',
+      'appendix',
+      'bibliography',
+      'copyright',
+      'further reading',
+      'license',
+      'licence',
+      'notes',
+      'publisher',
+      'table of contents',
+    };
+    return headings.contains(_normalizedBoundaryText(text));
   }
 
   StoredCharacterOccurrenceIndex _updateOccurrenceIndex(
@@ -142,7 +378,7 @@ class BookMemoryService {
       ..sort((a, b) => b.length.compareTo(a.length));
 
     for (final chunk in _storySearchChunks(chunks)) {
-      final text = chunk.text;
+      final text = authoritativeBookChunkText(chunk);
       if (text == null || text.isEmpty) continue;
       final chunkMatches = <_CharacterTextMatch>[];
       for (final alias in sortedAliases) {
@@ -186,7 +422,7 @@ class BookMemoryService {
   List<BookChunk> _storySearchChunks(List<BookChunk> chunks) {
     final storyChunks = <BookChunk>[];
     for (final chunk in chunks) {
-      final text = chunk.text;
+      final text = authoritativeBookChunkText(chunk);
       if (text == null || text.trim().isEmpty) continue;
       if (chunk.section != ChunkSection.content) continue;
       if (_isPostStoryMarker(text)) break;
@@ -245,7 +481,7 @@ class BookMemoryService {
     if (chunks.isEmpty) return 'empty';
     var textLength = 0;
     for (final chunk in chunks) {
-      textLength += chunk.text?.length ?? 0;
+      textLength += authoritativeBookChunkText(chunk)?.length ?? 0;
     }
     return 'v$occurrenceScanVersion:${chunks.length}:${chunks.first.index}:${chunks.last.index}:$textLength';
   }
@@ -259,6 +495,7 @@ class BookMemorySnapshot {
   final int lastReadIndex;
   final int totalChunks;
   final int? lastReadTime;
+  final StableBookLocation? lastReadLocation;
   final List<Bookmark> bookmarks;
   final List<Highlight> highlights;
   final List<Highlight> notes;
@@ -266,6 +503,9 @@ class BookMemorySnapshot {
   final List<CharacterMemoryGroup> characters;
   final List<BookMemoryEntry> entries;
   final List<ChapterInfo> chapters;
+  final int indexedSectionCount;
+  final int totalIndexSectionCount;
+  final bool derivedIndexComplete;
   final Map<String, BookMemoryEntry> _entriesBySource;
 
   BookMemorySnapshot({
@@ -276,6 +516,7 @@ class BookMemorySnapshot {
     required this.lastReadIndex,
     required this.totalChunks,
     required this.lastReadTime,
+    this.lastReadLocation,
     required this.bookmarks,
     required this.highlights,
     required this.notes,
@@ -283,6 +524,9 @@ class BookMemorySnapshot {
     required this.characters,
     required this.entries,
     required this.chapters,
+    this.indexedSectionCount = 0,
+    this.totalIndexSectionCount = 0,
+    this.derivedIndexComplete = false,
   }) : _entriesBySource = _buildEntriesBySource(entries);
 
   factory BookMemorySnapshot.empty({
@@ -317,6 +561,9 @@ class BookMemorySnapshot {
     List<BookMemoryEntry> entries = const [],
     StoredCharacterOccurrenceIndex? occurrenceIndex,
     required List<ChapterInfo> chapters,
+    int indexedSectionCount = 0,
+    int totalIndexSectionCount = 0,
+    bool derivedIndexComplete = false,
   }) {
     final logicalAnnotations = _logicalAnnotations(highlights);
     final regularHighlights = logicalAnnotations
@@ -340,6 +587,7 @@ class BookMemorySnapshot {
       lastReadIndex: metadata?.lastReadIndex ?? 0,
       totalChunks: metadata?.totalChunks ?? 0,
       lastReadTime: metadata?.lastReadTime,
+      lastReadLocation: metadata?.lastReadLocation,
       bookmarks: List.unmodifiable(bookmarks),
       highlights: regularHighlights,
       notes: notes,
@@ -347,7 +595,29 @@ class BookMemorySnapshot {
       characters: characters,
       entries: List.unmodifiable(entries.where((entry) => !entry.isEmpty)),
       chapters: List.unmodifiable(chapters),
+      indexedSectionCount: indexedSectionCount,
+      totalIndexSectionCount: totalIndexSectionCount,
+      derivedIndexComplete: derivedIndexComplete,
     );
+  }
+
+  double get indexedCoverage => totalIndexSectionCount <= 0
+      ? (derivedIndexComplete ? 1 : 0)
+      : (indexedSectionCount / totalIndexSectionCount).clamp(0.0, 1.0);
+
+  bool isAfterLastRead(CharacterOccurrencePosition position) {
+    final target = position.sourceRange?.location;
+    final current = lastReadLocation;
+    if (target == null || current == null) {
+      return position.chunkIndex > lastReadIndex;
+    }
+    final spine = target.spineIndex.compareTo(current.spineIndex);
+    if (spine != 0) return spine > 0;
+    final chunk = (target.localChunkIndex ?? 0).compareTo(
+      current.localChunkIndex ?? 0,
+    );
+    if (chunk != 0) return chunk > 0;
+    return target.textOffset > current.textOffset;
   }
 
   double get progress {

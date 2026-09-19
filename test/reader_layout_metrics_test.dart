@@ -273,6 +273,68 @@ void main() {
       ]);
       expect(readerTextEndsAtSentenceBoundary(ranges.first), isTrue);
     });
+
+    test('handles initials, decimals, ellipses, and Unicode punctuation', () {
+      const text =
+          'J. R. R. Tolkien paid 3.14 coins... Really? '
+          '“Yes!” she replied. 今日は晴れ。次です！';
+      final sentences = readerSentenceRanges(
+        text,
+      ).map((range) => text.substring(range.start, range.end).trim()).toList();
+
+      expect(sentences, [
+        'J. R. R. Tolkien paid 3.14 coins...',
+        'Really?',
+        '“Yes!” she replied.',
+        '今日は晴れ。',
+        '次です！',
+      ]);
+    });
+
+    test(
+      'protects compact initialisms but accepts their contextual ending',
+      () {
+        const text =
+            'At about 1 A.M., as Shackleton returned. 10 P.M. He slept.';
+        final sentences = readerSentenceRanges(text)
+            .map((range) => text.substring(range.start, range.end).trim())
+            .toList();
+
+        expect(sentences, [
+          'At about 1 A.M., as Shackleton returned.',
+          '10 P.M.',
+          'He slept.',
+        ]);
+      },
+    );
+
+    test('preserves exact source across sentence boundaries', () {
+      const text = 'First sentence.  “Second?”\nThird—still hyphen-like.';
+      final ranges = readerSentenceRanges(text);
+
+      expect(ranges.first.start, 0);
+      for (var index = 1; index < ranges.length; index++) {
+        expect(ranges[index - 1].end, ranges[index].start);
+      }
+      expect(
+        ranges.map((range) => text.substring(range.start, range.end)).join(),
+        text,
+      );
+    });
+
+    test('uses clauses before words for an oversized sentence', () {
+      const text = 'First clause, second clause; final clause.';
+      final clauses = readerSafeClauseRanges(text);
+
+      expect(
+        clauses.map((range) => text.substring(range.start, range.end)).toList(),
+        ['First clause, ', 'second clause; ', 'final clause.'],
+      );
+      expect(
+        clauses.map((range) => text.substring(range.start, range.end)).join(),
+        text,
+      );
+    });
   });
 
   group('final paragraph layout measurement', () {
@@ -362,15 +424,16 @@ void main() {
       );
     });
 
-    test('lazy replacement starts with only the target source chunk', () {
+    test('lazy replacement accepts a measured forward source ceiling', () {
       expect(
         readerFirstVisibleSourceRange(
           targetOriginalIndex: 50,
           sourceChunkCount: 200,
           lazy: true,
           nearbyRange: const SourceChunkRange(42, 90),
+          lazyEndExclusive: 57,
         ).toString(),
-        '[50,51)',
+        '[50,57)',
       );
       expect(
         readerFirstVisibleSourceRange(
@@ -380,6 +443,101 @@ void main() {
           nearbyRange: const SourceChunkRange(42, 90),
         ).toString(),
         '[42,90)',
+      );
+    });
+  });
+
+  group('anchored lazy reflow lookahead', () {
+    BookChunk paragraph(int index, String text) => BookChunk(
+      index: index,
+      type: BookChunkType.text,
+      section: ChunkSection.content,
+      sourceFile: 'chapter.xhtml',
+      text: text,
+    );
+
+    test('uses measured line capacity instead of one paragraph', () {
+      final chunks = List<BookChunk>.generate(
+        100,
+        (index) => paragraph(index, 'Ordinary paragraph $index.'),
+      );
+
+      final end = readerMeasuredAnchoredLookaheadEndExclusive(
+        sourceChunks: chunks,
+        sourceIndex: 40,
+        heightBudget: 120,
+        effectiveLineBoxHeight: 24,
+      );
+
+      expect(end, 47); // five measured lines plus two boundary units
+      expect(end, lessThan(chunks.length));
+    });
+
+    test('includes but never crosses a genuine structural boundary', () {
+      final chunks = <BookChunk>[
+        paragraph(0, 'Anchor paragraph.'),
+        paragraph(1, 'Following paragraph.'),
+        BookChunk(
+          index: 2,
+          type: BookChunkType.text,
+          section: ChunkSection.content,
+          sourceFile: 'chapter.xhtml',
+          text: 'Chapter Two',
+          isHeading: true,
+          blockRole: BookBlockRole.heading,
+        ),
+        paragraph(3, 'Text after the heading.'),
+      ];
+
+      expect(
+        readerMeasuredAnchoredLookaheadEndExclusive(
+          sourceChunks: chunks,
+          sourceIndex: 0,
+          heightBudget: 600,
+          effectiveLineBoxHeight: 24,
+        ),
+        3,
+      );
+    });
+
+    test('does not finalize an anchored card until a next card exists', () {
+      const anchor = BookChunk(
+        index: 4,
+        type: BookChunkType.text,
+        text: 'Anchor paragraph.',
+        sourceRanges: [
+          ChunkSourceRange(
+            originalChunkIndex: 4,
+            originalStartOffset: 0,
+            originalEndOffset: 17,
+            displayStartOffset: 0,
+            displayEndOffset: 17,
+          ),
+        ],
+      );
+      const following = BookChunk(
+        index: 5,
+        type: BookChunkType.text,
+        text: 'Following paragraph.',
+      );
+
+      expect(
+        readerAnchoredCardBoundaryIsFinalized(
+          emittedCards: const [anchor],
+          pendingCard: null,
+          sourceIndex: 4,
+          textOffset: 0,
+        ),
+        isFalse,
+      );
+      expect(
+        readerAnchoredCardBoundaryIsFinalized(
+          emittedCards: const [anchor],
+          pendingCard: following,
+          sourceIndex: 4,
+          textOffset: 0,
+        ),
+        isTrue,
       );
     });
   });

@@ -8,6 +8,8 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/book_chunk.dart';
+import '../models/canonical_display_cache_invalidation.dart';
+import '../models/canonical_display_segment.dart';
 import 'book_cache_service.dart';
 import 'chapter_card_layout_service.dart';
 import 'display_generation_coordinator.dart';
@@ -326,6 +328,16 @@ final class _CachedSegmentManifest {
       length == stat.size && modifiedMs == stat.modified.millisecondsSinceEpoch;
 }
 
+final class _LocatedLegacySegmentManifest {
+  const _LocatedLegacySegmentManifest({
+    required this.manifest,
+    required this.record,
+  });
+
+  final SegmentedDisplayCacheManifest manifest;
+  final DisplaySegmentRecord record;
+}
+
 final class _SegmentCacheFileCoordinator {
   Future<void> tail = Future<void>.value();
 
@@ -343,6 +355,198 @@ final class _SegmentCacheFileCoordinator {
   }
 }
 
+/// Explicit-root logical-byte transport for controlled P06 equivalence tests.
+/// It has no default path, manifest, migration, invalidation, retention, or
+/// live ReaderScreen connection. Physical production rollout remains P06-007.
+final class CanonicalDisplaySegmentControlledDiskStore {
+  CanonicalDisplaySegmentControlledDiskStore({required Directory rootDirectory})
+    : _rootDirectory = rootDirectory;
+
+  final Directory _rootDirectory;
+
+  Future<void> write(CanonicalDisplaySegmentRecord record) async {
+    await _rootDirectory.create(recursive: true);
+    await _file(
+      record.keyDigest,
+    ).writeAsBytes(CanonicalDisplaySegmentCodec.encode(record), flush: true);
+  }
+
+  Future<Uint8List?> read(String keyDigest) async {
+    final file = _file(keyDigest);
+    if (!await file.exists()) return null;
+    return Uint8List.fromList(await file.readAsBytes());
+  }
+
+  Future<bool> remove(String keyDigest) async {
+    final file = _file(keyDigest);
+    if (!await file.exists()) return false;
+    await file.delete();
+    return true;
+  }
+
+  Future<int> get byteCount async {
+    if (!await _rootDirectory.exists()) return 0;
+    var total = 0;
+    await for (final entity in _rootDirectory.list(followLinks: false)) {
+      if (entity is File) total += await entity.length();
+    }
+    return total;
+  }
+
+  /// Produces one opaque, exact-record deletion capability for the controlled
+  /// P06 test root. P06-005 can use it only through the P06-004 invalidation
+  /// service after a new strict record has been retained.
+  Future<CanonicalDisplayInvalidationLookupReceipt?>
+  lookupForMigrationReplacement({
+    required CanonicalDisplayInvalidationStorageScope scope,
+    required String trustedKeyDigest,
+  }) async {
+    if (p.normalize(_rootDirectory.absolute.path) != scope.rootPath ||
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(trustedKeyDigest)) {
+      return null;
+    }
+    final file = _file(trustedKeyDigest);
+    if (!await file.exists()) return null;
+    return _CanonicalDisplaySegmentControlledDiskInvalidationLookupReceipt(
+      scope: scope,
+      file: file,
+    );
+  }
+
+  File _file(String keyDigest) {
+    if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(keyDigest)) {
+      throw ArgumentError.value(keyDigest, 'keyDigest');
+    }
+    return File(p.join(_rootDirectory.path, 'seg-sha256-$keyDigest.cseg'));
+  }
+}
+
+final class _CanonicalDisplaySegmentControlledDiskInvalidationLookupReceipt
+    implements CanonicalDisplayInvalidationLookupReceipt {
+  _CanonicalDisplaySegmentControlledDiskInvalidationLookupReceipt({
+    required this.scope,
+    required File file,
+  }) : _file = file;
+
+  @override
+  final CanonicalDisplayInvalidationStorageScope scope;
+  final File _file;
+
+  @override
+  CanonicalDisplayInvalidationCandidateType get candidateType =>
+      CanonicalDisplayInvalidationCandidateType.strictCanonicalDisplay;
+
+  @override
+  Future<CanonicalDisplayInvalidationPhysicalMutation> mutate(
+    CanonicalDisplayInvalidationAction action, {
+    CanonicalDisplayInvalidationMutationInterceptor? interceptor,
+  }) async {
+    if (action !=
+        CanonicalDisplayInvalidationAction.invalidateExactDiskDerivative) {
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: 0,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'unsafe_controlled_canonical_action',
+      );
+    }
+    try {
+      await interceptor?.call(
+        CanonicalDisplayInvalidationMutationStep.beforePayloadMutation,
+      );
+      if (!await _file.exists()) {
+        return const CanonicalDisplayInvalidationPhysicalMutation.noOp();
+      }
+      await _file.delete();
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.applied,
+        physicalFilesTouched: 1,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+      );
+    } on Object {
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: 0,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'controlled_canonical_delete_failed',
+      );
+    }
+  }
+}
+
+/// Capability returned after a raw manifest is narrowed to one exact legacy
+/// segment. The manifest's filename is verified against the service-owned
+/// range filename before it can become a mutation target.
+final class SegmentedDisplayCacheInvalidationLookupReceipt
+    implements CanonicalDisplayInvalidationLookupReceipt {
+  SegmentedDisplayCacheInvalidationLookupReceipt._(
+    this._service,
+    this.scope,
+    this._key,
+    this._sourceRange,
+    this._fileName,
+    this._candidateType,
+  );
+
+  final SegmentedDisplayCacheService _service;
+  @override
+  final CanonicalDisplayInvalidationStorageScope scope;
+  final SegmentedDisplayCacheKey _key;
+  final SourceChunkRange _sourceRange;
+  final String _fileName;
+  final CanonicalDisplayInvalidationCandidateType _candidateType;
+
+  @override
+  CanonicalDisplayInvalidationCandidateType get candidateType => _candidateType;
+
+  @override
+  Future<CanonicalDisplayInvalidationPhysicalMutation> mutate(
+    CanonicalDisplayInvalidationAction action, {
+    CanonicalDisplayInvalidationMutationInterceptor? interceptor,
+  }) => _service._invalidateExactLegacySegment(
+    this,
+    action: action,
+    interceptor: interceptor,
+  );
+}
+
+/// Exact capability for the separate chapter-layout derivative root. Chapter
+/// layouts have no segment-manifest reference, so this can touch only one
+/// independently verified file and never a signature directory.
+final class ChapterLayoutInvalidationLookupReceipt
+    implements CanonicalDisplayInvalidationLookupReceipt {
+  ChapterLayoutInvalidationLookupReceipt._(
+    this._service,
+    this.scope,
+    this._layoutKey,
+  );
+
+  final SegmentedDisplayCacheService _service;
+  @override
+  final CanonicalDisplayInvalidationStorageScope scope;
+  final ChapterCardLayoutKey _layoutKey;
+
+  @override
+  CanonicalDisplayInvalidationCandidateType get candidateType =>
+      CanonicalDisplayInvalidationCandidateType.chapterLayout;
+
+  @override
+  Future<CanonicalDisplayInvalidationPhysicalMutation> mutate(
+    CanonicalDisplayInvalidationAction action, {
+    CanonicalDisplayInvalidationMutationInterceptor? interceptor,
+  }) => _service._invalidateExactChapterLayout(
+    this,
+    action: action,
+    interceptor: interceptor,
+  );
+}
+
 final class SegmentedDisplayCacheService {
   SegmentedDisplayCacheService({
     required Directory rootDirectory,
@@ -356,7 +560,7 @@ final class SegmentedDisplayCacheService {
            (() => DisplayCacheStoragePressure.normal),
        _clock = clock ?? (() => DateTime.now().millisecondsSinceEpoch);
 
-  static const int segmentedDisplayCacheFormatVersion = 2;
+  static const int segmentedDisplayCacheFormatVersion = 3;
   static const String segmentStatusReady = 'ready';
   static const int _maxSegmentFileBytes = 3 * 1024 * 1024;
   static const int _maxSegmentKeyLength = 96;
@@ -567,6 +771,397 @@ final class SegmentedDisplayCacheService {
         'reason': 'manifest_${error.runtimeType}',
       });
       return null;
+    }
+  }
+
+  /// Locates one current legacy segment without calling [loadManifest]. The
+  /// normal loader may clean incompatible directories, which is deliberately
+  /// too broad for controlled invalidation. This path only reads the requested
+  /// manifest and issues a receipt when a deterministic range filename and one
+  /// exact manifest reference agree.
+  Future<SegmentedDisplayCacheInvalidationLookupReceipt?>
+  lookupLegacySegmentForInvalidation({
+    required CanonicalDisplayInvalidationStorageScope scope,
+    required SegmentedDisplayCacheKey trustedKey,
+    required SourceChunkRange trustedSourceRange,
+    CanonicalDisplayInvalidationCandidateType candidateType =
+        CanonicalDisplayInvalidationCandidateType.segmentedDisplay,
+  }) async {
+    if (candidateType !=
+            CanonicalDisplayInvalidationCandidateType.segmentedDisplay &&
+        candidateType !=
+            CanonicalDisplayInvalidationCandidateType.sectionScopedSegment) {
+      throw ArgumentError.value(candidateType, 'candidateType');
+    }
+    await ensureInitialized();
+    if (!await _matchesInvalidationScope(scope, trustedKey)) return null;
+    final located = await _readExactLegacyManifestForInvalidation(
+      trustedKey,
+      trustedSourceRange,
+    );
+    if (located == null) return null;
+    final file = _legacySegmentFileForInvalidation(
+      trustedKey,
+      located.record.fileName,
+    );
+    if (file == null ||
+        await FileSystemEntity.type(file.path, followLinks: false) ==
+            FileSystemEntityType.link) {
+      return null;
+    }
+    return SegmentedDisplayCacheInvalidationLookupReceipt._(
+      this,
+      scope,
+      trustedKey,
+      trustedSourceRange,
+      located.record.fileName,
+      candidateType,
+    );
+  }
+
+  Future<CanonicalDisplayInvalidationPhysicalMutation>
+  _invalidateExactLegacySegment(
+    SegmentedDisplayCacheInvalidationLookupReceipt receipt, {
+    required CanonicalDisplayInvalidationAction action,
+    CanonicalDisplayInvalidationMutationInterceptor? interceptor,
+  }) => _fileCoordinator.exclusive(
+    () => _invalidateExactLegacySegmentUnlocked(
+      receipt,
+      action: action,
+      interceptor: interceptor,
+    ),
+  );
+
+  Future<CanonicalDisplayInvalidationPhysicalMutation>
+  _invalidateExactLegacySegmentUnlocked(
+    SegmentedDisplayCacheInvalidationLookupReceipt receipt, {
+    required CanonicalDisplayInvalidationAction action,
+    CanonicalDisplayInvalidationMutationInterceptor? interceptor,
+  }) async {
+    if (!await _matchesInvalidationScope(receipt.scope, receipt._key) ||
+        (action !=
+                CanonicalDisplayInvalidationAction
+                    .invalidateExactDiskDerivative &&
+            action !=
+                CanonicalDisplayInvalidationAction
+                    .quarantineExactDiskDerivative)) {
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: 0,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'unsafe_scope_or_action',
+      );
+    }
+    final located = await _readExactLegacyManifestForInvalidation(
+      receipt._key,
+      receipt._sourceRange,
+    );
+    if (located == null || located.record.fileName != receipt._fileName) {
+      return const CanonicalDisplayInvalidationPhysicalMutation.noOp();
+    }
+    final file = _legacySegmentFileForInvalidation(
+      receipt._key,
+      receipt._fileName,
+    );
+    if (file == null ||
+        await FileSystemEntity.type(file.path, followLinks: false) ==
+            FileSystemEntityType.link) {
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: 0,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'unsafe_segment_target',
+      );
+    }
+    return switch (action) {
+      CanonicalDisplayInvalidationAction.invalidateExactDiskDerivative =>
+        _removeSegmentManifestThenPayload(
+          key: receipt._key,
+          range: receipt._sourceRange,
+          file: file,
+          located: located,
+          interceptor: interceptor,
+        ),
+      CanonicalDisplayInvalidationAction.quarantineExactDiskDerivative =>
+        _quarantineSegmentThenRemoveManifest(
+          key: receipt._key,
+          range: receipt._sourceRange,
+          file: file,
+          located: located,
+          interceptor: interceptor,
+        ),
+      _ => throw StateError('Action was checked before dispatch.'),
+    };
+  }
+
+  Future<CanonicalDisplayInvalidationPhysicalMutation>
+  _removeSegmentManifestThenPayload({
+    required SegmentedDisplayCacheKey key,
+    required SourceChunkRange range,
+    required File file,
+    required _LocatedLegacySegmentManifest located,
+    CanonicalDisplayInvalidationMutationInterceptor? interceptor,
+  }) async {
+    try {
+      await interceptor?.call(
+        CanonicalDisplayInvalidationMutationStep.beforeManifestUpdate,
+      );
+      final directory = _legacySegmentDirectoryForInvalidation(key);
+      if (directory == null ||
+          await FileSystemEntity.type(directory.path, followLinks: false) ==
+              FileSystemEntityType.link) {
+        throw const FileSystemException('Unsafe segment directory link');
+      }
+      await _saveManifest(
+        key.cacheKey,
+        _manifestWithoutExactLegacyRecord(located.manifest, range),
+      );
+    } on Object {
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: 0,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'segment_manifest_update_failed',
+      );
+    }
+    try {
+      await interceptor?.call(
+        CanonicalDisplayInvalidationMutationStep.beforePayloadMutation,
+      );
+      if (await FileSystemEntity.type(file.path, followLinks: false) ==
+          FileSystemEntityType.link) {
+        throw const FileSystemException('Unsafe payload link');
+      }
+      final hadFile = await file.exists();
+      if (hadFile) await file.delete();
+      return CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.applied,
+        physicalFilesTouched: hadFile ? 1 : 0,
+        manifestEntriesTouched: 1,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+      );
+    } on Object {
+      // The exact reference has already been removed. Any surviving payload is
+      // intentionally orphaned and ineligible rather than made broadly
+      // discoverable or deleted through a fallback clear.
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: 0,
+        manifestEntriesTouched: 1,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'segment_payload_removal_failed',
+      );
+    }
+  }
+
+  Future<CanonicalDisplayInvalidationPhysicalMutation>
+  _quarantineSegmentThenRemoveManifest({
+    required SegmentedDisplayCacheKey key,
+    required SourceChunkRange range,
+    required File file,
+    required _LocatedLegacySegmentManifest located,
+    CanonicalDisplayInvalidationMutationInterceptor? interceptor,
+  }) async {
+    var filesTouched = 0;
+    try {
+      if (await file.exists()) {
+        await interceptor?.call(
+          CanonicalDisplayInvalidationMutationStep.beforePayloadMutation,
+        );
+        if (await FileSystemEntity.type(file.path, followLinks: false) ==
+            FileSystemEntityType.link) {
+          throw const FileSystemException('Unsafe payload link');
+        }
+        final quarantine = _legacySegmentFileForInvalidation(
+          key,
+          '.${located.record.fileName}.quarantine',
+          allowQuarantineName: true,
+        );
+        if (quarantine == null || await quarantine.exists()) {
+          throw const FileSystemException('Unsafe quarantine target');
+        }
+        await file.rename(quarantine.path);
+        filesTouched = 1;
+      }
+      try {
+        await interceptor?.call(
+          CanonicalDisplayInvalidationMutationStep.beforeManifestUpdate,
+        );
+        final directory = _legacySegmentDirectoryForInvalidation(key);
+        if (directory == null ||
+            await FileSystemEntity.type(directory.path, followLinks: false) ==
+                FileSystemEntityType.link) {
+          throw const FileSystemException('Unsafe segment directory link');
+        }
+        await _saveManifest(
+          key.cacheKey,
+          _manifestWithoutExactLegacyRecord(located.manifest, range),
+        );
+      } on Object {
+        return CanonicalDisplayInvalidationPhysicalMutation(
+          status: CanonicalDisplayInvalidationMutationStatus.failed,
+          physicalFilesTouched: filesTouched,
+          manifestEntriesTouched: 0,
+          recordsQuarantined: filesTouched,
+          memoryEntriesEvicted: 0,
+          diagnosticCode: 'segment_manifest_update_failed_after_quarantine',
+        );
+      }
+      return CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.applied,
+        physicalFilesTouched: filesTouched,
+        manifestEntriesTouched: 1,
+        recordsQuarantined: filesTouched,
+        memoryEntriesEvicted: 0,
+      );
+    } on Object {
+      return CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: filesTouched,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: filesTouched,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'segment_quarantine_failed',
+      );
+    }
+  }
+
+  /// Locates a chapter-layout record in its fixed derivative root. The decoded
+  /// key must exactly match the trusted caller-owned key before a receipt is
+  /// issued; the decoded filename is never used.
+  Future<ChapterLayoutInvalidationLookupReceipt?>
+  lookupChapterLayoutForInvalidation({
+    required CanonicalDisplayInvalidationStorageScope scope,
+    required ChapterCardLayoutKey trustedLayoutKey,
+  }) async {
+    await ensureInitialized();
+    if (!await _matchesChapterLayoutInvalidationScope(
+      scope,
+      trustedLayoutKey,
+    )) {
+      return null;
+    }
+    final file = _chapterLayoutRecordFileForInvalidation(trustedLayoutKey);
+    if (file == null ||
+        await FileSystemEntity.type(file.path, followLinks: false) ==
+            FileSystemEntityType.link) {
+      return null;
+    }
+    if (!await file.exists()) {
+      return ChapterLayoutInvalidationLookupReceipt._(
+        this,
+        scope,
+        trustedLayoutKey,
+      );
+    }
+    try {
+      final decoded = ChapterCardLayout.fromJson(
+        jsonDecode(await file.readAsString()) as Map<String, dynamic>,
+      );
+      if (jsonEncode(decoded.key.toJson()) !=
+          jsonEncode(trustedLayoutKey.toJson())) {
+        return null;
+      }
+      return ChapterLayoutInvalidationLookupReceipt._(
+        this,
+        scope,
+        trustedLayoutKey,
+      );
+    } on Object {
+      return null;
+    }
+  }
+
+  Future<CanonicalDisplayInvalidationPhysicalMutation>
+  _invalidateExactChapterLayout(
+    ChapterLayoutInvalidationLookupReceipt receipt, {
+    required CanonicalDisplayInvalidationAction action,
+    CanonicalDisplayInvalidationMutationInterceptor? interceptor,
+  }) async {
+    if (!await _matchesChapterLayoutInvalidationScope(
+          receipt.scope,
+          receipt._layoutKey,
+        ) ||
+        (action !=
+                CanonicalDisplayInvalidationAction
+                    .invalidateExactDiskDerivative &&
+            action !=
+                CanonicalDisplayInvalidationAction
+                    .quarantineExactDiskDerivative)) {
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: 0,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'unsafe_scope_or_action',
+      );
+    }
+    final file = _chapterLayoutRecordFileForInvalidation(receipt._layoutKey);
+    if (file == null) {
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: 0,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'unsafe_chapter_layout_target',
+      );
+    }
+    if (!await file.exists()) {
+      return const CanonicalDisplayInvalidationPhysicalMutation.noOp();
+    }
+    try {
+      await interceptor?.call(
+        CanonicalDisplayInvalidationMutationStep.beforePayloadMutation,
+      );
+      if (await FileSystemEntity.type(file.path, followLinks: false) ==
+          FileSystemEntityType.link) {
+        throw const FileSystemException('Unsafe chapter-layout link');
+      }
+      if (action ==
+          CanonicalDisplayInvalidationAction.quarantineExactDiskDerivative) {
+        final quarantine = _chapterLayoutRecordFileForInvalidation(
+          receipt._layoutKey,
+          quarantine: true,
+        );
+        if (quarantine == null || await quarantine.exists()) {
+          throw const FileSystemException('Unsafe chapter-layout quarantine');
+        }
+        await file.rename(quarantine.path);
+        return const CanonicalDisplayInvalidationPhysicalMutation(
+          status: CanonicalDisplayInvalidationMutationStatus.applied,
+          physicalFilesTouched: 1,
+          manifestEntriesTouched: 0,
+          recordsQuarantined: 1,
+          memoryEntriesEvicted: 0,
+        );
+      }
+      await file.delete();
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.applied,
+        physicalFilesTouched: 1,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+      );
+    } on Object {
+      return const CanonicalDisplayInvalidationPhysicalMutation(
+        status: CanonicalDisplayInvalidationMutationStatus.failed,
+        physicalFilesTouched: 0,
+        manifestEntriesTouched: 0,
+        recordsQuarantined: 0,
+        memoryEntriesEvicted: 0,
+        diagnosticCode: 'chapter_layout_mutation_failed',
+      );
     }
   }
 
@@ -1132,6 +1727,193 @@ final class SegmentedDisplayCacheService {
     } finally {
       _resettingRoots.remove(rootKey);
     }
+  }
+
+  Future<bool> _matchesInvalidationScope(
+    CanonicalDisplayInvalidationStorageScope scope,
+    SegmentedDisplayCacheKey key,
+  ) async {
+    final root = p.normalize(_rootDirectory.absolute.path);
+    if (scope.rootPath != root ||
+        scope.bookScope != key.bookId ||
+        await FileSystemEntity.type(_rootDirectory.path, followLinks: false) ==
+            FileSystemEntityType.link) {
+      return false;
+    }
+    final directory = _legacySegmentDirectoryForInvalidation(key);
+    return directory != null &&
+        await FileSystemEntity.type(directory.path, followLinks: false) !=
+            FileSystemEntityType.link;
+  }
+
+  Future<bool> _matchesChapterLayoutInvalidationScope(
+    CanonicalDisplayInvalidationStorageScope scope,
+    ChapterCardLayoutKey layoutKey,
+  ) async {
+    final root = p.normalize(_rootDirectory.absolute.path);
+    if (scope.rootPath != root ||
+        scope.bookScope != layoutKey.bookId ||
+        await FileSystemEntity.type(_rootDirectory.path, followLinks: false) ==
+            FileSystemEntityType.link) {
+      return false;
+    }
+    final directory = _chapterLayoutDirectoryForInvalidation();
+    return directory != null &&
+        await FileSystemEntity.type(directory.path, followLinks: false) !=
+            FileSystemEntityType.link;
+  }
+
+  Directory? _legacySegmentDirectoryForInvalidation(
+    SegmentedDisplayCacheKey key,
+  ) {
+    final root = p.normalize(_rootDirectory.absolute.path);
+    final safeKey = _safeKey(key.cacheKey);
+    if (safeKey.isEmpty ||
+        safeKey == '.' ||
+        safeKey == '..' ||
+        safeKey.contains('/') ||
+        safeKey.contains('\\') ||
+        safeKey.contains('\u0000')) {
+      return null;
+    }
+    final path = p.normalize(p.join(root, safeKey));
+    if (!p.isWithin(root, path) || p.dirname(path) != root) return null;
+    return Directory(path);
+  }
+
+  Directory? _chapterLayoutDirectoryForInvalidation() {
+    final root = p.normalize(_rootDirectory.absolute.path);
+    final path = p.normalize(p.join(root, 'chapter_layout_records'));
+    if (!p.isWithin(root, path) || p.dirname(path) != root) return null;
+    return Directory(path);
+  }
+
+  File? _chapterLayoutRecordFileForInvalidation(
+    ChapterCardLayoutKey key, {
+    bool quarantine = false,
+  }) {
+    final directory = _chapterLayoutDirectoryForInvalidation();
+    final safeKey = _safeKey(key.cacheKey);
+    if (directory == null ||
+        safeKey.isEmpty ||
+        safeKey == '.' ||
+        safeKey == '..' ||
+        safeKey.contains('/') ||
+        safeKey.contains('\\') ||
+        safeKey.contains('\u0000')) {
+      return null;
+    }
+    final fileName = quarantine ? '.$safeKey.json.quarantine' : '$safeKey.json';
+    final path = p.normalize(p.join(directory.path, fileName));
+    if (!p.isWithin(directory.path, path) ||
+        p.dirname(path) != directory.path) {
+      return null;
+    }
+    return File(path);
+  }
+
+  File? _legacySegmentFileForInvalidation(
+    SegmentedDisplayCacheKey key,
+    String fileName, {
+    bool allowQuarantineName = false,
+  }) {
+    final directory = _legacySegmentDirectoryForInvalidation(key);
+    if (directory == null ||
+        fileName.isEmpty ||
+        p.isAbsolute(fileName) ||
+        p.basename(fileName) != fileName ||
+        fileName.contains('..') ||
+        fileName.contains('/') ||
+        fileName.contains('\\') ||
+        fileName.contains('\u0000')) {
+      return null;
+    }
+    if (allowQuarantineName) {
+      if (!fileName.startsWith('.') || !fileName.endsWith('.quarantine')) {
+        return null;
+      }
+    } else if (!fileName.startsWith('segment_') ||
+        !fileName.endsWith('.json.gz')) {
+      return null;
+    }
+    final path = p.normalize(p.join(directory.path, fileName));
+    if (!p.isWithin(directory.path, path) ||
+        p.dirname(path) != directory.path) {
+      return null;
+    }
+    return File(path);
+  }
+
+  Future<_LocatedLegacySegmentManifest?>
+  _readExactLegacyManifestForInvalidation(
+    SegmentedDisplayCacheKey key,
+    SourceChunkRange range,
+  ) async {
+    final directory = _legacySegmentDirectoryForInvalidation(key);
+    if (directory == null ||
+        await FileSystemEntity.type(directory.path, followLinks: false) ==
+            FileSystemEntityType.link) {
+      return null;
+    }
+    final manifestFile = File(p.join(directory.path, 'manifest.json'));
+    if (await FileSystemEntity.type(manifestFile.path, followLinks: false) ==
+            FileSystemEntityType.link ||
+        !await manifestFile.exists()) {
+      return null;
+    }
+    try {
+      final manifest = SegmentedDisplayCacheManifest.fromJson(
+        jsonDecode(await manifestFile.readAsString()) as Map<String, dynamic>,
+      );
+      if (manifest.bookId != key.bookId || manifest.cacheKey != key.cacheKey) {
+        return null;
+      }
+      final matches = manifest.segments
+          .where(
+            (record) =>
+                record.sourceStart == range.start &&
+                record.sourceEndExclusive == range.endExclusive,
+          )
+          .toList(growable: false);
+      if (matches.length != 1 ||
+          matches.single.fileName != _segmentFileName(range)) {
+        return null;
+      }
+      return _LocatedLegacySegmentManifest(
+        manifest: manifest,
+        record: matches.single,
+      );
+    } on Object {
+      return null;
+    }
+  }
+
+  SegmentedDisplayCacheManifest _manifestWithoutExactLegacyRecord(
+    SegmentedDisplayCacheManifest manifest,
+    SourceChunkRange range,
+  ) {
+    final records = manifest.segments
+        .where(
+          (record) =>
+              record.sourceStart != range.start ||
+              record.sourceEndExclusive != range.endExclusive,
+        )
+        .toList(growable: false);
+    return SegmentedDisplayCacheManifest(
+      version: manifest.version,
+      bookId: manifest.bookId,
+      cacheKey: manifest.cacheKey,
+      parsedContentVersion: manifest.parsedContentVersion,
+      parserVersion: manifest.parserVersion,
+      displayLayoutVersion: manifest.displayLayoutVersion,
+      settingsSignature: manifest.settingsSignature,
+      viewportSignature: manifest.viewportSignature,
+      sourceChunkCount: manifest.sourceChunkCount,
+      complete: _isCompleteCoverage(records, manifest.sourceChunkCount),
+      createdAtMs: manifest.createdAtMs,
+      updatedAtMs: _clock(),
+      segments: records,
+    );
   }
 
   Future<Directory> _signatureDirectory(String cacheKey) async {

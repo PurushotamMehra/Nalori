@@ -44,5 +44,25 @@ void main() {
       expect(payload.fontFamily, ReaderFontFamily.lora);
       expect(payload.attribution, 'Untitled Book');
     });
+
+    test('keeps the selected quote verbatim in the share payload', () {
+      const quote =
+          '  “Café déjà vu,” she said — don\'t change it.\n\n'
+          'Second paragraph: 日本語 & emoji 📚  ';
+
+      final payload = QuoteSharePayload.fromSelection(
+        quote: quote,
+        bookTitle: 'Book',
+        author: 'Author',
+        bookId: 'book.epub',
+        displayIndex: 2,
+        startOffset: 4,
+        endOffset: 82,
+      );
+
+      expect(payload.quote, quote);
+      expect(payload.startOffset, 4);
+      expect(payload.endOffset, 82);
+    });
   });
 }
