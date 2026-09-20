@@ -1,5 +1,146 @@
 # IMPLEMENT-P04-LAZY-SNAPSHOT-HANDOFF-001: stopped entry proof
 
+## Continuation after owner dual-authority decision
+
+The following is the current result; the original entry-proof record below is
+preserved as history. Entry HEAD is now
+`7f226c7268fbcc1212eab82cb4eb4b955f364f32` on
+`rescue/change-039-device-failure-2026-09-19`. Tracked files were clean on entry;
+the same five diagnostic files were untracked. Recovery and CHANGE-040 commits
+remain unchanged. No production file was edited in this continuation.
+
+The owner has authorized a strict dual-authority resolved-card validation path:
+stable LazyPackingIdentityV1 for measurement/rendering/packing; exact separate
+snapshot/source/prefix membership; ordinary non-lazy F202/F208 behavior remains
+strict. The prior request for that decision is **resolved**. The old K02 test
+still exercises the ordinary adapter, so its failure must not be mistaken for
+a refutation of the newly approved lazy validation path.
+
+Before implementing that path, a production-paginator precondition test found
+a **different stop condition: window-dependent card payload/slice semantics
+prevent history-independent exact-byte reopen**. This is not a request to undo
+or repeat the owner's dual-authority decision.
+
+### New executable evidence
+
+Added `test/reader_contract/regression/lazy_snapshot_handoff_reopen_payload_test.dart`.
+It uses independent real lazy repositories/indexes/parser runs and fresh parsed
+cache directories for A+B, B alone, and a further B-only reopen. Each repository
+is closed before the next opens. The existing controlled layout harness supplies
+the environment and production font resolver. Each P05 contract is then built
+again with the **actual lazy snapshot's** publication, parser, source revision
+and snapshot digest, using the real font gate and contract builder. No F202/F208
+field is copied or overridden, and no validator is removed.
+
+The test computes the design's stable packing tuple from actual index metadata,
+parser/dependency/structural revisions and P05 metric/renderer/pagination/font
+evidence. This is a test-only digest input to the existing production paginator,
+not a new typed authority or proof of authenticated handoff. Both sessions start
+at B's validated hard section root and run the production paginator and canonical
+identity builder. A is not paginated to reach B. B is the genuine final section;
+no false no-successor claim is used to alter H01–H03.
+
+R01 is a green counterexample/control:
+
+- Packing digest, physical card signature, source owner/digest, and resolved
+  block fingerprint are identical between the two histories.
+- The production `ReaderCheckpoint.create` / `fromPayload` codec produces
+  identical valid checkpoint payloads and integrity checksums, including the
+  actual stable locations emitted by each lazy window. These in-memory codec
+  checks are not a checkpoint-store or restoration-UI test.
+- Historical A+B emits card JSON `i: 14` and slice `sourceOrdinalHint: 14`.
+  B alone emits `i: 0` and `sourceOrdinalHint: 0`. No field is normalized.
+- P05 `contractIdentity` and physical card components also differ, as expected
+  for distinct source-bound contracts. The ordinal payload mismatch exists
+  independently of those P05 fields and of the rendering membership check.
+- Fresh B-only reopen reproduces the B-only signature, card JSON, slices and
+  resolved layout exactly. The failure is not nondeterministic parsing/layout.
+
+R02 is the intended red entry gate: equal signatures and checkpoints do not
+reproduce the historical A+B payload under bounded B-only reconstruction.
+
+```text
+Which: at location ['payload']['i'] is <0> instead of <14>
+Equal stable packing/signature/checkpoint cannot choose between different
+historical card bytes, slice hints and P05 layout payloads. No normalization,
+re-signing or checkpoint mutation is permitted.
+```
+
+In the final snapshot-bound-contract run, both histories have signature
+`5734818046b94814136be161b63561536708a36692635c7157e3b6f3b9b08281` and checkpoint
+checksum `883187c4902a2ca200c0b1a0af554d5838c37138b23bfbce58033a39f15923dc`.
+The card payload digests differ:
+
+- A+B: `2d537b9a6c9d7031461aa5f6b3d97ab734a0bec2d41b4285cfceba5d50a65f78`.
+- B alone: `eb5654439862c545f3c0ab217669e1e4e02e0dbdf7a20c6fb92272b78e998666`.
+
+Publication-dependent hashes can change when the temporary EPUB is rebuilt;
+the executable assertions require equality across histories within one opened
+publication, not hardcoded fixture hash values.
+
+### Why this activates the owner's stop condition
+
+`CanonicalReaderCardIdentityBuilder` intentionally excludes ordinal hints from
+the signature; `LazyBookSession.loadedWindow` assigns dense window indexes;
+`CanonicalPaginationSourceSnapshot.pin` requires those indexes and owner hints
+to agree. The generated card JSON and canonical slice encoding retain those
+indexes. The checkpoint holds the stable card identity, not the original card
+JSON/resolved layout or the historical loaded-window provenance.
+
+Consequently the same surviving checkpoint and stable publication inputs admit
+two distinct required historical byte sequences. Loading A as an adjacent
+section can recreate the A+B candidate, but cannot establish that A+B rather
+than B-only was the original history. Inspecting more book content does not
+recover that absent history. This does not prove that the dual-authority
+architecture is impossible; it proves that **validation alone** cannot satisfy
+the exact-byte reopen requirement with the existing emitted representation.
+
+The owner expressly required stopping if this model needs changes to existing
+card payload/signature semantics, persistent migration, unbounded reopen, or new
+restoration UX. A review must now specify a deterministic lazy payload/address
+space from initial emission (including the treatment of ordinal hints and
+source-bound resolved-layout provenance), or explicitly revise what exact
+equality means across reopen. Persisting historical window provenance would be
+another, separately authorized persistence change. None was chosen or
+implemented here. Existing retained cards/signatures were not rewritten, and
+no exact-unavailable UI or reset policy was invented.
+
+### Current gate status and observed work
+
+| Entry gate | Current result |
+| --- | --- |
+| 1: screen authority/failure settlement | Still partial at the entry-proof commit. Missing warmup promotion, queued hydration, eviction/rebuild, repeated failure, held-close and held-book-switch cases were not added after this stop. |
+| 2: dual authority, mutations, reopen, legacy | Not satisfied. Owner's K02 architecture decision accepted; typed lazy validator and mutation suite not implemented before the payload precondition failed. Stable signatures and same-history reopen pass, cross-history exact bytes/slices fail. Legacy bounded exact recovery and actual retry/exact-unavailable UI remain unproved; this new test is not legacy recovery evidence. |
+| 3: two handoffs/retention/backward | Not satisfied. No authenticated handoffs, empty/oversized-section transfer, or aggregate backward bound proof was executed. |
+
+Actual maxima **per tested pagination session**: 2 retained published cards,
+1 continuation guard, 18 snapshot sources (A+B; B-only has 4), 4 consumed work
+entries and 4 entered sources per initial section-root generation. These are
+not two-handoff or aggregate-retention maxima. The test retains result cards
+for comparison, not a live handoff lineage; it does not prove that 96/25/432
+or 110/158 allowances cannot multiply across sessions. The pre-existing S01
+screen trace's 6 cards/18 sources is historical evidence, not rerun here.
+
+```sh
+rtk flutter test --no-pub --reporter expanded test/reader_contract/regression/lazy_snapshot_handoff_reopen_payload_test.dart
+rtk dart analyze test/reader_contract/regression/lazy_snapshot_handoff_reopen_payload_test.dart
+rtk git diff --check
+```
+
+Final snapshot-bound-contract test run: **1 passed / 1 failed / 0 skipped**, exit
+1. R01 green, R02 red at the payload index assertion above. Analyzer: no issues.
+Whitespace check: clean. The earlier exploratory run using the harness's generic
+contract had the same counterexample, but the final result above is the one with
+actual lazy snapshot-bound P05 evidence. Frozen P02–P06 files, H01–H06, the
+production seam, schemas/versions and protected diagnostics were not edited.
+
+**All three entry gates remain unsatisfied; separately reviewable production
+handoff implementation is not authorized.** No commit, amend, reset, rebase,
+push, device run or P07 work was performed. P04 remains
+`ARCHITECTURAL_CORRECTION_REQUIRED`, P06 `REGRESSED_ON_DEVICE`, progress 46/89.
+
+## Original entry-proof record (historical)
+
 Recorded 2026-09-20. **Incomplete; production handoff is not authorized.**
 The packing/renderer authority integration needs explicit architectural review.
 This report does not close any implementation-entry gate.
