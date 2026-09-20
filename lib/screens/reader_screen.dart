@@ -449,10 +449,71 @@ final class _PreparedChapterLayoutSource {
   final StableBookLocation chapterEnd;
 }
 
+/// Test access to the mounted reader's actual adjacent work. This handle owns
+/// no work or settlement state; its futures and observations come from State.
+@visibleForTesting
+class ReaderAdjacentWorkTestAccess {
+  ReaderAdjacentWorkTestAccess({this.warmupDelay, this.hydrationQuietDelay});
+
+  final Future<void> Function(Duration)? warmupDelay;
+  final Future<void> Function(Duration)? hydrationQuietDelay;
+  _ReaderScreenState? _state;
+  String? _bookId;
+
+  bool get attached =>
+      (_state?.mounted ?? false) &&
+      _state!.widget.bookId == _bookId &&
+      identical(_state!.widget.adjacentWorkTestAccess, this);
+  _ReaderScreenState get _current {
+    final state = _state;
+    if (state == null || !attached) {
+      throw StateError('Reader adjacent-work handle is detached.');
+    }
+    return state;
+  }
+
+  String get owner => _current._visiblePositionCoordinator.sessionId;
+  int get generation => _current._rebuildGeneration;
+  bool get building => _current._isRebuildingChunks;
+  int get sourceCount => _current._sourceChunks.length;
+  int get cardCount =>
+      _current._progressiveDisplayState?.canonicalCards.length ?? 0;
+  Object? get failure => _current._progressiveDisplayState?.failure;
+  Object? get presentedFailure => _current._progressiveRangeFailure;
+  String get publicationDigest => readerSha256([
+    for (final card
+        in _current._progressiveDisplayState?.canonicalCards ??
+            <CanonicalFinalizedReaderCard>[])
+      [
+        card.card.toJson(),
+        card.identity.toJson(),
+        if (card.resolvedLayout case final layout?) ...[
+          layout.contractIdentity,
+          layout.physicalLayoutCompositeFingerprint,
+          layout.physicalCardIdentityComponents,
+          for (final block in layout.blocks) block.blockLayoutFingerprint,
+        ],
+        for (final slice in card.sourceSlices) slice.toCanonicalJson(),
+      ],
+  ]);
+  Future<bool>? get activeForward =>
+      _current._activeLazyAdjacentLoads[DisplayRangeDirection.forward];
+
+  Future<bool> forward({String reason = 'next_page_boundary'}) =>
+      _current._ensureAdjacentSectionAvailable(
+        DisplayRangeDirection.forward,
+        reason: reason,
+      );
+  void warmup(StableBookLocation location) =>
+      _current._scheduleLazyAdjacentWarmup(location);
+  void hydrate() => _current._scheduleLazyParsedHydration();
+}
+
 /// Screen 2 — fullscreen vertical-swipe reader with progress tracking,
 /// overlay menu (scrubber + navigation), and bookmark management.
 class ReaderScreen extends StatefulWidget {
   final String title;
+  final ReaderAdjacentWorkTestAccess? adjacentWorkTestAccess;
   final String bookId;
   final List<BookChunk> chunks;
   final Map<String, int> anchorMap;
@@ -475,6 +536,7 @@ class ReaderScreen extends StatefulWidget {
 
   const ReaderScreen({
     super.key,
+    this.adjacentWorkTestAccess,
     required this.title,
     required this.bookId,
     required this.chunks,
@@ -502,7 +564,8 @@ class ReaderScreen extends StatefulWidget {
     required File bookFile,
     required BookMetadata metadata,
     required ReadingSettings settings,
-  }) : title = metadata.title,
+  }) : adjacentWorkTestAccess = null,
+       title = metadata.title,
        bookId = metadata.id,
        chunks = const [],
        anchorMap = const {},
@@ -1067,6 +1130,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   void initState() {
     super.initState();
+    final testAccess = widget.adjacentWorkTestAccess;
+    assert(testAccess == null || !testAccess.attached);
+    testAccess?._state = this;
+    testAccess?._bookId = widget.bookId;
     final readerSequence = ++_nextReaderSessionSequence;
     _visiblePositionCoordinator =
         ReaderVisiblePositionCoordinator<StableBookLocation>(
@@ -1225,7 +1292,29 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   @override
+  void didUpdateWidget(covariant ReaderScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(
+          oldWidget.adjacentWorkTestAccess,
+          widget.adjacentWorkTestAccess,
+        ) &&
+        oldWidget.bookId == widget.bookId) {
+      return;
+    }
+    final oldAccess = oldWidget.adjacentWorkTestAccess;
+    if (identical(oldAccess?._state, this)) oldAccess?._state = null;
+    // A new book must mount its own State/session before gaining test access.
+    if (oldWidget.bookId != widget.bookId) return;
+    final testAccess = widget.adjacentWorkTestAccess;
+    assert(testAccess == null || !testAccess.attached);
+    testAccess?._state = this;
+    testAccess?._bookId = widget.bookId;
+  }
+
+  @override
   void dispose() {
+    final testAccess = widget.adjacentWorkTestAccess;
+    if (identical(testAccess?._state, this)) testAccess?._state = null;
     _stageCommittedLifecycleSnapshot('reader_disposed');
     WidgetsBinding.instance.removeObserver(this);
     _directOpenOperation?.cancel();
@@ -7823,7 +7912,8 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _scheduleLazyAdjacentWarmup(StableBookLocation location) {
     if (_lazySession == null) return;
     unawaited(() async {
-      await Future<void>.delayed(const Duration(milliseconds: 16));
+      await (widget.adjacentWorkTestAccess?.warmupDelay ??
+          Future<void>.delayed)(const Duration(milliseconds: 16));
       if (!mounted || _lazySession == null) return;
       final currentSpines = _loadedLazySpineIndexes();
       if (!currentSpines.contains(location.spineIndex)) return;
@@ -7852,7 +7942,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     while (mounted && identical(_lazySession, session)) {
       final remaining = _remainingHydrationQuietPeriod();
       if (remaining <= Duration.zero && !_hasForegroundReaderWork()) break;
-      await Future<void>.delayed(
+      await (widget.adjacentWorkTestAccess?.hydrationQuietDelay ??
+          Future<void>.delayed)(
         remaining > Duration.zero
             ? remaining
             : const Duration(milliseconds: 120),
