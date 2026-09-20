@@ -6075,3 +6075,191 @@ Strict P03–P06 identity, seam, continuation, compatibility and publication
 authority remain intact. Checkpoint schema, stable-location semantics,
 restoration authority, user data and dependency/lock state were not changed by
 this correction.
+
+## CHANGE-20260919-040 — Specify lazy snapshot handoff and input-exhaustion semantics
+
+Recorded 2026-09-20; the change ID/title are owner-specified.
+
+- Task: `DESIGN-P04-LAZY-SNAPSHOT-HANDOFF` only.
+- Baseline/recovery: `a130bda2785a57ed2e94ae3fd0630572d3f9d010` on
+  `rescue/change-039-device-failure-2026-09-19`.
+- Outcome: `DESIGN_SPECIFIED_WITH_IMPLEMENTATION_GATES`. No production
+  correction, schema/version change, device execution, commit or push.
+- Requirements: REQ-007–REQ-013, REQ-027–REQ-030, REQ-040, REQ-043–REQ-045,
+  REQ-048 and REQ-051; this entry does not mark them newly verified.
+- Protected evidence: `terminal_out.md`, `nalori-logcat.txt`,
+  `nalori-last-anr.txt`, `nalori-meminfo.txt`, `regression.mp4` remain untracked
+  and untouched. No recovery history or previous ledger entry was rewritten.
+
+### Superseding gate decision
+
+Latest owner ordinary A059 evidence invalidates CHANGE-039's host-only success
+claims. P04's loaded-snapshot completeness assumption requires architecture
+correction: immutable content is not proof that the publication ends there.
+P04's relevant lazy-input/publication exit gate is now
+`ARCHITECTURAL_CORRECTION_REQUIRED`, with all eight historical tasks preserved.
+P06 is `REGRESSED_ON_DEVICE` at 7/7; overall progress remains 46/89. P07 is
+unstarted and blocked. A correction is not implemented, so
+`CORRECTION_IMPLEMENTED_NOT_DEVICE_VERIFIED` is not the status of CHANGE-040.
+
+### Inspection and selected contract
+
+Inspected canonical snapshot/continuation construction and codec; the sole
+production terminalBookEnd reason assignment and terminal cursor/frontier
+validation; session initial/target/forward/backward/deferred publication;
+checkpoint index/restart bounds; screen window creation/append/eviction and
+catch/warmup/hydration; stable section/source/spine authority; progressive
+append/replacement; P06 segment construction, admission and end-cursor
+persistence; and source/layout identity and exact-card dependencies.
+
+The selected contract is
+[`nalori-lazy-snapshot-handoff-design.md`](nalori-lazy-snapshot-handoff-design.md).
+It contains the full field tables, state distinctions, authority audit,
+transaction steps, boundedness/retention/backward rules and next-task prompt.
+
+Choose a sealed section-end receipt plus authenticated successor session over
+immutable A+B. Verify every A owner/record as an exact prefix, preserve all
+accepted card bytes/signatures, and append only B through a dedicated atomic
+handoff transaction. The receipt is not a terminal continuation. Only immutable
+spine plus complete final-section evidence authorizes terminalBookEnd.
+Ordinary snapshot/session rejection, continuation parent validation and all
+structural/source checks stay strict. New display generation, old-card repack,
+mutable snapshot, terminal-bit clearing and forged continuation parents are
+rejected alternatives.
+
+Handoff fields bind publication/spine/parser/dependency authority; old/new
+snapshot digests/revisions and exact prefix; parent/successor session lineage;
+receipt, accepted publication, committed and suffix card identities/bytes;
+next expected stable owner/cursor and hard-section seam; F196/F206/F204/F207,
+font delivery, old/new source evidence and integrity digest. Runtime epoch,
+publication revision and cancellation/retry owner form a separate CAS envelope.
+Demand and warmup join/promote one owned attempt; failure settles and latches
+all matching work until explicit retry without changing the readable card.
+
+P05 dependency: current controlled identity includes F202's snapshot digest.
+The design specifies a stable lazy packing identity with separate mandatory
+per-snapshot/per-source proof. It does not pretend A and A+B have equal F202
+or change the existing P05 codec. Legacy exact-checkpoint behavior must be
+proved before production wiring; no silent re-signing or semantic downgrade.
+
+### Files and scope
+
+| File | Change |
+| --- | --- |
+| `docs/development/nalori-lazy-snapshot-handoff-design.md` | New concrete handoff contract, rejection choices, field tables, boundedness and blocked-seam inventory |
+| `docs/development/nalori-canonical-pagination-design.md` | Reopened lazy gate and corrected terminal authority; historical specification retained with explicit superseding addendum |
+| `docs/development/nalori-reader-canonical-display-cache-contract.md` | Reopened P06 and specified contextual terminal/publication-start admission and safe-miss consequences |
+| `docs/development/nalori-reader-reliability-plan.md` | Current gate/requirement qualifications and dashboard; no checklist count changes |
+| `test/reader_contract/regression/lazy_snapshot_handoff_characterization_test.dart` | New deliberately red production-entry characterization and real-final-section control; no existing/frozen test changes |
+| This ledger | Append-only design, regression, test and limitation evidence |
+
+### Red characterization results
+
+Final command:
+
+```sh
+rtk flutter test --no-pub --reporter expanded test/reader_contract/regression/lazy_snapshot_handoff_characterization_test.dart
+```
+
+Result: **1 passed, 4 failed, 0 skipped**, exit **1**, about **10 seconds**.
+The corrected fixture setup reached the intended assertions in two completed
+runs, before and after removal of redundant default arguments.
+
+| ID | Actual production evidence | Result / scope |
+| --- | --- | --- |
+| H01 | Real parsed first section has 14 chunks and a verified lazy-index successor; pagination produces `CanonicalPaginationCheckpointReason.terminalBookEnd` | RED: expected not terminalBookEnd |
+| H02 | Real successor adds four chunks; A's pinned digest/count stay unchanged; `generateForward` returns `terminalStateContradiction: A terminal continuation cannot be resumed.` | RED: expected accepted result; public lazy/session composition, not private screen integration |
+| H03 | Simultaneous speculative/boundary-priority calls on the same accepted suffix both return that exact terminal rejection | RED: both expected accepted; does not prove screen join/callback ordering |
+| H04 | `readerShouldSurfacePreparationFailure('lazy_forward_boundary')` returns false | RED: expected true; predicate coverage only, not caught-error/upstream settlement |
+| H06 | Real final linear section has no successor and returns terminalBookEnd, logical-end cursor, empty frontier and codec-accepted continuation | GREEN genuine-end control |
+
+No fake pagination or lifecycle implementation was used. The existing small
+EPUB builder/parser and controlled layout harness are reused unchanged. The
+test loops invoke only production initial/forward pagination, bounded to 25
+steps over the micro-fixture, and do not implement packing decisions.
+
+Two initial attempts failed during test input setup because the explicit
+stable target omitted local-chunk/parser-version evidence; those errors are
+**not** counted as defect characterization. The test setup was corrected to
+provide chunk zero and the real lazy parser version. No production code was
+changed to make setup or assertions work. Initial analysis reported two
+redundant-default infos; both were removed. A later interruption left two
+tool-session results unavailable; their outcomes were not inferred and the
+final characterization/analysis commands were rerun to captured completion.
+
+### Missing deterministic production seams (not claimed as tests)
+
+Full requested cases 3–5 remain blocked on private ReaderScreen scheduling,
+catch and hydration state. The source/device evidence shows range failure
+reported and then append/navigation/prefetch completion, but a fake catch or
+a manually resumed hydration loop would not prove that production path.
+
+The design specifies the exact minimum seam: optional state-bound test access
+to the existing adjacent/warmup/hydration methods and read-only owned
+completion/publication/failure state, with deterministic hooks at existing
+warmup/quiet scheduling boundaries. Existing repository parser/coordinator
+injection can hold queued parsing. No seam is introduced here; no P07 general
+lifecycle harness was begun. Implementation must first use this seam to
+prove caught failure reaches upstream as failure and blocks queued hydration,
+repeat requests, rebuilds and stale book-close/switch callbacks.
+
+### Controls and scope verification
+
+```sh
+rtk dart format test/reader_contract/regression/lazy_snapshot_handoff_characterization_test.dart
+rtk dart analyze test/reader_contract/regression/lazy_snapshot_handoff_characterization_test.dart
+rtk flutter test --no-pub test/reader_contract/pagination/reader_card_paginator_continuation_checkpoint_test.dart test/reader_contract/pagination/progressive_display_state_canonical_transaction_test.dart test/unit/services/display_generation_coordinator_test.dart
+rtk git diff --check
+```
+
+- Format: clean final file, exit 0.
+- Scoped analysis: **No issues found**, exit 0.
+- Existing controls: **55 passed**, exit 0, **1 minute 6 seconds**. These prove
+  the current fixed-snapshot contracts, not the new handoff or device behavior.
+- No production files, frozen P02–P06 test/oracle files, dependencies or
+  persistent schemas changed. No new full-suite or device success is claimed.
+
+### Compatibility, bounds and regression-register additions
+
+Keep physical `canonical_display_v4`, continuation v1 and checkpoint/location
+schemas unchanged. Partial-window terminal records become typed safe misses
+under independent contextual end proof, not converted continuations. A local
+ordinal zero cannot prove publication start. Suspended/handoff-spanning records
+have no write authority until separate persistence design; ordinary strictly
+representable segments remain eligible. New lazy packing identity separates
+new signatures from old window-dependent signatures. Preserve old checkpoint
+bytes and return explicit exact-unavailable when bounded exact proof fails;
+do not migrate/reset implicitly. No version constant was changed here.
+
+Bounds are aggregate across live/retired sessions: existing two-card frontier,
+48-source/eight-card cadence, 110/158 work envelopes, 432 resident canonical
+sources, 96 cards, 25 continuation/receipt/lineage guards and current parsed
+retention limits. One section/one owned handoff per attempt, no retained
+growing snapshot chain; byte-batched hashing and 64 KiB receipt/handoff metadata
+cap are specified. Exact suffix retention and backward reconstruction need
+independent proofs before implementation. Oversized sections cannot justify
+whole-book work or disabled demand navigation.
+
+| Regression ID | Requirements | Evidence | Status |
+| --- | --- | --- | --- |
+| REG-040-LAZY-END | REQ-007, REQ-010, REQ-013, REQ-048 | H01/H02 and owner continuation failure | OPEN — P04 architectural correction required |
+| REG-040-FAILURE-SETTLEMENT | REQ-029–REQ-030, REQ-043–REQ-045, REQ-051 | H03/H04 partial evidence; source/device completion and hydration path; missing screen seam disclosed | OPEN — P06 device regression |
+| REG-040-TERMINAL-CACHE | REQ-009–REQ-010 | Builder/admission rely on snapshot-local terminal evidence without spine completeness | OPEN — contextual end proof and compatibility tests required |
+
+Test-removal/replacement ledger: none. No frozen test was changed, removed,
+skipped or given a new expected value. This is new red characterization.
+
+### Next task and blockers
+
+Exact next task: `IMPLEMENT-P04-LAZY-SNAPSHOT-HANDOFF-001 — Prove lazy handoff
+authority and failure settlement before wiring snapshot transfer`.
+
+Use the bounded prompt in section 10 of the new design. First prove the real
+screen seam/failure cases, lazy packing compatibility plus legacy exact
+checkpoint outcome, and bounded retention/backward transfers after multiple
+handoffs. No production handoff wiring is authorized by this design-only task.
+Do not broaden it into persistent-schema changes, restoration/reset UX,
+whole-book parsing, relaxed validation or P07. Stop for a further design
+decision if the required exact restoration or source-address-space proofs
+cannot be satisfied within those limits. Owner A059 verification remains
+mandatory after a future correction; the 55 passing controls do not close it.

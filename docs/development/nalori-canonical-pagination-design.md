@@ -2,8 +2,16 @@
 
 Design task: `TASK-P04-001`  
 Date: 2026-08-31  
-Status: implementation-ready specification; no production or test implementation is included  
+Status: historical P04 specification; lazy-input/publication exit gate `ARCHITECTURAL_CORRECTION_REQUIRED` by CHANGE-20260919-040
 Requirements: `REQ-007`–`REQ-013`, `REQ-027`–`REQ-028`, `REQ-040`, `REQ-044`–`REQ-045`, `REQ-048`, `REQ-051`
+
+Current correction: [canonical lazy snapshot handoff](nalori-lazy-snapshot-handoff-design.md).
+The immutable snapshot's last source is not evidence of book completeness.
+The addendum selects a sealed section-boundary receipt and authenticated
+successor session, preserves true `terminalBookEnd`, and specifies a dedicated
+append transfer without weakening ordinary snapshot/session validation.
+Historical P04 tasks and frozen oracles remain unchanged. Section 17's original
+no-blocker conclusion does not apply to this reopened lazy-snapshot gate.
 
 ## 1. Authority and goals
 
@@ -223,7 +231,7 @@ The conceptual payload is `CanonicalPaginationContinuation`. P04 may implement d
 | `chainOrdinal` / `parentDigest` | Monotonic in-memory continuation chain | Reject stale/forked continuations | Expected parent digest and ordinal at seam | Two scalars/hash | Screen generation alone |
 | Checkpoint reason / interval counters | Accepted predecessor checkpoint plus fully consumed source/finalized-card accounting | Preserve the 48-source/eight-card cadence across smaller requests | Counters are nonnegative and within their stride; cadence reasons require the exact reached stride; provisional exhaustion must be below both | Two bounded integers plus one enum | Mutable request/window start or generation counter |
 | `integrityDigest` | Canonical encoding of all payload fields | Detect corruption/partial reconstruction | Recompute before use | One hash | Cache file checksum as authority |
-| Terminal flag | Trusted section/book end evidence | Distinguish resumable and terminal continuation | Must agree with snapshot boundary | One enum | Empty result interpreted as end |
+| Terminal flag | Verified logical book-end evidence, independently established from immutable publication spine authority | Distinguish resumable work and true book end | Must agree with logical-end cursor, empty frontier and terminalBookEnd; loaded-input/section exhaustion alone is insufficient | One flag; input exhaustion uses the separate handoff receipt | Snapshot exhaustion interpreted as book end |
 
 Not stored because it is derivable or noncanonical: measured height caches, rendered widgets/spans, complete retained card arrays, display maps, request/source-window indexes, target display index, controller state, cache file location, scheduler/generation counters, or arbitrary widget state. Detailed work counters are returned as diagnostics; only the two bounded checkpoint-interval counters above participate in continuation cadence.
 

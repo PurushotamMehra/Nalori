@@ -10,8 +10,11 @@ independently audits and strengthens the P06-004/P06-005 trust boundaries.
 `CHANGE-20260913-037` completes finite retention, `CHANGE-20260913-038`
 completes the isolated v4 physical rollout, and `CHANGE-20260914-039`
 corrects the device-exposed startup, write-ordering and restart-evidence
-regressions. P06 remains 7/7 but is
-`CORRECTION_IMPLEMENTED_NOT_DEVICE_VERIFIED` until the owner device rerun.
+regressions in host controls. The latest ordinary A059 run supersedes those
+success claims: P06 remains 7/7 and is `REGRESSED_ON_DEVICE`.
+CHANGE-20260919-040 specifies [lazy snapshot handoff](nalori-lazy-snapshot-handoff-design.md)
+without implementing it. P04's relevant gate is
+`ARCHITECTURAL_CORRECTION_REQUIRED`; P07 remains blocked.
 Authority: this document specifies the logical and physical evidence required
 before a canonical display-cache segment can be retained, written or reused.
 
@@ -21,7 +24,7 @@ This contract covers a bounded derivative of one canonical reader-card sequence.
 
 ### Verified baseline
 
-- P04 is COMPLETED at 8/8 and P05 is COMPLETED at 7/7.
+- P04 retains 8/8 historical completed tasks but its lazy-input/publication gate is ARCHITECTURAL_CORRECTION_REQUIRED; P05 retains its completed 7/7 evidence.
 - CHANGE-20260910-029 established F001-F211, U-01-U-10, P05 161/161, repeated P03 57/57 evidence, unchanged P04 final-gate 3/3, and frozen P02 9/9 controls.
 - ReaderCompatibilityClassifier distinguishes exact compatibility, authoritative source/layout/renderer/pagination changes, incomplete evidence, corruption, and unsupported revisions. Its result is advisory: it cannot publish, write, restore, settle, or migrate.
 - A whole or segmented legacy display-cache hit is observable, but P04 rejects it with canonicalRegenerationRequired because the record lacks finalized continuation and seam proof. ReaderScreen then regenerates from source.
@@ -796,3 +799,35 @@ font source bytes and unpinned source/display intermediates, and retains the
 visible current card. These host-level guarantees do not establish Android PSS
 or RSS. The prior device observation was approximately 517 MB PSS and 596 MB
 RSS; post-correction device measurement is still required.
+
+## 24. Reopened lazy input and terminal admission contract
+
+CHANGE-20260919-040 supersedes any assumption that the last source ordinal in
+a pinned lazy snapshot proves logical book end. A v1 terminal continuation
+can pass codec validation while making that false semantic claim. The live
+builder currently derives a logical-end right proof from its terminal flag;
+the admission context needs independent immutable spine/complete-section
+evidence. P06 remains REGRESSED_ON_DEVICE at 7/7 pending this correction and
+the ordinary A059 gate.
+
+The selected [handoff contract](nalori-lazy-snapshot-handoff-design.md) uses a
+separate in-memory section-end receipt and authenticated successor session.
+It requires exact A-prefix-of-A+B proof and immutable accepted cards. Ordinary
+same-snapshot/session and continuation-parent rejection remains unchanged.
+Neither receipt nor handoff may be encoded as a v1 terminal continuation.
+
+The first implementation must treat a partial-window terminal record as a
+typed `unverifiedLogicalEnd` safe miss on both memory and disk paths, without
+conversion, partial publication or destructive cleanup. It must also prove
+publication start independently of local source ordinal zero. Genuine final
+spine records retain strict source/layout/renderer/pagination and end proof.
+
+The design changes no persistent schema or version. Physical v4 and current
+continuation/checkpoint formats stay unchanged; handoff-spanning or suspended
+records have no write authority under those formats. Ordinary representable
+segments remain eligible after strict contextual admission. Persisting the
+new handoff protocol requires a separately approved P06 contract/migration
+task. The proposed lazy packing identity separates new lazy signatures from
+old window-dependent signatures; it must not silently migrate old exact
+checkpoints. Legacy exact restoration and bounded retention are explicit
+implementation-entry proofs, not claims of completed compatibility.
