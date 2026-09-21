@@ -133,11 +133,10 @@ class ReaderCheckpointStore {
         final epoch = rows.isEmpty
             ? 1
             : ((rows.single['current_epoch'] as num).toInt() + 1);
-        await txn.insert(
-          'reader_checkpoint_sessions',
-          {'book_id': bookId, 'current_epoch': epoch},
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+        await txn.insert('reader_checkpoint_sessions', {
+          'book_id': bookId,
+          'current_epoch': epoch,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
         _trace('checkpoint_session_begin', {
           'book': bookId,
           'sessionEpoch': epoch,
@@ -192,8 +191,13 @@ class ReaderCheckpointStore {
     return null;
   }
 
-  Future<ReaderCheckpointCommitResult> commit(ReaderCheckpoint checkpoint) {
+  Future<ReaderCheckpointCommitResult> commit(
+    ReaderCheckpoint checkpoint, {
+    bool Function()? canCommit,
+    String? expectedPreviousChecksum,
+  }) {
     return _serialize(() async {
+      if (canCommit?.call() == false) throw const _CheckpointCommitCancelled();
       _trace('checkpoint_store_start', {
         'book': checkpoint.bookId,
         'publicationFingerprint': checkpoint.publicationFingerprint,
@@ -291,6 +295,12 @@ class ReaderCheckpointStore {
           }
         }
         if (latestValid != null) {
+          if (latestValid.formatVersion == 2 && checkpoint.formatVersion != 2) {
+            return ReaderCheckpointCommitResult(
+              ReaderCheckpointCommitStatus.invalidRejected,
+              checkpoint: checkpoint,
+            );
+          }
           final latestEpoch = latestValid.sessionEpoch;
           final latestRevision = latestValid.revision;
           if (checkpoint.sessionEpoch < latestEpoch ||
@@ -311,6 +321,11 @@ class ReaderCheckpointStore {
           }
         }
 
+        if (canCommit?.call() == false ||
+            (expectedPreviousChecksum != null &&
+                latestValid?.integrityChecksum != expectedPreviousChecksum)) {
+          throw const _CheckpointCommitCancelled();
+        }
         await txn.insert('reader_checkpoint_journal', {
           'book_id': checkpoint.bookId,
           'session_epoch': checkpoint.sessionEpoch,
@@ -327,6 +342,11 @@ class ReaderCheckpointStore {
           'ORDER BY session_epoch DESC, revision DESC, record_id DESC LIMIT ?)',
           [checkpoint.bookId, checkpoint.bookId, _recordsRetainedPerBook],
         );
+        // A lost publication owner rolls back the entire journal transaction,
+        // including pruning. Legacy callers have no additional guard.
+        if (canCommit?.call() == false) {
+          throw const _CheckpointCommitCancelled();
+        }
         _trace('checkpoint_store_success', {
           'book': checkpoint.bookId,
           'publicationFingerprint': checkpoint.publicationFingerprint,
@@ -340,6 +360,12 @@ class ReaderCheckpointStore {
         );
       });
     }).catchError((Object error, StackTrace stackTrace) {
+      if (error is _CheckpointCommitCancelled) {
+        return ReaderCheckpointCommitResult(
+          ReaderCheckpointCommitStatus.staleSessionRejected,
+          checkpoint: checkpoint,
+        );
+      }
       _trace('checkpoint_store_failure', {
         'book': checkpoint.bookId,
         'sessionEpoch': checkpoint.sessionEpoch,
@@ -411,6 +437,10 @@ class ReaderCheckpointStore {
   void _trace(String event, Map<String, Object?> fields) {
     trace?.call(event, fields);
   }
+}
+
+final class _CheckpointCommitCancelled implements Exception {
+  const _CheckpointCommitCancelled();
 }
 
 enum ReaderRestoreMatchStrategy { exactSignature, semanticAnchor }
@@ -502,7 +532,10 @@ class ReaderCheckpointCoordinator {
     required String currentLayoutFingerprint,
   }) {
     final checkpoint = _current;
-    if (checkpoint == null) return null;
+    if (checkpoint == null ||
+        checkpoint.formatVersion != ReaderCheckpoint.currentFormatVersion) {
+      return null;
+    }
     final exactExpected =
         checkpoint.state == ReaderCheckpointState.exactCommitted &&
         checkpoint.layoutFingerprint == currentLayoutFingerprint &&
@@ -568,7 +601,10 @@ class ReaderCheckpointCoordinator {
     required ReaderRestoreMatchStrategy strategy,
   }) {
     final checkpoint = _current;
-    if (checkpoint == null) return false;
+    if (checkpoint == null ||
+        checkpoint.formatVersion != ReaderCheckpoint.currentFormatVersion) {
+      return false;
+    }
     final matches = strategy == ReaderRestoreMatchStrategy.exactSignature
         ? visibleCard.signature == checkpoint.card?.signature
         : visibleCard.containsAnchor(checkpoint.semanticAnchor);

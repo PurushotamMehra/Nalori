@@ -6372,3 +6372,37 @@ P04 `ARCHITECTURAL_CORRECTION_REQUIRED`, P06 `REGRESSED_ON_DEVICE`,
 progress **46/89**, P07 **UNSTARTED**. Continue only the entry-proof prompt
 in the current report. The deferred scrubber cannot start until P06 device and
 stable-address/reopen gates pass.
+
+
+## IMPLEMENT-P04-LAZY-STABLE-BODY-002 — Versioned lazy persistence prerequisite
+
+Date: 2026-09-21. Branch `rescue/change-039-device-failure-2026-09-19`, starting
+HEAD `92bf7fe9fae6cf228ebd334fc9a2523f50ac3fc2`; no commit or Git mutation.
+Owner-authorized `nalori.lazy.stable-card` v1 and lazy checkpoint payload v2
+use the existing SQLite schema-1 journal. Complete section membership and
+stable source slices are separate from checked resident indexes. P05
+source/font/image/structure/layout validation remains active. Exact new-body
+admission requires production regeneration and full canonical-byte equality.
+
+Added explicit legacy exact, `semanticMigrationV1`, and `exactUnavailable`
+recovery outcomes. Migration commits only after target publication under the
+current owner, with epoch/revision/previous-checksum guards and transactional
+rollback. Old journal bytes survive unsuccessful recovery and remain as the
+prior row after successful conversion. Ordinary v1 paths cannot downgrade v2.
+
+R02/L02 and all other historical reds are unchanged. The new R03–R12/L03
+proofs, exact files, versions, commands, intermediate failures, final counts,
+and next bounded prompt are in
+[nalori-lazy-stable-body-proof.md](nalori-lazy-stable-body-proof.md).
+The final new-format suite reports 33 passed / 0 failed / 0 skipped, including
+direct SQLite row preservation/append audits. Observed per-generation maxima
+are 19 sources / 6 cards / 1 guard / 14 work entries / 14 entered sources;
+these do not prove aggregate handoff retention. Scoped analysis has no issues.
+The unchanged historical suite remains 15 passed / 9 failed. All 132 unique
+ordinary controls pass after fixing only the host SQLite loader path for the
+25-case checkpoint suite; no frozen tests changed.
+
+No snapshot handoff, ReaderScreen scheduling/seam, preemption, retention
+transfer, scrubber, device, P07, commit/amend/reset/rebase/push work. Existing
+untracked diagnostics remain untouched. P04 ARCHITECTURAL_CORRECTION_REQUIRED,
+P06 REGRESSED_ON_DEVICE, progress 46/89. No checklist item closed.

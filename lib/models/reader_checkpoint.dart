@@ -3,6 +3,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 
 import 'book_chunk.dart';
+import 'lazy_stable_card.dart';
 import 'stable_book_location.dart';
 
 /// Bump this whenever card boundaries or source-range interpretation changes.
@@ -434,6 +435,8 @@ class ReaderCheckpoint {
     this.card,
     this.stableLocation,
     this.targetLayoutSettings,
+    this.lazyStableBody,
+    this.lazyMigration,
   });
 
   final int formatVersion;
@@ -451,6 +454,42 @@ class ReaderCheckpoint {
   final String navigationSource;
   final Map<String, Object?>? targetLayoutSettings;
   final String integrityChecksum;
+  final LazyStableCardBody? lazyStableBody;
+  final String? lazyMigration;
+
+  /// Version 2 is reserved for the lazy stable-body domain. Version 1 creation
+  /// and validation retain the ordinary full-snapshot rules.
+  factory ReaderCheckpoint.createLazy({
+    required String bookId,
+    required LazyStableCardBody body,
+    required int sessionEpoch,
+    required int revision,
+    required int committedAtMillis,
+    String? migration,
+  }) {
+    final identity = body.identity;
+    final payload = <String, Object?>{
+      'formatVersion': 2,
+      'domain': 'nalori.lazy.checkpoint',
+      'bookId': bookId,
+      'publicationFingerprint': identity.publicationFingerprint,
+      'card': identity.toJson(),
+      'semanticAnchor': identity.firstMeaningfulAnchor().toJson(),
+      'layoutFingerprint': identity.layoutFingerprint,
+      'paginationVersion': identity.paginationVersion,
+      'state': ReaderCheckpointState.exactCommitted.name,
+      'sessionEpoch': sessionEpoch,
+      'revision': revision,
+      'committedAtMillis': committedAtMillis,
+      'navigationSource': migration ?? 'lazy_exact',
+      'lazyStableBody': body.toJson(),
+      if (migration != null) 'lazyMigration': migration,
+    };
+    return ReaderCheckpoint.fromPayload(
+      payload,
+      integrityChecksum: readerSha256(payload),
+    );
+  }
 
   factory ReaderCheckpoint.create({
     required String bookId,
@@ -500,8 +539,42 @@ class ReaderCheckpoint {
       throw const FormatException('Invalid checkpoint integrity checksum');
     }
     final version = (payload['formatVersion'] as num?)?.toInt();
-    if (version != currentFormatVersion) {
+    if (version != currentFormatVersion && version != 2) {
       throw const FormatException('Unsupported reader checkpoint version');
+    }
+    LazyStableCardBody? lazyBody;
+    if (version == 2) {
+      if (payload['formatVersion'] is! int ||
+          payload['domain'] != 'nalori.lazy.checkpoint' ||
+          payload['lazyStableBody'] is! Map ||
+          payload.containsKey('stableLocation') ||
+          payload.containsKey('targetLayoutSettings') ||
+          payload.keys.toSet().difference(const {
+            'formatVersion',
+            'domain',
+            'bookId',
+            'publicationFingerprint',
+            'card',
+            'semanticAnchor',
+            'layoutFingerprint',
+            'paginationVersion',
+            'state',
+            'sessionEpoch',
+            'revision',
+            'committedAtMillis',
+            'navigationSource',
+            'lazyStableBody',
+            'lazyMigration',
+          }).isNotEmpty) {
+        throw const FormatException('Invalid lazy checkpoint domain');
+      }
+      lazyBody = LazyStableCardBody.fromJson(
+        Map<String, Object?>.from(payload['lazyStableBody']! as Map),
+      );
+    } else if (payload.containsKey('domain') ||
+        payload.containsKey('lazyStableBody') ||
+        payload.containsKey('lazyMigration')) {
+      throw const FormatException('Lazy record presented as legacy');
     }
     final state = ReaderCheckpointState.values.firstWhere(
       (value) => value.name == payload['state'],
@@ -532,6 +605,8 @@ class ReaderCheckpoint {
           ? Map<String, Object?>.from(payload['targetLayoutSettings']! as Map)
           : null,
       integrityChecksum: integrityChecksum,
+      lazyStableBody: lazyBody,
+      lazyMigration: payload['lazyMigration'] as String?,
     );
     if (!checkpoint.isValid) {
       throw const FormatException('Incomplete reader checkpoint');
@@ -540,6 +615,29 @@ class ReaderCheckpoint {
   }
 
   bool get isValid {
+    if (formatVersion == 2) {
+      final body = lazyStableBody;
+      if (body == null ||
+          state != ReaderCheckpointState.exactCommitted ||
+          paginationVersion != body.identity.paginationVersion ||
+          stableLocation != null ||
+          targetLayoutSettings != null ||
+          canonicalJsonEncode(body.identity.toJson()) !=
+              canonicalJsonEncode(card?.toJson()) ||
+          (body.toJson()['section'] as Map)['bookId'] != bookId ||
+          canonicalJsonEncode(semanticAnchor.toJson()) !=
+              canonicalJsonEncode(
+                body.identity.firstMeaningfulAnchor().toJson(),
+              ) ||
+          (lazyMigration != null &&
+              lazyMigration != 'lazy_semantic_migration_v1')) {
+        return false;
+      }
+    } else if (formatVersion != currentFormatVersion ||
+        lazyStableBody != null ||
+        lazyMigration != null) {
+      return false;
+    }
     if (bookId.isEmpty ||
         publicationFingerprint.isEmpty ||
         layoutFingerprint.isEmpty ||
@@ -566,6 +664,7 @@ class ReaderCheckpoint {
 
   Map<String, Object?> payloadJson() => {
     'formatVersion': formatVersion,
+    if (formatVersion == 2) 'domain': 'nalori.lazy.checkpoint',
     'bookId': bookId,
     'publicationFingerprint': publicationFingerprint,
     if (card != null) 'card': card!.toJson(),
@@ -580,6 +679,8 @@ class ReaderCheckpoint {
     'navigationSource': navigationSource,
     if (targetLayoutSettings != null)
       'targetLayoutSettings': targetLayoutSettings,
+    if (lazyStableBody != null) 'lazyStableBody': lazyStableBody!.toJson(),
+    if (lazyMigration != null) 'lazyMigration': lazyMigration,
   };
 
   static StableBookLocation sanitizeStableLocation(

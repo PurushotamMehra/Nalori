@@ -1,5 +1,10 @@
 # IMPLEMENT-P04-LAZY-SNAPSHOT-HANDOFF-001: stopped entry proof
 
+Current prerequisite implementation: [IMPLEMENT-P04-LAZY-STABLE-BODY-002](nalori-lazy-stable-body-proof.md).
+That report records the authorized new payload versions and legacy recovery
+policy. The historical CHANGE-041 findings and red expectations below remain
+unchanged. Screen and retention gates remain open; progress is 46/89.
+
 ## Current continuation — CHANGE-20260921-041 (2026-09-21)
 
 **Stopped at the stable-address/legacy-recovery entry boundary. All three
