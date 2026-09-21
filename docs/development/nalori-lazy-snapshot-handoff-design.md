@@ -447,3 +447,158 @@ Bounded next-task prompt:
 
 Design completion is not correction implementation, device verification or
 permission to weaken these gates.
+
+## 11. Accepted navigation and performance amendment (2026-09-21)
+
+These are owner-approved acceptance requirements, not achieved claims. They
+amend the forward-looking design; prior failure evidence remains unchanged.
+
+**Adjacent reading** consumes a verified section-boundary receipt and immutable
+snapshot handoff. **Direct target preparation** serves chapter-list, bookmark,
+search-result, annotation and other stable-location jumps. Chapter 1 → chapter 6
+resolves chapter 6 from pinned spine/stable-location authority and parses,
+paginates and hands off through **zero** intermediate chapters. A chain of
+adjacent handoffs is never a random-access implementation.
+
+Direct target preparation must join identical requests, give the latest
+foreground demand publication ownership, preempt/cancel lower-priority warmup
+within one scheduler quantum, and keep the current readable card until the
+first target card is accepted. Only the target owning section and bounded
+necessary evidence may load. First readable target publication precedes
+hydration, derived indexing, speculative adjacent work and any awaited physical
+cache write. Stale/superseded work cannot publish. A direct target may eventually
+replace the visible range under explicit navigation authority; that replacement
+must never be used to disguise an adjacent handoff or error recovery.
+
+| Acceptance requirement | Target / evidence method |
+| --- | --- |
+| Already prepared card navigation | ≤100 ms on A059 |
+| Prefetched chapter boundary | ≤250 ms on A059 |
+| Cached/parsed direct chapter target | ≤250 ms on A059 |
+| Uncached ordinary direct chapter target | First readable card ideally ≤500 ms; hard target ≤1 second |
+| Intermediate chapters parsed for 1 → 6 | Zero, deterministic parser counters |
+| Awaited hydration/index/cache-write work before first target card | Zero, deterministic completion gates/order trace |
+| Foreground preemption | Within one scheduler quantum |
+| UI-isolate work | Cooperative ≤8 ms deterministic injected-clock slices |
+| ANR / Stop-Wait | Zero; debug must also avoid ANR/unbounded loops |
+
+Host tests use deterministic ordering/counters/injected scheduling, not wall
+clock timings. Final latency acceptance requires ordinary profile/release A059
+owner evidence. No device execution or latency achievement is asserted here.
+
+The chapter-card scrubber is separately deferred in the reliability plan as
+`DEFERRED-UX-CHAPTER-CARD-SCRUBBER-001`, UNSTARTED. It has no authority to expand
+this task into reader widget changes.
+
+## 12. Stable lazy source address proposal and explicit representation gate
+
+The smallest source address is a tuple, not a resident ordinal:
+
+`(publicationSpineAuthorityDigest, exactSectionIdentityDigest, localSourcePosition)`.
+
+The pinned publication/spine digest covers book/publication identity, index
+schema, parser/dependency revisions and ordered immutable spine tuples. Exact
+section ownership includes full checksum, parser/dependency evidence, stable
+spine item identity, normalized href/full path and linear/nonlinear scope.
+`localSourcePosition` is the parsed source position within that exact complete
+section, not the ordinal of a loaded window. Equal positions in different
+sections cannot alias. Preceding sections need not be parsed to derive it.
+
+An address names a source. Separate membership evidence binds source canonical
+bytes/digest and complete ordered section records/count. Reject insertion,
+removal, reordering, mutation, parser/dependency changes or a prefix that does
+not exactly preserve those records. Do not accept an address solely because its
+integer or text matches. Complete evidence that exceeds the source/byte bounds
+returns needs-evidence/bound failure, not an incomplete digest or truncation.
+
+A fragment carries the address plus a tagged interval: text UTF-16 start/end,
+table row interval and stable cell ownership where applicable, or atomic source
+extent for images/milestones. Structural/logical owner role, heading/list IDs,
+list marker/fragment metadata, publisher/rich-layout evidence and exact image
+bytes/metrics remain required. Source offsets are checked against the original
+section record; text/table/atomic coordinate systems are never interchanged.
+Empty sections use complete empty-section certificates, never invented sources.
+
+Runtime maps resolve `(address → resident slot)` and reverse mappings. A dense
+index is an optional checked hint only; it cannot affect stable card identity,
+persistence, restoration, bookmarks, annotations, projection authority or
+handoff. Ordering uses pinned spine order then local source/fragment order,
+not current list position. Address equality is independent of packing; the
+accepted dual-authority model separately checks all P05 metric, renderer,
+pagination/classifier, font, image and structural evidence. A matching address
+never authorizes an incompatible rendered card.
+
+**Representation gate:** Existing `BookChunk.toJson()['i']` and canonical slice
+`sourceOrdinalHint` are still encoded in current card/continuation/cache payloads.
+Their bytes are not to be normalized, deleted, reindexed or re-signed on accepted
+cards. The new lazy emission contract needs a distinct in-memory stable body
+with resident projections outside that body, from first emission onward. The
+ordinary full-snapshot P05 path and its F202/F208 remain unchanged. This paragraph
+specifies the separation, not a selected durable encoding, a schema migration,
+or permission to rewrite an old body. Before production adoption, prove stable
+body/signature/slice/layout bytes for A+B, direct B, eviction, backward and fresh
+reopen with production pagination and strict admission. The current R02 red
+must remain until that actual contract exists.
+
+## 13. Persistence and legacy recovery gate
+
+No durable encoding is selected by §12. Existing schema fields accepting strings
+or integers does not prove that a new address interpretation is backward
+compatible. A schema-free claim requires actual encode → close/reopen → bounded
+regenerate → exact signature/body/slices/layout validation, including old records
+and malformed/ambiguous inputs. The current test-only tuple is not that codec.
+
+Legacy recovery can succeed for a known exact original window: L01 persists a
+real old F202/F208 checkpoint, reopens SQLite and regenerates exact original
+cards in the small fixture. This is conditional evidence, not a deterministic
+way to discover an arbitrary missing historical window. L02 records that a
+window-only composite change currently permits semantic restoration under
+`layout_changed`; this is not authorized recovery for the new protocol. Preserve
+user records; do not silently choose that result, reset, re-sign or delete them.
+
+If exact original evidence is unavailable within aggregate bounds, stop for
+DEC-REQ-001/002 and evaluate these explicit alternatives:
+
+1. **Versioned lazy checkpoint/address migration:** separately authorize the
+   encoding, version discrimination, exact conversion criteria and rollback;
+   preserve old records. Never manufacture new exact authority from text alone.
+2. **Typed exact-unavailable:** preserve checkpoint and user data, retain any
+   already readable publication, and expose explicit retry/recovery. The owner
+   must choose the missing/cold-reader UX; existing nullable restore results do
+   not themselves constitute a typed UI outcome.
+3. **Bounded authoritative reconstruction:** enumerate only candidates whose
+   original window and compatibility evidence are actually available; require
+   the original signature and full bytes. Enforce 432 sources/96 cards/25 guards
+   and 110/158 work envelopes globally, including simultaneous private attempts.
+   Failure/exhaustion preserves the checkpoint. L01's known 18-source fixture
+   is not proof for every historical window or oversized section.
+4. **Restoration UX:** decide blocking retry, explicit user-authorized reset or
+   another nonapproximate outcome under DEC-REQ-001/002. No option is implicitly
+   selected by this design amendment.
+
+## 14. Mandatory direct-target and address entry gates
+
+The adjacent-work test handle currently exposes no direct stable-target entry
+and no awaitable first-target-card acceptance event. `prepareNavigation` service
+counters can prove which sections parsed, but cannot prove the old visible
+publication remained readable or when its successor was accepted. Required
+future narrow seam: delegate to `_navigateToStableLocation`, expose read-only
+navigation owner/publication identity and existing target acceptance/settlement
+completion; hold actual parse/pagination work through existing hooks. Do not
+introduce an alternate coordinator or a broad reader control API.
+
+D01 service evidence: chapter 1 → 6 parses only `[0,5]` (zero-based).
+D02: an explicit target remains queued behind a held chapter-7 boundary prefetch
+until parser release. The service does not meet the preemption acceptance gate.
+`LazySectionRepository._loadSectionUnshared` additionally awaits
+`_cache.writeSection` before returning parsed work; first-card-before-awaited-
+physical-write remains an explicit gate. Neither finding is device timing.
+
+The real-screen direct-target test must prove old publication retention, zero
+intermediate parsing, current/latest foreground ownership, identical-demand
+join, lower-priority preemption and first-card ordering. No pre-handoff approval
+is possible from service counters alone. Address/legacy/retention and H01–H06
+truth remain independent gates. See the [current entry-proof report](nalori-lazy-snapshot-handoff-entry-proof.md)
+and [address inventory](nalori-lazy-source-address-inventory.md) for commands,
+counts and exact unresolved coverage. The report's current bounded prompt
+supersedes the earlier next-task prompt while these entry blockers remain.

@@ -12,10 +12,12 @@ import 'package:nalori/services/lazy_parsed_book.dart';
 import 'package:nalori/services/lazy_section_repository.dart';
 import 'package:nalori/services/parsed_section_cache_service.dart';
 import 'package:nalori/services/reader_card_paginator.dart';
+import 'package:nalori/services/reader_checkpoint_store.dart';
 import 'package:nalori/services/reader_font_evidence_gate.dart';
 import 'package:nalori/services/reader_layout_contract_service.dart';
 
 import '../pagination/reader_core_pagination_harness.dart';
+import '../support/reader_contract_sandbox.dart';
 
 // Entry precondition, not a handoff implementation. Use the selected stable
 // packing tuple as the existing paginator's controlled identity, with each
@@ -28,7 +30,11 @@ void main() {
   });
   tearDownAll(() => fixture.close());
 
-  Future<_Run> generate(WidgetTester tester, {required bool precedingA}) async {
+  Future<_Run> generate(
+    WidgetTester tester, {
+    required bool precedingA,
+    bool legacy = false,
+  }) async {
     final lazy = LazyBookSession(
       repository: LazySectionRepository(
         cache: ParsedSectionCacheService(
@@ -176,9 +182,10 @@ void main() {
       (owner) =>
           owner.sectionIdentity == window.sections.last.identity.stableKey,
     );
+    final controlledIdentity = legacy ? contract.identity : packing;
     final session = CanonicalReaderPaginationSession(
       sourceSnapshot: snapshot,
-      controlledLayoutIdentity: packing,
+      controlledLayoutIdentity: controlledIdentity,
       layout: layout,
     );
     final result = await session.generateInitial(
@@ -202,7 +209,7 @@ void main() {
       bookId: index.bookId,
       publicationFingerprint: index.publicationFingerprint,
       semanticAnchor: card.identity.firstMeaningfulAnchor(),
-      layoutFingerprint: packing,
+      layoutFingerprint: controlledIdentity,
       state: ReaderCheckpointState.exactCommitted,
       sessionEpoch: 1,
       revision: 1,
@@ -315,6 +322,99 @@ void main() {
       );
     },
   );
+  for (final exactWindow in [true, false]) {
+    testWidgets(
+      exactWindow
+          ? 'L01 CONTROL legacy checkpoint persists and exact bounded original window reconstructs'
+          : 'L02 RED changed window alone must not authorize legacy semantic restoration',
+      (tester) async {
+        final original = await generate(tester, precedingA: true, legacy: true);
+        final sandbox = (await tester.runAsync(ReaderContractSandbox.create))!;
+        try {
+          final writer = (await tester.runAsync(
+            () async => sandbox.createCheckpointStore(),
+          ))!;
+          await tester.runAsync(() async {
+            expect(await writer.beginSession(original.checkpoint.bookId), 1);
+            expect((await writer.commit(original.checkpoint)).applied, isTrue);
+            await writer.close();
+          });
+          final reopenedStore = (await tester.runAsync(
+            () async => sandbox.createCheckpointStore(),
+          ))!;
+          final coordinator = ReaderCheckpointCoordinator(
+            store: reopenedStore,
+            bookId: original.checkpoint.bookId,
+            publicationFingerprint: original.checkpoint.publicationFingerprint,
+          );
+          await tester.runAsync(() => coordinator.initialize());
+          expect(
+            coordinator.current!.payloadJson(),
+            original.checkpoint.payloadJson(),
+          );
+          // Regenerate only after the durable store was closed and reopened.
+          final reconstructed = await generate(
+            tester,
+            precedingA: exactWindow,
+            legacy: true,
+          );
+          expect(
+            original.contract.identities.layoutMetricsFingerprint,
+            reconstructed.contract.identities.layoutMetricsFingerprint,
+          );
+          final resolution = coordinator.resolveRestore(
+            cards: [reconstructed.card.identity],
+            currentLayoutFingerprint: reconstructed.contract.identity,
+          );
+          expect(
+            coordinator.current!.payloadJson(),
+            original.checkpoint.payloadJson(),
+          );
+          expect(coordinator.ordinaryWritesEnabled, isFalse);
+          if (exactWindow) {
+            expect(
+              resolution!.strategy,
+              ReaderRestoreMatchStrategy.exactSignature,
+            );
+            expect(
+              reconstructed.card.card.toJson(),
+              original.card.card.toJson(),
+            );
+            expect(_slices(reconstructed.card), _slices(original.card));
+            expect(
+              reconstructed.card.resolvedLayout,
+              original.card.resolvedLayout,
+            );
+          } else {
+            expect(
+              reconstructed.card.identity.signature,
+              isNot(original.card.identity.signature),
+            );
+            // The existing exact-missing branch itself fails closed.
+            expect(
+              coordinator.resolveRestore(
+                cards: [reconstructed.card.identity],
+                currentLayoutFingerprint: original.contract.identity,
+              ),
+              isNull,
+            );
+            // ignore: avoid_print
+            print(
+              'LEGACY changedWindow strategy=${resolution?.strategy.name} reason=${resolution?.fallbackReason} checkpointPreserved=true',
+            );
+            expect(
+              resolution,
+              isNull,
+              reason:
+                  'Window-only F202/F208 change is not genuine reflow; preserve legacy checkpoint and require explicit exact-unavailable.',
+            );
+          }
+        } finally {
+          await tester.runAsync(sandbox.close);
+        }
+      },
+    );
+  }
 }
 
 List<Map<String, Object?>> _slices(CanonicalFinalizedReaderCard card) => [

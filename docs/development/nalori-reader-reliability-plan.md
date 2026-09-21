@@ -6,6 +6,15 @@ Plan status: P00/P01 complete, P02 core complete at 7/8 with its optional task d
 
 Current scoped design: [canonical lazy snapshot handoff](nalori-lazy-snapshot-handoff-design.md), task `DESIGN-P04-LAZY-SNAPSHOT-HANDOFF`. Next task is `IMPLEMENT-P04-LAZY-SNAPSHOT-HANDOFF-001`, whose entry proofs and bounded prompt are in section 10 of that design. Neither identifier adds a historical checklist task or changes the 89-task denominator. Recovery commit `a130bda2785a57ed2e94ae3fd0630572d3f9d010` and the five protected diagnostic files remain immutable evidence.
 
+Latest entry proof: `CHANGE-20260921-041` amends navigation/performance requirements
+and records the [source-address inventory](nalori-lazy-source-address-inventory.md)
+and [current stopped entry report](nalori-lazy-snapshot-handoff-entry-proof.md).
+The report's current bounded prompt supersedes the earlier next-task wording.
+Address witness controls pass, but exact payload reopen, held-speculation
+preemption and legacy window-only semantic fallback remain red. All three
+implementation-entry gates remain unsatisfied; production handoff is not
+authorized. The chapter-local scrubber in §7A is deferred and UNSTARTED.
+
 `CHANGE-20260913-036` is a non-task independent audit of P06-004/P06-005. It
 strengthens exact memory scope, strict-admission provenance, asynchronous
 freshness ordering and stable-start replacement anchoring. At that audit point
@@ -1123,6 +1132,55 @@ close P06 after the latest device regression.
 | --- | --- | --- | ---: | --- | --- |
 | NOT_STARTED | All `REQ-*` | P04–P10 | 0 / 9 | — | All repair phases plus owner manual-device evidence |
 
+## 7A. Accepted handoff-entry amendments and deferred UX (2026-09-21)
+
+CHANGE-20260921-041 records plan/proof work under
+`IMPLEMENT-P04-LAZY-SNAPSHOT-HANDOFF-001`, not a completed implementation task.
+The [handoff design §§11–14](nalori-lazy-snapshot-handoff-design.md) now requires
+separate adjacent receipt/handoff and direct stable-target preparation. A
+chapter 1 → 6 target must parse zero intermediate chapters, retain the old
+readable card until acceptance, join identical demand, give latest foreground
+demand ownership, preempt speculation within one quantum and publish before
+hydration/indexing/speculation/awaited physical cache writes.
+
+Acceptance targets, not achievements: prepared navigation ≤100 ms; prefetched
+boundary and cached/parsed chapter target ≤250 ms; uncached ordinary target
+ideally ≤500 ms/hard ≤1 second; deterministic injected-clock UI slices ≤8 ms;
+zero ANR/Stop-Wait, including no debug unbounded loop. Host evidence uses counters
+and scheduling gates; final latency belongs to ordinary profile/release A059.
+The stable address and exact reopen gate, full screen direct-target gate and
+DEC-REQ-001/002 remain open; P07 remains unstarted.
+
+Current evidence: combined address/direct/reopen tests **13 passed / 3 failed**
+(D02, R02, L02); unchanged P05/backward/H characterization **101 passed / 4
+failed** (H01–H04). Known-original-window legacy SQLite reopen is exact in L01;
+bounded discovery of an arbitrary historical window and actual recovery UI are
+unproved. Per new reconstruction session maxima: 2 cards, 1 guard, 18 sources,
+4 generation entries/entered sources. These are not aggregate two-handoff or
+oversized-section bounds. No stable persistent encoding is chosen. See the
+entry report for exact commands, mutation-proof limits and required decisions.
+
+### DEFERRED-UX-CHAPTER-CARD-SCRUBBER-001 — Replace whole-book scrubber with chapter-local card scrubber
+
+Status: **UNSTARTED / DEFERRED**, plan only. Excluded from the existing 89-task
+historical denominator; adds zero completed tasks. Start only after both the P06
+device exit gate and stable-address/reopen gate are satisfied.
+
+- Remove the draggable whole-book scrubber; show only current-chapter card
+  navigation, such as Card X of Y.
+- Drag/select may navigate only within the current chapter. It must never
+  request, parse, hydrate or paginate another chapter.
+- The chapter list remains the explicit cross-chapter mechanism and uses direct
+  target preparation, never repeated adjacent handoffs.
+- If the exact chapter card count is unavailable, do not invent an exact total
+  or delay first-card publication to calculate it. Later design must select
+  progressive, temporarily disabled or bounded current-chapter-only completion.
+- Current-chapter background completion stays low priority and demand-preemptible.
+- Font/layout changes invalidate only the chapter-local card count.
+- No whole-book dense card number becomes stable or persisted identity.
+- No scrubber implementation, reader widget change or UI-test change is part of
+  this amendment.
+
 ## 8. Trusted test architecture
 
 The trusted suite should be a small hierarchy under a proposed `test/reader_contract/` root. These paths are design targets, not files that exist today.
@@ -1313,7 +1371,7 @@ P06/P11 must record old/new formats, bytes retained, eviction behaviour, migrati
 | P10 — Legacy-test reconciliation | NOT_STARTED | 0 | 7 | No | No | P03–P09 replacement evidence | — |
 | P11 — Release gate/handoff | NOT_STARTED | 0 | 9 | No | No | P04–P10 and owner device evidence | — |
 
-Overall: 46 of 89 tasks remain historically complete. No checklist task was added, unchecked or renumbered. P03 is 7/7, P04 is 8/8 with its lazy-input/publication gate `ARCHITECTURAL_CORRECTION_REQUIRED`, P05 is 7/7, and P06 is `REGRESSED_ON_DEVICE` at 7/7. CHANGE-040 is design and red characterization only. Fixed-snapshot P03–P06 evidence remains historical evidence; it does not establish lazy handoff, failure settlement, bounded post-failure work or physical-device acceptance. P04/P06 gates remain open and P07 is unstarted. The next bounded task is IMPLEMENT-P04-LAZY-SNAPSHOT-HANDOFF-001, subject to the three implementation-entry proofs in the handoff design. TASK-P02-004 remains deferred and nonblocking. No production correction, schema change or device run was made by CHANGE-040.
+Overall: 46 of 89 tasks remain historically complete. No historical checklist task was added, unchecked or renumbered. The separate deferred scrubber item is UNSTARTED and excluded from this denominator. P03 is 7/7, P04 is 8/8 with its lazy-input/publication gate `ARCHITECTURAL_CORRECTION_REQUIRED`, P05 is 7/7, and P06 is `REGRESSED_ON_DEVICE` at 7/7. CHANGE-040 is design and red characterization only. Fixed-snapshot P03–P06 evidence remains historical evidence; it does not establish lazy handoff, failure settlement, bounded post-failure work or physical-device acceptance. P04/P06 gates remain open and P07 is unstarted. The next bounded task is IMPLEMENT-P04-LAZY-SNAPSHOT-HANDOFF-001, subject to the three implementation-entry proofs in the handoff design. TASK-P02-004 remains deferred and nonblocking. No production correction, schema change or device run was made by CHANGE-040.
 
 ## 14. Definition of release-ready
 

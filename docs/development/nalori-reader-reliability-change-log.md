@@ -6263,3 +6263,112 @@ whole-book parsing, relaxed validation or P07. Stop for a further design
 decision if the required exact restoration or source-address-space proofs
 cannot be satisfied within those limits. Owner A059 verification remains
 mandatory after a future correction; the 55 passing controls do not close it.
+
+## CHANGE-20260921-041 — Stable lazy address/reopen entry characterization and plan amendment
+
+Task: **IMPLEMENT-P04-LAZY-SNAPSHOT-HANDOFF-001**, bounded proof/design
+continuation only. Date: 2026-09-21. No completed checklist task added.
+
+### Starting/final authority and protected scope
+
+Branch `rescue/change-039-device-failure-2026-09-19`; HEAD remains
+`008989ca3457e5ed6c3fdb48b8d1337f8fbbbea4`. Prior proof
+`7f226c7268fbcc1212eab82cb4eb4b955f364f32`, design
+`4ad765d8a56fe88d0b4917b351cdab2672d251b7`, and recovery
+`a130bda2785a57ed2e94ae3fd0630572d3f9d010` are unchanged. Tracked tree was
+clean at entry; the five existing untracked diagnostic files were untouched.
+No production file/schema/version/frozen oracle edit, device execution,
+commit/amend/reset/rebase/push or P07 work.
+
+### Files and accepted decisions
+
+- Updated `nalori-lazy-snapshot-handoff-design.md` §§11–14: separate adjacent
+  handoff from direct targeting; stable source tuple and exact-body gate;
+  first-card ordering, foreground preemption and A059 targets recorded as
+  requirements; persistence/legacy alternatives and missing screen seam.
+- Updated `nalori-reader-reliability-plan.md`: accepted requirements plus
+  **DEFERRED-UX-CHAPTER-CARD-SCRUBBER-001**, UNSTARTED outside 89-task denominator.
+  No widget/scrubber implementation.
+- Added `nalori-lazy-source-address-inventory.md`: 321 resolved expressions,
+  280 unique file/line/kind records grouped into 145 file/symbol entries,
+  supplemented by codecs/declarations/projection/checkpoint consumers.
+- Updated `nalori-lazy-snapshot-handoff-entry-proof.md` with current evidence,
+  stop conditions and bounded subsequent prompt; historical evidence retained.
+- Added `test/reader_contract/regression/lazy_source_address_entry_test.dart`
+  and `lazy_direct_target_entry_test.dart`, plus isolated
+  `support/lazy_address_fixture.dart`. No frozen fixture was modified.
+- Extended `lazy_snapshot_handoff_reopen_payload_test.dart` with L01/L02
+  real SQLite checkpoint persistence/reopen/coordinator tests. R01/R02
+  expectations unchanged.
+
+Minimal address proposal is publication/spine authority + exact stable section
+identity + section-local source position, with separately authenticated full
+ordered membership and fragment offsets. Test witness is not a codec or new
+production validator. Equal local positions in different sections do not alias;
+actual lazy eviction/reload preserves that comparison tuple. Source insertion,
+removal, reorder, text/parser/dependency/image-byte injection/structure
+mutations reject against the captured witness. Production emitted exact body
+still differs (`i/hint 14` versus `0`); no normalization, re-signing,
+F202/F208 override or retained-card rewrite.
+
+D01 parses only chapter 1 and target chapter 6 (`[0,5]`), zero intermediates.
+D02 cannot start target parsing while a speculative chapter-7 parser holds the
+single work slot. This is service evidence only; direct first-card acceptance
+and retained old visible publication need the exact narrow screen seam recorded
+in design §14. Repository cache write is still awaited before parse return.
+
+L01 proves exact legacy recovery **when the original A+B window is known**,
+through production persistence, paginator and snapshot-bound P05 contracts.
+L02 finds actual `semanticAnchor / layout_changed` on a window-only composite
+change with unchanged metrics. The original checkpoint is preserved; no
+semantic settlement or user-data mutation was performed. Universal bounded
+historical-window discovery and mounted retry/exact-unavailable UI are not
+proved. Stop for DEC-REQ-001/002 before selecting migration or recovery UX.
+
+### Exact validation
+
+```sh
+rtk flutter test --no-pub --reporter expanded test/reader_contract/regression/lazy_source_address_entry_test.dart test/reader_contract/regression/lazy_direct_target_entry_test.dart test/reader_contract/regression/lazy_snapshot_handoff_reopen_payload_test.dart
+rtk flutter test --no-pub --reporter expanded test/reader_contract/layout/reader_layout_contract_shared_test.dart test/reader_contract/layout/reader_font_evidence_gate_test.dart test/reader_contract/layout/reader_compatibility_classifier_test.dart test/reader_contract/pagination/reader_card_paginator_backward_preparation_test.dart test/reader_contract/regression/lazy_snapshot_handoff_characterization_test.dart
+rtk flutter test --no-pub --reporter expanded test/reader_contract/regression/lazy_source_address_entry_test.dart
+rtk dart analyze test/reader_contract/regression/lazy_source_address_entry_test.dart test/reader_contract/regression/lazy_direct_target_entry_test.dart test/reader_contract/regression/lazy_snapshot_handoff_reopen_payload_test.dart test/reader_contract/regression/support/lazy_address_fixture.dart
+rtk git diff --check
+```
+
+- Combined new proof: **13 passed / 3 failed / 0 skipped**, exit 1.
+  D02: `Expected: true; Actual: false`, explicit target queued behind held
+  boundaryPrefetch. R02: `['payload']['i'] is <0> instead of <14>`.
+  L02: `Expected: null; Actual: ReaderRestoreResolution`,
+  `semanticAnchor / layout_changed`.
+- Controls/characterization: **101 passed / 4 failed / 0 skipped**, exit 1.
+  P05 90/0, fixed-snapshot backward 10/0, H 1/4. H01 actual
+  `terminalBookEnd`; H02/H03 `terminalStateContradiction: A terminal
+  continuation cannot be resumed.`; H04 expected true/actual false.
+- Final standalone witness: **10 passed / 0 failed / 0 skipped**, exit 0.
+- Final scoped analysis: **No issues found**, exit 0. Whitespace check clean.
+- Focused direct and L0 runs each **1 passed / 1 failed / 0 skipped**, exit 1.
+  Earlier source setup **9/1/0** (missing fixture image) and cancelled L0
+  fake-zone SQLite setup (exit 130, no completed count) are disclosed in the
+  entry report, not counted as product evidence.
+- P05 F001–F211 controls unchanged; record maxima 4696/1462/1728 bytes remain
+  ordinary P05 evidence. H01–H06 truth and earlier S01/K02 reds preserved.
+
+### Bounds, decisions and remaining gates
+
+Per new paginator reconstruction: **2 cards / 1 guard / 18 sources /
+4 consumed generation entries / 4 entered sources**. Not aggregate transfer
+bounds. No two-handoff/empty/oversized/backward lazy proof; no assertion of
+nonmultiplication of 96/25/432/110–158 caps. Ten green backward controls use
+fixed snapshots only.
+
+**All three implementation-entry gates remain unsatisfied. Production handoff
+is not authorized.** Remaining decisions are representation/persistence and
+legacy exact-unavailable/recovery under DEC-REQ-001/002, not reconsideration
+of the accepted dual-authority architecture. Evaluate versioned migration
+preserving originals, typed exact-unavailable with owner-chosen UX, or proved
+bounded authoritative reconstruction. No alternative was silently chosen.
+
+P04 `ARCHITECTURAL_CORRECTION_REQUIRED`, P06 `REGRESSED_ON_DEVICE`,
+progress **46/89**, P07 **UNSTARTED**. Continue only the entry-proof prompt
+in the current report. The deferred scrubber cannot start until P06 device and
+stable-address/reopen gates pass.
