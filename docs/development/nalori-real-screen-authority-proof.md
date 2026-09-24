@@ -394,6 +394,10 @@ their earlier 16/8 result is classified below and is not included in the 286.
 
 ### Default isolate cancellation: exact unverified behavior
 
+Historical status at the close-only checkpoint: the gap below is now closed
+by the separately authorized default-parser host verification appended below.
+The original search findings and cooperative-parser limitations are preserved.
+
 **No existing test was found that exercises cancellation of the DEFAULT isolate
 parser and asserts physical worker exit before single-slot reuse.** Search of
 `test/` for isolate/worker exit, cancellation and parser references, followed by
@@ -488,3 +492,137 @@ No retention/handoff audit or implementation was started. The earlier next-task
 prompt remains unexecuted. P04 and P06 stay open at **46/89**, P07 unstarted.
 This closes the requested verification/reporting pass, not the broader P04/P06
 acceptance gates.
+
+
+## Default parser isolate verification — 2026-09-25
+
+This follow-up closes only the default-parser cancellation/physical-exit/
+single-slot-reuse verification gap. Baseline and unchanged HEAD:
+`89b5e45c346987725f2b638d77b722da5a496b6d`, on
+`rescue/change-039-device-failure-2026-09-19`. The prior **286/286** final-tree
+verification remains historical evidence for that baseline; it was **not rerun**
+and is not counted as verification of this follow-up's edits.
+
+### Narrow change and proof mechanism
+
+The repository accepts optional `LazyParserIsolateTestAccess`. It does not
+replace the parser: tests omit the repository's `parser` argument and execute
+`_defaultLazySectionParser` → production `Isolate.spawn` → `_parseSectionWorker`
+→ `EpubParserService.parseLazySection`. Only when the optional hook is supplied,
+the real worker sends a startup acknowledgement containing a resume port and
+waits on that port before parsing. The parent observes spawn requests, results,
+kill calls and the existing VM `onExit` notification. Test callbacks themselves
+stay in the parent isolate; only a send port crosses into the worker.
+
+The production cancellation token, `Isolate.immediate` kill, awaited exit,
+post-result authority check and coordinator `whenComplete` slot release are
+unchanged. No worker lifecycle defect was exposed, so no correction to those
+algorithms was needed. The optional startup branch adds an async worker return
+type; with no hook, parsing proceeds directly. I04 explicitly exercises that
+unhooked path.
+
+`started` is an acknowledgement from inside the actual worker. `exited` is
+observed only from its VM exit port, not inferred from cancellation or future
+settlement. The counter conservatively spans **before spawn through observed
+exit**. Its maximum of one bounds simultaneously live physical workers by one;
+it is not a sampled OS thread count. I01 also asserts the old observed exit
+precedes the successor's spawn request, and zero active coordinator jobs after
+completion. This closes the gap that the earlier injected cooperative A01
+could not prove.
+
+All fixtures use the existing small three-section EPUB builder. No sleeps,
+large inputs or elapsed-time assertions arrange the races. Per-test 45-second
+timeouts detect hangs only. No timeout fired. These are host lifecycle proofs,
+not device or throughput measurements.
+
+### Focused assertions (five test cases)
+
+| Test | Production evidence and assertions |
+| --- | --- |
+| I01 | Hold the actual speculative worker after its startup acknowledgement; submit unrelated foreground `prepareNavigation`. Both matching speculative waiters throw `SharedSectionWorkCancelled`; old worker is killed and exits before the new worker spawns. Exactly one old spawn, maximum live interval count one, successor window/current location/loaded and retained section are all section 1, and active jobs end at zero. Sending to the dead worker's resume port cannot resurrect a result. No old result, physical write or old cache entry exists. |
+| I02 | Close the real session with an acknowledged active worker and another queued request. Active and queued requests both cancel; exit precedes close completion, queued worker never spawns, active jobs are zero and current/loaded/retained state is empty. No result or physical cache entry survives. |
+| I03 supersession | Let the real worker parse and return its result. At the parent's result observation, submit the next foreground request before production admission. The old navigation future throws cancellation; only the successor enters the session/window and retained cache. Old worker exit still precedes successor spawn; no physical write or old cache entry exists. |
+| I03 close | Close at the same actual-result observation boundary. Old navigation throws cancellation after worker exit; close completes with empty session/retained state, no active jobs and no physical write or old cache entry. |
+| I04 | No hook and no injected parser. Production parsing returns section 1 with matching source checksum, current parser version, expected `Section 2 text.` content and `s2` anchor. Navigation succeeds and coordinator jobs drain. |
+
+I03 observes the real parser result before its cancellation admission check;
+it does not fabricate a parsed section or successful publication. The rejected
+old navigation supplies no prepared window to publish or persist. These focused
+tests cover repository/session admission and physical worker lifecycle; mounted
+ReaderScreen card publication remains covered by the prior 21-case suite,
+which was not repeated here.
+
+### Actual final-run lifecycle traces
+
+Spine indices below are zero-based. These are recorded final-run traces, with
+the necessary ordering edges asserted by the tests:
+
+```text
+I01 [spawnRequested:0, started:0, killSent:0, exited:0,
+     spawnRequested:1, started:1, resultReceived:1, exited:1]
+I02 [spawnRequested:0, started:0, killSent:0, exited:0, closeCompleted]
+I03-supersede [spawnRequested:0, started:0, resultReceived:0,
+              foregroundRequested, exited:0, oldSettledCancelled,
+              spawnRequested:1, started:1, resultReceived:1, exited:1]
+I03-close [spawnRequested:0, started:0, resultReceived:0,
+           closeRequested, exited:0, oldSettledCancelled]
+```
+
+Every observed case recorded `maxSpawnToExit=1` and `writes=[]`.
+
+### Commands and completed results
+
+Working directory: `/home/uttam/Desktop/Antigravity Projects/Nalori`.
+Host Flutter/Dart SDK cache access was approved. SQLite overrides were not
+needed for these focused service tests. Initial execution:
+
+```sh
+rtk dart format lib/services/lazy_section_repository.dart test/unit/services/default_lazy_parser_isolate_test.dart
+rtk flutter test --no-pub --reporter expanded test/unit/services/default_lazy_parser_isolate_test.dart > /tmp/nalori-default-isolate-focused-1.log 2>&1
+rtk flutter test --no-pub --reporter expanded test/unit/services/lazy_section_repository_test.dart test/unit/services/shared_lazy_section_work_coordinator_test.dart test/unit/services/lazy_book_session_test.dart > /tmp/nalori-default-isolate-controls.log 2>&1
+rtk dart analyze lib/services/lazy_section_repository.dart test/unit/services/default_lazy_parser_isolate_test.dart
+```
+
+Initial format exited 0. Focused tests: **5 passed, 0 failed, 0 skipped**, exit 0.
+Affected controls: **39 passed, 0 failed, 0 skipped**, exit 0. Initial analysis
+exited 0 but reported two info findings (`avoid_void_async` and
+`curly_braces_in_flow_control_structures`). Both were corrected in the added
+code. This justified one final focused verification of those edits:
+
+```sh
+rtk dart format lib/services/lazy_section_repository.dart test/unit/services/default_lazy_parser_isolate_test.dart
+rtk flutter test --no-pub --reporter expanded test/unit/services/default_lazy_parser_isolate_test.dart test/unit/services/lazy_section_repository_test.dart test/unit/services/shared_lazy_section_work_coordinator_test.dart test/unit/services/lazy_book_session_test.dart > /tmp/nalori-default-isolate-final.log 2>&1
+rtk dart analyze lib/services/lazy_section_repository.dart test/unit/services/default_lazy_parser_isolate_test.dart
+rtk proxy git diff --check
+```
+
+Final format: exit 0, two files checked, no formatting changes.
+Final focused plus affected controls: **44 passed, 0 failed, 0 skipped**, exit 0,
+completed reporter tail `00:01 +44: All tests passed!`, process exited normally.
+Final scoped analysis: **No issues found**, exit 0. Diff check: exit 0.
+The 44 are **5 focused + 39 controls**, not 88 distinct cases across the two
+runs. No command hung and no broad matrix was repeated. Only this report was
+edited after the final test run.
+
+### Checkpoint files and remaining gates
+
+Exactly three files belong to this follow-up checkpoint:
+
+```text
+lib/services/lazy_section_repository.dart
+test/unit/services/default_lazy_parser_isolate_test.dart
+docs/development/nalori-real-screen-authority-proof.md
+```
+
+The five pre-existing untracked artifacts remain outside this scope and were
+not edited. No existing test expectations, protected diagnostics, frozen
+oracles, stable-body/checkpoint schemas or P05 validators changed. No commit,
+staging, push, reset, device run, handoff, retention transfer or scrubber work
+was performed.
+
+The requested default-parser host cancellation/exit/reuse gap is closed. The
+prior eight historical failures and their individual classifications remain
+unchanged; no historical suite was rerun or suppressed. This follow-up provides
+no snapshot handoff or retention-transfer acceptance. P04 and P06 remain open,
+progress **46/89**, P07 unstarted. No additional implementation is authorized by
+this completion report.

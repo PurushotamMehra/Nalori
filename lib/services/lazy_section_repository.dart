@@ -318,6 +318,23 @@ final class _SharedSectionJob {
   SharedSectionJobState state = SharedSectionJobState.queued;
 }
 
+/// Observations around the real default parser; no replacement parser or exit.
+@visibleForTesting
+enum LazyParserIsolateEvent { spawnRequested, resultReceived, killSent, exited }
+
+@visibleForTesting
+final class LazyParserIsolateTestAccess {
+  const LazyParserIsolateTestAccess({required this.onStarted, this.onEvent});
+
+  /// The real worker acknowledges startup, then waits for this port's message.
+  final void Function(LazySectionIdentity identity, SendPort resume) onStarted;
+  final void Function(
+    LazySectionIdentity identity,
+    LazyParserIsolateEvent event,
+  )?
+  onEvent;
+}
+
 final class LazySectionParseRequest {
   const LazySectionParseRequest({
     required this.identity,
@@ -327,6 +344,7 @@ final class LazySectionParseRequest {
     required this.resourceMediaTypes,
     required this.footnoteContentById,
     this.cancellation,
+    this.isolateTestAccess,
   });
 
   final LazySectionIdentity identity;
@@ -336,6 +354,7 @@ final class LazySectionParseRequest {
   final Map<String, String> resourceMediaTypes;
   final Map<String, String> footnoteContentById;
   final LazySectionWorkCancellation? cancellation;
+  final LazyParserIsolateTestAccess? isolateTestAccess;
 }
 
 typedef LazySectionParser =
@@ -347,6 +366,7 @@ final class LazySectionRepository {
     ParsedSectionCacheService? cache,
     SharedLazySectionWorkCoordinator? workCoordinator,
     LazySectionParser? parser,
+    this.isolateTestAccess,
     int retainedSectionLimit = 3,
     int retainedSectionByteBudget = 6 * 1024 * 1024,
   }) : _indexService = indexService ?? LazyEpubIndexService(),
@@ -361,6 +381,8 @@ final class LazySectionRepository {
   final ParsedSectionCacheService _cache;
   final SharedLazySectionWorkCoordinator _workCoordinator;
   final LazySectionParser _parser;
+  @visibleForTesting
+  final LazyParserIsolateTestAccess? isolateTestAccess;
   final int _retainedSectionLimit;
   final int _retainedSectionByteBudget;
   final _retained = <int, ParsedSection>{};
@@ -670,6 +692,7 @@ final class LazySectionRepository {
       LazySectionParseRequest(
         identity: identity,
         cancellation: cancellation,
+        isolateTestAccess: isolateTestAccess,
         html: sectionResource.html,
         section: section,
         resourceBytes: resources.bytes,
@@ -966,7 +989,16 @@ Future<ParsedSection> _defaultLazySectionParser(
 ) async {
   final results = ReceivePort();
   final exits = ReceivePort();
-  final exited = exits.first;
+  final access = request.isolateTestAccess;
+  void observe(LazyParserIsolateEvent event) =>
+      access?.onEvent?.call(request.identity, event);
+  final exited = exits.first.then(
+    (_) => observe(LazyParserIsolateEvent.exited),
+  );
+  final startup = access == null ? null : ReceivePort();
+  final startupSubscription = startup?.listen((resume) {
+    access!.onStarted(request.identity, resume as SendPort);
+  });
   final payload = (
     identity: request.identity,
     html: request.html,
@@ -975,9 +1007,11 @@ Future<ParsedSection> _defaultLazySectionParser(
     resourceMediaTypes: request.resourceMediaTypes,
     footnoteContentById: request.footnoteContentById,
   );
+  observe(LazyParserIsolateEvent.spawnRequested);
   final worker = await Isolate.spawn(_parseSectionWorker, (
     results.sendPort,
     payload,
+    startup?.sendPort,
   ), onExit: exits.sendPort);
   try {
     final response = await Future.any<Object?>([
@@ -986,21 +1020,25 @@ Future<ParsedSection> _defaultLazySectionParser(
         request.cancellation!.whenCancelled.then((_) => null),
     ]);
     if (response == null) {
+      observe(LazyParserIsolateEvent.killSent);
       worker.kill(priority: Isolate.immediate);
       await exited;
       throw SharedSectionWorkCancelled(request.identity);
     }
+    observe(LazyParserIsolateEvent.resultReceived);
     await exited;
     request.cancellation?.check(request.identity);
     if (response is ParsedSection) return response;
     throw StateError('$response');
   } finally {
+    if (startupSubscription != null) await startupSubscription.cancel();
+    startup?.close();
     results.close();
     exits.close();
   }
 }
 
-void _parseSectionWorker(
+Future<void> _parseSectionWorker(
   (
     SendPort,
     ({
@@ -1011,9 +1049,16 @@ void _parseSectionWorker(
       Map<String, String> resourceMediaTypes,
       Map<String, String> footnoteContentById,
     }),
+    SendPort?,
   )
   message,
-) {
+) async {
+  if (message.$3 case final startup?) {
+    final resume = ReceivePort();
+    startup.send(resume.sendPort);
+    await resume.first;
+    resume.close();
+  }
   try {
     message.$1.send(_parseSectionPayload(message.$2));
   } catch (error) {
