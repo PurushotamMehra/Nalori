@@ -6406,3 +6406,35 @@ No snapshot handoff, ReaderScreen scheduling/seam, preemption, retention
 transfer, scrubber, device, P07, commit/amend/reset/rebase/push work. Existing
 untracked diagnostics remain untouched. P04 ARCHITECTURAL_CORRECTION_REQUIRED,
 P06 REGRESSED_ON_DEVICE, progress 46/89. No checklist item closed.
+
+
+## IMPLEMENT-P04-REAL-SCREEN-AUTHORITY-003 — Real screen ownership and settlement
+
+Date: 2026-09-24. Branch `rescue/change-039-device-failure-2026-09-19`, starting
+and final HEAD `e6037812e5ca3785029963d91dacfae8acf2b4d1`; no commit or Git mutation.
+Mounted-screen tests captured 0 passed / 9 failed before production correction.
+The [complete proof ledger](nalori-real-screen-authority-proof.md) preserves
+those traces, exact changed files, intermediate failures, all validation commands,
+final counts and the next bounded retention/handoff entry prompt.
+
+Foreground target ownership now supersedes unrelated speculative work and joins
+identical work, including hydration. Parsed evidence returns before physical
+cache persistence. The old readable card survives private target preparation;
+current-owner first-card acceptance authorizes atomic publication, then cache,
+hydration and index work. Chapter 1 → 6 starts only parsers 0 and 5; parser
+concurrency remains one. Lazy exact/migration/unavailable recovery uses unchanged
+stable-body v1/checkpoint v2, with post-publication guarded migration append.
+Failure latches automatic work, settles joined callers as failure and supports
+one-attempt Retry. Close/switch revoke old callbacks. No user/source deletion.
+
+Final mounted-screen suite: 21/21. Unchanged stable-body/service/cache controls
+pass 133/133; unchanged ordinary
+P05/backward/admission/checkpoint controls pass 132/132. Historical controls are
+16 passed / 8 failed: S01 is corrected; R02/L02, H01–H04, K02 and the old D02
+uncooperative-parser fixture remain red, with explanations in the proof ledger.
+S01 also needed a cleanup-only fixture correction: close its real checkpoint
+store while the widget fake zone can still be pumped. Original behavior
+assertions remain unchanged; interrupted cleanup attempts are in the ledger. No
+historical expectation was edited. No handoff, retention transfer, device,
+P07 or scrubber work. P04 ARCHITECTURAL_CORRECTION_REQUIRED, P06
+REGRESSED_ON_DEVICE, progress 46/89. No checklist item closed.

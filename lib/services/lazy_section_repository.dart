@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -63,6 +64,28 @@ final class SharedSectionWorkCancelled implements Exception {
       'Queued shared section work cancelled: ${identity.stableKey}';
 }
 
+/// Cancellation is acknowledged by the physical parser before its slot is reused.
+final class LazySectionWorkCancellation {
+  final _cancelled = Completer<void>();
+  bool get isCancelled => _cancelled.isCompleted;
+  Future<void> get whenCancelled => _cancelled.future;
+  void cancel() {
+    if (!isCancelled) _cancelled.complete();
+  }
+
+  void check(LazySectionIdentity identity) {
+    if (isCancelled) throw SharedSectionWorkCancelled(identity);
+  }
+
+  Future<void> checkpoint(
+    Future<void> ready,
+    LazySectionIdentity identity,
+  ) async {
+    await Future.any([ready, whenCancelled]);
+    check(identity);
+  }
+}
+
 final class SharedSectionWorkRequest {
   const SharedSectionWorkRequest({
     required this.future,
@@ -74,13 +97,18 @@ final class SharedSectionWorkRequest {
 }
 
 final class SharedLazySectionWorkCoordinator {
-  SharedLazySectionWorkCoordinator({this.maxConcurrentJobs = 1})
+  SharedLazySectionWorkCoordinator({this.maxConcurrentJobs = 1, this.onLaunch})
     : assert(maxConcurrentJobs > 0);
 
   static final SharedLazySectionWorkCoordinator instance =
       SharedLazySectionWorkCoordinator();
 
   final int maxConcurrentJobs;
+  @visibleForTesting
+  final void Function(LazySectionIdentity identity, int quantum)? onLaunch;
+  int _schedulerQuantum = 0;
+  @visibleForTesting
+  int get schedulerQuantum => _schedulerQuantum;
   final Map<String, _SharedSectionJob> _jobs = {};
   final Map<String, int> _bookGenerations = {};
   var _globalGeneration = 0;
@@ -94,11 +122,27 @@ final class SharedLazySectionWorkCoordinator {
     required Object owner,
     required LazySectionWorkPriority priority,
     required Future<ParsedSection> Function() operation,
+    LazySectionWorkCancellation? cancellation,
   }) {
     final generation = _generation(identity.bookId);
     final key = _jobKey(identity, generation);
+    if (priority == LazySectionWorkPriority.explicitNavigation) {
+      for (final other in _jobs.values.toList()) {
+        if (other.identity.bookId == identity.bookId &&
+            other.key != key &&
+            other.cancellation != null) {
+          other.cancellation!.cancel();
+          if (other.state == SharedSectionJobState.queued) {
+            _jobs.remove(other.key);
+            other.completer.completeError(
+              SharedSectionWorkCancelled(other.identity),
+            );
+          }
+        }
+      }
+    }
     final existing = _jobs[key];
-    if (existing != null) {
+    if (existing != null && existing.cancellation?.isCancelled != true) {
       existing.owners.add(owner);
       if (priority.outranks(existing.priority)) {
         existing.priority = priority;
@@ -116,6 +160,7 @@ final class SharedLazySectionWorkCoordinator {
       priority: priority,
       operation: operation,
       owners: {owner},
+      cancellation: cancellation,
     );
     _jobs[key] = job;
     _scheduleDrain();
@@ -141,6 +186,7 @@ final class SharedLazySectionWorkCoordinator {
     for (final job in _jobs.values) {
       if (!matches(job.priority)) continue;
       job.owners.remove(owner);
+      if (job.owners.isEmpty) job.cancellation?.cancel();
       if (job.owners.isEmpty && job.state == SharedSectionJobState.queued) {
         cancelled.add(job);
       }
@@ -212,6 +258,7 @@ final class SharedLazySectionWorkCoordinator {
   }
 
   void _drain() {
+    _schedulerQuantum++;
     while (_runningJobs < maxConcurrentJobs) {
       final queued =
           _jobs.values
@@ -232,6 +279,7 @@ final class SharedLazySectionWorkCoordinator {
   void _launch(_SharedSectionJob job) {
     job.state = SharedSectionJobState.launched;
     _runningJobs++;
+    onLaunch?.call(job.identity, _schedulerQuantum);
     unawaited(
       job
           .operation()
@@ -256,9 +304,11 @@ final class _SharedSectionJob {
     required this.priority,
     required this.operation,
     required this.owners,
+    this.cancellation,
   });
 
   final String key;
+  final LazySectionWorkCancellation? cancellation;
   final LazySectionIdentity identity;
   final int generation;
   LazySectionWorkPriority priority;
@@ -276,6 +326,7 @@ final class LazySectionParseRequest {
     required this.resourceBytes,
     required this.resourceMediaTypes,
     required this.footnoteContentById,
+    this.cancellation,
   });
 
   final LazySectionIdentity identity;
@@ -284,6 +335,7 @@ final class LazySectionParseRequest {
   final Map<String, Uint8List> resourceBytes;
   final Map<String, String> resourceMediaTypes;
   final Map<String, String> footnoteContentById;
+  final LazySectionWorkCancellation? cancellation;
 }
 
 typedef LazySectionParser =
@@ -357,6 +409,55 @@ final class LazySectionRepository {
       'retained': _retained.length,
       'retainedBytes': retainedEstimatedBytes,
     });
+  }
+
+  final Map<String, Future<void>> _publishedWrites = {};
+  void persistPublishedSection(
+    ParsedSection section, {
+    required bool Function() isCurrent,
+  }) {
+    final epoch = _sessionEpoch;
+    final key = section.identity.stableKey;
+    if (!isCurrent()) return;
+    final pending = _publishedWrites[key];
+    if (pending != null) {
+      // A superseded write cannot consume a newer accepted publication's save.
+      unawaited(
+        pending.then((_) {
+          if (isCurrent()) {
+            persistPublishedSection(section, isCurrent: isCurrent);
+          }
+        }),
+      );
+      return;
+    }
+    bool authorized() =>
+        epoch == _sessionEpoch && _handle != null && isCurrent();
+    final generation = _cache.generationForBook(section.identity.bookId);
+    final task = Future<void>(() async {
+      if (!authorized()) return;
+      try {
+        await _cache.writeSection(
+          section,
+          expectedGeneration: generation,
+          canCommit: authorized,
+        );
+      } catch (error) {
+        _lazySectionRepoDiagLog('published_section_cache_write_failed', {
+          'book': section.identity.bookId,
+          'spineIndex': section.identity.spineIndex,
+          'error': error.runtimeType,
+        });
+      }
+    });
+    _publishedWrites[key] = task;
+    unawaited(
+      task.whenComplete(() {
+        if (identical(_publishedWrites[key], task)) {
+          _publishedWrites.remove(key);
+        }
+      }),
+    );
   }
 
   void cancelBackgroundWork() {
@@ -451,13 +552,16 @@ final class LazySectionRepository {
     final backgroundEpoch = _backgroundEpoch;
     final identity = _identityFor(handle.index, spineIndex);
     final cacheGeneration = _cache.generationForBook(identity.bookId);
+    final cancellation = LazySectionWorkCancellation();
     final request = _workCoordinator.request(
       identity: identity,
+      cancellation: cancellation,
       owner: _workOwner,
       priority: priority,
       operation: () => _loadSectionUnshared(
         handle,
         identity,
+        cancellation: cancellation,
         priority: priority,
         cacheGeneration: cacheGeneration,
         backgroundEpoch: backgroundEpoch,
@@ -509,13 +613,17 @@ final class LazySectionRepository {
     required LazySectionWorkPriority priority,
     required int cacheGeneration,
     required int backgroundEpoch,
+    required LazySectionWorkCancellation cancellation,
   }) async {
     final spineIndex = identity.spineIndex;
+    cancellation.check(identity);
 
     final cached = await _cache.loadSection(
       identity,
       expectedGeneration: cacheGeneration,
+      waitForPendingWrites: false,
     );
+    cancellation.check(identity);
     if (cached != null) {
       _throwIfBackgroundWorkWasCancelled(
         identity,
@@ -544,6 +652,7 @@ final class LazySectionRepository {
       priority: priority,
       backgroundEpoch: backgroundEpoch,
     );
+    cancellation.check(identity);
     final section = _sectionKindFor(handle.index, spineIndex);
     final resources = await _readSectionImageResources(
       handle,
@@ -555,10 +664,12 @@ final class LazySectionRepository {
       sectionResource.href,
       sectionResource.html,
     );
+    cancellation.check(identity);
     final stopwatch = Stopwatch()..start();
     final parsed = await _parser(
       LazySectionParseRequest(
         identity: identity,
+        cancellation: cancellation,
         html: sectionResource.html,
         section: section,
         resourceBytes: resources.bytes,
@@ -571,6 +682,7 @@ final class LazySectionRepository {
       priority: priority,
       backgroundEpoch: backgroundEpoch,
     );
+    cancellation.check(identity);
     stopwatch.stop();
     _lazySectionRepoDiagLog('lazy_section_parse_complete', {
       'book': identity.bookId,
@@ -588,8 +700,10 @@ final class LazySectionRepository {
       'elapsedMs': stopwatch.elapsedMilliseconds,
       'priority': priority.name,
     });
-    _workCoordinator.markCommitting(identity);
-    await _cache.writeSection(parsed, expectedGeneration: cacheGeneration);
+    if (parsed.identity != identity &&
+        parsed.identity.stableKey != identity.stableKey) {
+      throw const FormatException('Parsed target identity mismatch');
+    }
     return parsed;
   }
 
@@ -599,12 +713,11 @@ final class LazySectionRepository {
     required int backgroundEpoch,
   }) {
     if (!_isBackgroundPriority(priority)) return true;
-    if (_backgroundPaused) return false;
     final currentPriority = _workCoordinator.priorityFor(identity);
     if (currentPriority != null && !_isBackgroundPriority(currentPriority)) {
       return true;
     }
-    return backgroundEpoch == _backgroundEpoch;
+    return !_backgroundPaused && backgroundEpoch == _backgroundEpoch;
   }
 
   void _throwIfBackgroundWorkWasCancelled(
@@ -850,15 +963,62 @@ List<int> _hydrationOrder(List<int> readable, int centerSpineIndex) {
 
 Future<ParsedSection> _defaultLazySectionParser(
   LazySectionParseRequest request,
-) {
-  return compute(_parseSectionPayload, (
+) async {
+  final results = ReceivePort();
+  final exits = ReceivePort();
+  final exited = exits.first;
+  final payload = (
     identity: request.identity,
     html: request.html,
     section: request.section,
     resourceBytes: request.resourceBytes,
     resourceMediaTypes: request.resourceMediaTypes,
     footnoteContentById: request.footnoteContentById,
-  ));
+  );
+  final worker = await Isolate.spawn(_parseSectionWorker, (
+    results.sendPort,
+    payload,
+  ), onExit: exits.sendPort);
+  try {
+    final response = await Future.any<Object?>([
+      results.first,
+      if (request.cancellation != null)
+        request.cancellation!.whenCancelled.then((_) => null),
+    ]);
+    if (response == null) {
+      worker.kill(priority: Isolate.immediate);
+      await exited;
+      throw SharedSectionWorkCancelled(request.identity);
+    }
+    await exited;
+    request.cancellation?.check(request.identity);
+    if (response is ParsedSection) return response;
+    throw StateError('$response');
+  } finally {
+    results.close();
+    exits.close();
+  }
+}
+
+void _parseSectionWorker(
+  (
+    SendPort,
+    ({
+      LazySectionIdentity identity,
+      String html,
+      ChunkSection section,
+      Map<String, Uint8List> resourceBytes,
+      Map<String, String> resourceMediaTypes,
+      Map<String, String> footnoteContentById,
+    }),
+  )
+  message,
+) {
+  try {
+    message.$1.send(_parseSectionPayload(message.$2));
+  } catch (error) {
+    message.$1.send(error.toString());
+  }
 }
 
 ParsedSection _parseSectionPayload(

@@ -75,7 +75,6 @@ void main() {
         );
   });
   tearDownAll(() async {
-    await ReaderCheckpointStore().close();
     await fixture.close();
   });
 
@@ -188,6 +187,19 @@ void main() {
     if (!hydration.isCompleted) hydration.complete();
     await tester.runAsync(lazy.close);
     await tester.pump(const Duration(seconds: 2));
+    // Drain the real accepted-publication save while its widget fake zone can
+    // still run. Closing the singleton later in tearDownAll cannot pump it.
+    var checkpointClosed = false;
+    ReaderCheckpointStore().close().then((_) => checkpointClosed = true);
+    for (var i = 0; i < 1000 && !checkpointClosed; i++) {
+      await tester.runAsync(() => Future<void>(() {}));
+      await tester.pump();
+    }
+    expect(
+      checkpointClosed,
+      isTrue,
+      reason: 'checkpoint writer drained and closed',
+    );
     expect(
       error.toString(),
       contains('terminal continuation cannot be resumed'),

@@ -58,8 +58,13 @@ final class LazyCheckpointRecoveryCoordinator {
   bool _committing = false;
   bool get ordinaryWritesEnabled => false;
 
-  Future<void> initialize() async {
-    _current = await store.loadNewestValid(bookId);
+  Future<void> initialize({
+    ReaderCheckpoint? preloaded,
+    bool ignoreStored = false,
+  }) async {
+    _current = ignoreStored
+        ? null
+        : preloaded ?? await store.loadNewestValid(bookId);
     _epoch = await store.beginSession(bookId);
     _pending = null;
   }
@@ -253,6 +258,35 @@ final class LazyCheckpointRecoveryCoordinator {
       null,
       'lazy_semantic_migration_v1',
     );
+  }
+
+  /// Ordinary lazy reading can save only a body from the screen's accepted
+  /// publication. A legacy record remains protected until migration commits.
+  Future<bool> commitAcceptedBody({
+    required LazyStableCardBody body,
+    required bool Function() isCurrent,
+  }) async {
+    if (_committing ||
+        _pending != null ||
+        _current?.formatVersion == 1 ||
+        !isCurrent()) {
+      return false;
+    }
+    final checkpoint = ReaderCheckpoint.createLazy(
+      bookId: bookId,
+      body: body,
+      sessionEpoch: _epoch,
+      revision: ++_revision,
+      committedAtMillis: DateTime.now().millisecondsSinceEpoch,
+    );
+    _committing = true;
+    try {
+      final result = await store.commit(checkpoint, canCommit: isCurrent);
+      if (result.applied) _current = checkpoint;
+      return result.applied;
+    } finally {
+      _committing = false;
+    }
   }
 
   /// Retry and Back both abandon the private target and preserve the journal.

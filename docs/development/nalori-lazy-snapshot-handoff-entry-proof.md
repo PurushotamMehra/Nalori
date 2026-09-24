@@ -5,6 +5,11 @@ That report records the authorized new payload versions and legacy recovery
 policy. The historical CHANGE-041 findings and red expectations below remain
 unchanged. Screen and retention gates remain open; progress is 46/89.
 
+Current screen-authority correction: [IMPLEMENT-P04-REAL-SCREEN-AUTHORITY-003](nalori-real-screen-authority-proof.md).
+It records real-screen red/green evidence and the corrected failure settlement;
+the historical findings below remain evidence. Retention/handoff entry remains
+open, and no checklist count changes (46/89).
+
 ## Current continuation — CHANGE-20260921-041 (2026-09-21)
 
 **Stopped at the stable-address/legacy-recovery entry boundary. All three

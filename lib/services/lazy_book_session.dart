@@ -223,7 +223,10 @@ final class LazyBookSession {
     _updatePinnedSections(targetSpineIndex: resolvedLocation.spineIndex);
     return LazyNavigationPreparation(
       resolution: resolution,
-      window: loadedWindow(centerSpineIndex: resolvedLocation.spineIndex),
+      window: loadedWindow(
+        centerSpineIndex: resolvedLocation.spineIndex,
+        onlySpineIndices: {resolvedLocation.spineIndex},
+      ),
       superseded: false,
     );
   }
@@ -401,6 +404,15 @@ final class LazyBookSession {
     );
   }
 
+  void persistPublishedSections({
+    required Iterable<ParsedSection> sections,
+    required bool Function() isCurrent,
+  }) {
+    for (final section in sections) {
+      _repository.persistPublishedSection(section, isCurrent: isCurrent);
+    }
+  }
+
   Future<ParsedSection> loadSection(
     int spineIndex, {
     LazySectionWorkPriority priority =
@@ -409,11 +421,15 @@ final class LazyBookSession {
   }) async {
     final existing = _loadedSections[spineIndex];
     if (existing != null) return existing;
+    final indexBefore = _index;
     final section = await _repository.loadSectionWithPriority(
       spineIndex,
       priority: priority,
       pinDuringLoad: priority == LazySectionWorkPriority.explicitNavigation,
     );
+    if (!identical(_index, indexBefore) || _index == null) {
+      throw SharedSectionWorkCancelled(section.identity);
+    }
     _loadedSections[spineIndex] = section;
     if (!preserveDistantTarget) _releaseDistantSections();
     _updatePinnedSections();
@@ -622,10 +638,20 @@ final class LazyBookSession {
     _repository.recordMeaningfulRead(location.spineIndex, readAtMs);
   }
 
-  LazyLoadedContentWindow loadedWindow({int? centerSpineIndex}) {
+  LazyLoadedContentWindow loadedWindow({
+    int? centerSpineIndex,
+    Set<int>? onlySpineIndices,
+  }) {
     final center = centerSpineIndex ?? _currentLocation?.spineIndex ?? 0;
-    final sections = _loadedSections.entries.toList()
-      ..sort((a, b) => a.key.compareTo(b.key));
+    final sections =
+        _loadedSections.entries
+            .where(
+              (entry) =>
+                  onlySpineIndices == null ||
+                  onlySpineIndices.contains(entry.key),
+            )
+            .toList()
+          ..sort((a, b) => a.key.compareTo(b.key));
     final parsedSections = sections.map((entry) => entry.value).toList();
     final chunks = <BookChunk>[];
     final anchors = <String, int>{};

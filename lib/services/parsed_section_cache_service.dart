@@ -374,6 +374,7 @@ final class _ParsedCacheFileCoordinator {
   Future<void> tail = Future<void>.value();
   final Map<String, int> generations = {};
   final Set<String> deletingBooks = {};
+  int pendingOperations = 0;
   int temporarySequence = 0;
   int globalGeneration = 0;
   bool resetting = false;
@@ -390,11 +391,14 @@ final class _ParsedCacheFileCoordinator {
 
   Future<T> exclusive<T>(Future<T> Function() operation) {
     final completer = Completer<T>();
+    pendingOperations++;
     tail = tail.then((_) async {
       try {
         completer.complete(await operation());
       } catch (error, stackTrace) {
         completer.completeError(error, stackTrace);
+      } finally {
+        pendingOperations--;
       }
     });
     tail = tail.catchError((_) {});
@@ -405,6 +409,9 @@ final class _ParsedCacheFileCoordinator {
 final class ParsedSectionCacheService {
   ParsedSectionCacheService({
     Directory? rootDirectory,
+    this.beforePhysicalWrite,
+    this.onPhysicalWriteComplete,
+    this.beforePhysicalCommit,
     ParsedSectionCachePolicy policy = const ParsedSectionCachePolicy(),
     ParsedCacheStoragePressureProvider? storagePressureProvider,
     ParsedSectionRetentionRegistry? retentionRegistry,
@@ -426,6 +433,9 @@ final class ParsedSectionCacheService {
   static const String directoryName = 'parsed_sections';
   static final Map<String, _ParsedCacheFileCoordinator> _coordinators = {};
 
+  final Future<void> Function(ParsedSection)? beforePhysicalWrite;
+  final void Function(ParsedSection)? onPhysicalWriteComplete;
+  final Future<void> Function(ParsedSection)? beforePhysicalCommit;
   final Directory? _rootDirectory;
   final ParsedSectionCachePolicy _policy;
   final ParsedCacheStoragePressureProvider _storagePressureProvider;
@@ -600,8 +610,9 @@ final class ParsedSectionCacheService {
       _coordinator.exclusive(() => _loadManifestUnlocked(bookId));
 
   Future<ParsedSectionCacheManifest?> _loadManifestUnlocked(
-    String bookId,
-  ) async {
+    String bookId, {
+    bool readOnly = false,
+  }) async {
     final file = await _manifestFile(bookId);
     final stat = await file.stat();
     if (stat.type == FileSystemEntityType.file) {
@@ -628,12 +639,15 @@ final class ParsedSectionCacheService {
       );
       if (manifest.version != lazyParsedSectionCacheFormatVersion ||
           manifest.bookId != bookId) {
+        if (readOnly) return null;
         final dir = await _bookDir(bookId, create: false);
         if (await dir.exists()) await dir.delete(recursive: true);
         _manifestCache.remove(bookId);
         return null;
       }
-      final validated = await _validatedManifestUnlocked(bookId, manifest);
+      final validated = readOnly
+          ? manifest
+          : await _validatedManifestUnlocked(bookId, manifest);
       if (validated.records.length != manifest.records.length) {
         return validated;
       }
@@ -650,7 +664,7 @@ final class ParsedSectionCacheService {
         'path': file.path,
         'reason': 'manifest_${error.runtimeType}',
       });
-      await file.delete();
+      if (!readOnly) await file.delete();
       return null;
     }
   }
@@ -659,7 +673,13 @@ final class ParsedSectionCacheService {
     LazySectionIdentity identity, {
     String parserVersion = lazyParsedSectionParserVersion,
     int? expectedGeneration,
+    bool waitForPendingWrites = true,
   }) async {
+    // A foreground cache read is a safe miss while persistence owns the disk
+    // queue. It must never inherit a physical writer's completion barrier.
+    if (!waitForPendingWrites && _coordinator.pendingOperations > 0) {
+      return null;
+    }
     final generation = expectedGeneration ?? generationForBook(identity.bookId);
     if (_coordinator.resetting ||
         _coordinator.deletingBooks.contains(identity.bookId)) {
@@ -671,7 +691,10 @@ final class ParsedSectionCacheService {
           _coordinator.deletingBooks.contains(identity.bookId)) {
         return null;
       }
-      final manifest = await _loadManifestUnlocked(identity.bookId);
+      final manifest = await _loadManifestUnlocked(
+        identity.bookId,
+        readOnly: !waitForPendingWrites,
+      );
       if (manifest == null) {
         _parsedSectionDiagLog('lazy_section_cache_miss', {
           'book': identity.bookId,
@@ -708,7 +731,9 @@ final class ParsedSectionCacheService {
           'path': file.path,
           'reason': error.runtimeType,
         });
-        await _removeRecordUnlocked(identity.bookId, record);
+        if (waitForPendingWrites) {
+          await _removeRecordUnlocked(identity.bookId, record);
+        }
         return null;
       }
     });
@@ -717,14 +742,14 @@ final class ParsedSectionCacheService {
       return null;
     }
     try {
-      final section = await Isolate.run(
-        () => _deserializeSection(recordAndBytes.bytes),
-      );
+      final section = await _deserializeSectionAsync(recordAndBytes.bytes);
       if (section.identity.stableKey != identity.stableKey ||
           section.parserVersion != parserVersion) {
         throw const FormatException('Parsed section identity mismatch');
       }
-      await _touchRecordIfDue(identity.bookId, recordAndBytes.record);
+      if (waitForPendingWrites) {
+        await _touchRecordIfDue(identity.bookId, recordAndBytes.record);
+      }
       _parsedSectionDiagLog('lazy_section_cache_hit', {
         'book': identity.bookId,
         'spineIndex': identity.spineIndex,
@@ -740,9 +765,11 @@ final class ParsedSectionCacheService {
         'href': identity.href,
         'reason': error.runtimeType,
       });
-      await _coordinator.exclusive(
-        () => _removeRecordUnlocked(identity.bookId, recordAndBytes.record),
-      );
+      if (waitForPendingWrites) {
+        await _coordinator.exclusive(
+          () => _removeRecordUnlocked(identity.bookId, recordAndBytes.record),
+        );
+      }
       return null;
     }
   }
@@ -750,25 +777,33 @@ final class ParsedSectionCacheService {
   Future<void> writeSection(
     ParsedSection section, {
     int? expectedGeneration,
+    bool Function()? canCommit,
   }) async {
+    if (canCommit != null && !canCommit()) return;
     if (section.parserVersion != section.identity.parserVersion) {
       throw const FormatException('Parsed section parser identity mismatch');
     }
     final generation =
         expectedGeneration ?? generationForBook(section.identity.bookId);
-    final bytes = await Isolate.run(() => _serializeSection(section));
-    await _coordinator.exclusive(
-      () => _writeSectionUnlocked(section, bytes, generation),
+    await beforePhysicalWrite?.call(section);
+    if (canCommit != null && !canCommit()) return;
+    final bytes = await _serializeSectionAsync(section);
+    final committed = await _coordinator.exclusive(
+      () => _writeSectionUnlocked(section, bytes, generation, canCommit),
     );
+    if (!committed) return;
     await enforceBudget();
+    onPhysicalWriteComplete?.call(section);
   }
 
-  Future<void> _writeSectionUnlocked(
+  Future<bool> _writeSectionUnlocked(
     ParsedSection section,
     Uint8List bytes,
     int generation,
+    bool Function()? canCommit,
   ) async {
     final bookId = section.identity.bookId;
+    if (canCommit != null && !canCommit()) return false;
     if (generation != generationForBook(bookId) ||
         _coordinator.resetting ||
         _coordinator.deletingBooks.contains(bookId)) {
@@ -790,9 +825,7 @@ final class ParsedSectionCacheService {
 
     try {
       await tmpFile.writeAsBytes(bytes, flush: true);
-      final validated = await Isolate.run(
-        () => _deserializeSection(tmpFile.readAsBytesSync()),
-      );
+      final validated = await _validateSectionFileAsync(tmpFile);
       if (validated.identity.stableKey != section.identity.stableKey) {
         throw const FormatException('Parsed section validation mismatch');
       }
@@ -801,7 +834,7 @@ final class ParsedSectionCacheService {
           _coordinator.deletingBooks.contains(bookId)) {
         throw ParsedSectionCacheWriteInvalidated(bookId);
       }
-      await tmpFile.rename(finalFile.path);
+      if (canCommit != null && !canCommit()) return false;
 
       final now = _nowMs;
       final record = ParsedSectionCacheRecord(
@@ -828,7 +861,19 @@ final class ParsedSectionCacheService {
         lastAccessedAtMs: now,
         status: 'ready',
       );
-      await _upsertRecordUnlocked(section.identity.bookId, record);
+      await beforePhysicalCommit?.call(section);
+      bool authorized() =>
+          generation == generationForBook(bookId) &&
+          !_coordinator.resetting &&
+          !_coordinator.deletingBooks.contains(bookId) &&
+          (canCommit?.call() ?? true);
+      final committed = await _upsertRecordUnlocked(
+        section.identity.bookId,
+        record,
+        canCommit: authorized,
+        publishPayload: () => tmpFile.renameSync(finalFile.path),
+      );
+      if (!committed) return false;
       _parsedSectionDiagLog('lazy_section_cache_write_end', {
         'book': section.identity.bookId,
         'spineIndex': section.identity.spineIndex,
@@ -837,6 +882,7 @@ final class ParsedSectionCacheService {
         'bytes': bytes.length,
         'path': finalFile.path,
       });
+      return true;
     } finally {
       if (await tmpFile.exists()) {
         await tmpFile.delete();
@@ -875,11 +921,17 @@ final class ParsedSectionCacheService {
     return normalized;
   }
 
-  Future<void> _upsertRecordUnlocked(
+  Future<bool> _upsertRecordUnlocked(
     String bookId,
-    ParsedSectionCacheRecord record,
-  ) async {
-    final current = await _loadManifestUnlocked(bookId);
+    ParsedSectionCacheRecord record, {
+    bool Function()? canCommit,
+    void Function()? publishPayload,
+  }) async {
+    if (canCommit != null && !canCommit()) return false;
+    final current = await _loadManifestUnlocked(
+      bookId,
+      readOnly: canCommit != null,
+    );
     final now = _nowMs;
     final records = [
       ...?current?.records.where(
@@ -893,7 +945,7 @@ final class ParsedSectionCacheService {
       ),
       record,
     ]..sort((a, b) => a.spineIndex.compareTo(b.spineIndex));
-    await _saveManifestUnlocked(
+    return _saveManifestUnlocked(
       ParsedSectionCacheManifest(
         version: lazyParsedSectionCacheFormatVersion,
         bookId: bookId,
@@ -902,6 +954,8 @@ final class ParsedSectionCacheService {
         records: records,
         hydration: _recordHydrationCompletion(current?.hydration, record, now),
       ),
+      canCommit: canCommit,
+      publishPayload: publishPayload,
     );
   }
 
@@ -1232,21 +1286,30 @@ final class ParsedSectionCacheService {
     );
   }
 
-  Future<void> _saveManifestUnlocked(
-    ParsedSectionCacheManifest manifest,
-  ) async {
+  Future<bool> _saveManifestUnlocked(
+    ParsedSectionCacheManifest manifest, {
+    bool Function()? canCommit,
+    void Function()? publishPayload,
+  }) async {
     final dir = await _bookDir(manifest.bookId);
     final temporaryId = _coordinator.temporarySequence++;
     final tmp = File(p.join(dir.path, 'manifest.json.tmp.${pid}_$temporaryId'));
     final file = File(p.join(dir.path, 'manifest.json'));
     await tmp.writeAsString(jsonEncode(manifest.toJson()), flush: true);
-    await tmp.rename(file.path);
-    final stat = await file.stat();
+    if (canCommit != null && !canCommit()) {
+      await tmp
+          .delete(); // Only this attempt's unpublished temporary derivative.
+      return false;
+    }
+    publishPayload?.call();
+    tmp.renameSync(file.path);
+    final stat = file.statSync();
     _manifestCache[manifest.bookId] = _CachedParsedSectionManifest(
       manifest: manifest,
       modifiedMs: stat.modified.millisecondsSinceEpoch,
       length: stat.size,
     );
+    return true;
   }
 
   Future<File> _manifestFile(String bookId) async {
@@ -1310,3 +1373,12 @@ final class _ParsedDiskCandidate {
 List<int> _sortedInts(Set<int> values) {
   return values.toList()..sort();
 }
+
+Future<Uint8List> _serializeSectionAsync(ParsedSection section) =>
+    Isolate.run(() => ParsedSectionCacheService._serializeSection(section));
+Future<ParsedSection> _validateSectionFileAsync(File file) => Isolate.run(
+  () => ParsedSectionCacheService._deserializeSection(file.readAsBytesSync()),
+);
+
+Future<ParsedSection> _deserializeSectionAsync(Uint8List bytes) =>
+    Isolate.run(() => ParsedSectionCacheService._deserializeSection(bytes));
