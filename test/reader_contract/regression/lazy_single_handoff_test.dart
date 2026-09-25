@@ -553,6 +553,8 @@ class LazySingleHandoffTestRun {
   late LazyPreparedSection a;
   late ProgressiveDisplayState state;
   late ReaderCorePaginationHarness harness;
+  Future<ParsedSection> Function(int)? reloadSection;
+  final List<int> reloadRequests = [];
   bool cancelled = false;
   bool invalidFontEvidence = false;
   final LazyPublicationOwner owner = (
@@ -582,6 +584,8 @@ class LazySingleHandoffTestRun {
   static Future<LazySingleHandoffTestRun> open(
     WidgetTester tester, {
     int sectionCount = 2,
+    int? fixtureSectionCount,
+    bool keepSourceForReload = false,
     File? fixture,
   }) async {
     final run = LazySingleHandoffTestRun();
@@ -589,9 +593,11 @@ class LazySingleHandoffTestRun {
       final root = await Directory.systemTemp.createTemp('nalori-one-handoff-');
       final file =
           fixture ??
-          await File(
-            '${root.path}/book.epub',
-          ).writeAsBytes(buildAddressFixture(sectionCount: sectionCount));
+          await File('${root.path}/book.epub').writeAsBytes(
+            buildAddressFixture(
+              sectionCount: fixtureSectionCount ?? sectionCount,
+            ),
+          );
       final lazy = LazyBookSession(
         repository: LazySectionRepository(
           cache: ParsedSectionCacheService(
@@ -609,7 +615,30 @@ class LazySingleHandoffTestRun {
         ];
       } finally {
         await lazy.close();
-        await root.delete(recursive: true);
+        if (keepSourceForReload) {
+          addTearDown(() => root.delete(recursive: true));
+          run.reloadSection = (spine) async {
+            run.reloadRequests.add(spine);
+            return (await tester.runAsync(() async {
+              final reload = LazyBookSession(
+                repository: LazySectionRepository(
+                  cache: ParsedSectionCacheService(
+                    rootDirectory: Directory('${root.path}/reload-cache'),
+                  ),
+                  workCoordinator: SharedLazySectionWorkCoordinator(),
+                ),
+              );
+              try {
+                await reload.open(file);
+                return await reload.loadSection(spine);
+              } finally {
+                await reload.close();
+              }
+            }))!;
+          };
+        } else {
+          await root.delete(recursive: true);
+        }
       }
     });
     final input = LazySectionInput.capture(

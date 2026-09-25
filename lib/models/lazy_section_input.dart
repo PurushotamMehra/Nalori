@@ -85,6 +85,26 @@ final class PublicationSpineAuthority {
   LazyStableSectionAuthority sectionAuthority(ParsedSection section) =>
       LazyStableSectionAuthority.capture(_index, section);
 
+  LazySectionIdentity? predecessorOf(ParsedSection section) {
+    sectionAuthority(section);
+    if (!_index.spine[section.identity.spineIndex].isLinear) {
+      throw StateError('Nonlinear target has no linear predecessor authority');
+    }
+    for (var i = section.identity.spineIndex - 1; i >= 0; i--) {
+      final item = _index.spine[i];
+      if (item.isLinear) {
+        return LazySectionIdentity.fromIndexItem(
+          bookId: bookId,
+          publicationFingerprint: publicationFingerprint,
+          item: item,
+          sourceChecksum: item.sourceChecksum,
+          dependencySignature: dependencyIdentity,
+        );
+      }
+    }
+    return null;
+  }
+
   LazySectionIdentity? successorOf(ParsedSection section) {
     sectionAuthority(section);
     final position = section.identity.spineIndex;
@@ -221,7 +241,17 @@ final class LazySectionInput {
       publication: publication,
       sections: [successor],
     );
-    if (nextCandidate?.stableKey != successor.identity.stableKey) {
+    return joinSuccessor(added);
+  }
+
+  /// Join two verified windows by sharing their immutable records.
+  LazySectionInput joinSuccessor(LazySectionInput added) {
+    if (sectionCount != 1 ||
+        added.sectionCount != 1 ||
+        sectionAuthorities.single.publication !=
+            added.sectionAuthorities.single.publication ||
+        nextCandidate?.stableKey !=
+            added.sectionAuthorities.single.sectionKey) {
       throw StateError('Section is not the immediate pinned successor');
     }
     final encoded = List<String>.unmodifiable([

@@ -1,3 +1,4 @@
+import '../models/lazy_section_input.dart';
 import 'lazy_snapshot_handoff_service.dart';
 import 'package:flutter/foundation.dart';
 
@@ -481,9 +482,20 @@ final class ProgressiveDisplayState {
     return true;
   }
 
+  void latchLazyAttemptFailure(LazyHandoffOperation operation) {
+    final old = _lazyPublication;
+    if (operation.isCurrent &&
+        old != null &&
+        old.owner.bookOpenEpoch == operation.owner.bookOpenEpoch &&
+        old.owner.displayOwner == operation.owner.displayOwner) {
+      _failedLazyAttempt = operation.owner;
+    }
+  }
+
   LazySnapshotPublicationResult retainSnapshotSuffix({
     required LazyHandoffOperation operation,
     Set<String> pinnedRendererCards = const {},
+    bool retainPredecessor = false,
     void Function(LazyRetainedSection)? onPrepared,
     void Function()? beforeCommit,
   }) {
@@ -496,7 +508,13 @@ final class ProgressiveDisplayState {
         LazySnapshotPublicationOutcome.stale,
       );
     }
-    final retainedSignatures = old.current.cards
+    final selected = retainPredecessor ? old.predecessor : old.current;
+    if (selected == null) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.retentionRequired,
+      );
+    }
+    final retainedSignatures = selected.cards
         .map((c) => c.identity.signature)
         .toSet();
     if (!retainedSignatures.contains(_lazyVisibleCardSignature) ||
@@ -508,7 +526,7 @@ final class ProgressiveDisplayState {
     }
     final visible = _lazyVisibleCardSignature;
     try {
-      final retained = LazyRetainedSection.capture(old.current);
+      final retained = LazyRetainedSection.capture(selected);
       onPrepared?.call(retained);
       final candidate = LazyAcceptedPublication.retained(old, retained);
       final projection = _lazyProjection(candidate);
@@ -582,6 +600,112 @@ final class ProgressiveDisplayState {
     } on Object catch (error) {
       return LazySnapshotPublicationResult(
         LazySnapshotPublicationOutcome.invalid,
+        '$error',
+      );
+    }
+  }
+
+  /// Validated prepend imports only predecessor cards. The committed section
+  /// stays byte-identical under its original renderer authority.
+  LazySnapshotPublicationResult publishSnapshotPrepend({
+    required LazyPreparedSection predecessor,
+    required LazyPreparedSection reconstructedCurrent,
+    required LazySectionInput window,
+    required LazySnapshotHandoffV1 handoff,
+    required LazyHandoffOperation operation,
+    void Function()? beforeCommit,
+  }) {
+    final old = _lazyPublication;
+    final visible = _lazyVisibleCardSignature;
+    if (operation.pagination.isCancelled()) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.cancelled,
+      );
+    }
+    if (old == null ||
+        visible == null ||
+        !operation.isCurrent ||
+        predecessor.owner != operation.owner ||
+        reconstructedCurrent.owner != operation.owner ||
+        old.owner.bookOpenEpoch != operation.owner.bookOpenEpoch ||
+        old.owner.displayOwner != operation.owner.displayOwner) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.stale,
+      );
+    }
+    if (_failedLazyAttempt == operation.owner) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.failedAttempt,
+      );
+    }
+    try {
+      final expected = buildLazySnapshotPrepend(
+        old: old,
+        predecessor: predecessor,
+        reconstructedCurrent: reconstructedCurrent,
+        window: window,
+        committedCardSignature: visible,
+      );
+      if (expected.canonicalEncoding != handoff.canonicalEncoding ||
+          expected.handoffDigest != handoff.handoffDigest) {
+        throw StateError('Prepend evidence differs');
+      }
+      if (old.cards.length + predecessor.cards.length >
+              CanonicalPaginationBounds.activeCardCeiling ||
+          window.snapshot.sourceCount >
+              CanonicalPaginationBounds.activeSourceCeiling) {
+        throw StateError('Prepend exceeds publication bounds');
+      }
+      final candidate = LazyAcceptedPublication.prepended(
+        old,
+        predecessor,
+        window,
+        handoff,
+      );
+      final projection = _lazyProjection(candidate);
+      beforeCommit?.call();
+      if (operation.pagination.isCancelled()) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.cancelled,
+        );
+      }
+      if (!operation.isCurrent ||
+          !identical(old, _lazyPublication) ||
+          visible != _lazyVisibleCardSignature) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      final rechecked = buildLazySnapshotPrepend(
+        old: old,
+        predecessor: predecessor,
+        reconstructedCurrent: reconstructedCurrent,
+        window: window,
+        committedCardSignature: visible,
+      );
+      if (rechecked.canonicalEncoding != expected.canonicalEncoding ||
+          !operation.isCurrent ||
+          !identical(old, _lazyPublication) ||
+          visible != _lazyVisibleCardSignature) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      _commitLazyPublication(candidate, projection);
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.accepted,
+      );
+    } on Object catch (error) {
+      if (!operation.isCurrent || !identical(old, _lazyPublication)) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      _failedLazyAttempt = operation.owner;
+      return LazySnapshotPublicationResult(
+        error is LazyExactReconstructionUnavailable
+            ? LazySnapshotPublicationOutcome.exactUnavailable
+            : LazySnapshotPublicationOutcome.invalid,
         '$error',
       );
     }
@@ -725,7 +849,7 @@ final class ProgressiveDisplayState {
       for (final card in publication.cards)
         List<int>.unmodifiable(
           card.sourceSlices.map((s) {
-            final owners = publication.current.input.snapshot.owners;
+            final owners = publication.sourceInput.snapshot.owners;
             final ordinal = owners.indexWhere(
               (o) =>
                   o.sourceIdentity == s.sourceIdentity &&
@@ -753,7 +877,7 @@ final class ProgressiveDisplayState {
         PreparedDisplayRange(
           sourceRange: SourceChunkRange(
             0,
-            publication.current.input.snapshot.sourceCount,
+            publication.sourceInput.snapshot.sourceCount,
           ),
           displayStart: 0,
           displayEndExclusive: chunks.length,
@@ -780,13 +904,13 @@ final class ProgressiveDisplayState {
     _acceptedCanonicalContinuation = candidate.current.receipt == null
         ? candidate.current.continuation
         : null;
-    _acceptedSourceSnapshot = candidate.current.input.snapshot;
+    _acceptedSourceSnapshot = candidate.sourceInput.snapshot;
     _acceptedSessionIdentity = candidate.sessionDigest;
     _acceptedLayoutIdentity = candidate.current.packingIdentity;
     _acceptedPaginationIdentity = readerPaginationAlgorithmVersion;
     _canonicalCacheWriteAuthority =
         false; // No ordinary cache terminal proof for a section receipt.
-    sourceChunkCount = candidate.current.input.snapshot.sourceCount;
+    sourceChunkCount = candidate.sourceInput.snapshot.sourceCount;
     initialWindowReady = true;
     generationComplete = candidate.current.input.verifiedBookEnd;
     _lazyPublication = candidate;

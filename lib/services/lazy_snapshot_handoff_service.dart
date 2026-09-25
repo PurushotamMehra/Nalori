@@ -188,6 +188,7 @@ final class LazyPreparedSection extends LazySectionAuthority {
     this.receipt,
     this.sessionDigest,
     this.owner,
+    this.workEntries,
   );
   @override
   final LazySectionInput input;
@@ -205,6 +206,7 @@ final class LazyPreparedSection extends LazySectionAuthority {
   final String sessionDigest;
   @override
   final LazyPublicationOwner owner;
+  final int workEntries;
   @override
   CanonicalPaginationContinuation? get continuation => session.acceptedSuffix;
   @override
@@ -216,6 +218,7 @@ final class LazyPreparedSection extends LazySectionAuthority {
     required LazySectionInput input,
     required ReaderCardPaginatorLayout layout,
     required LazyHandoffOperation operation,
+    int maximumWork = CanonicalPaginationBounds.normalWorkEnvelope,
     int maximumCards = CanonicalPaginationBounds.activeCardCeiling,
     int maximumGuards =
         CanonicalPaginationBounds.residentContinuationRecordBasis,
@@ -236,8 +239,11 @@ final class LazyPreparedSection extends LazySectionAuthority {
       layout: layout,
       sectionInput: input,
     );
-    if (maximumCards < 1 || maximumGuards < 1) {
-      throw StateError('No aggregate preparation budget');
+    if (maximumCards < 1 ||
+        maximumGuards < 1 ||
+        maximumWork < 1 ||
+        maximumWork > CanonicalPaginationBounds.normalWorkEnvelope) {
+      throw const LazyHandoffBoundExceeded('No aggregate preparation budget');
     }
     onProgress?.call(session);
     final root = snapshot.ownerAt(input.lastSectionStart);
@@ -250,6 +256,7 @@ final class LazyPreparedSection extends LazySectionAuthority {
       operation: operation.pagination,
       budget: CanonicalPaginationWorkBudget(
         maxFinalizedCards: maximumCards < 8 ? maximumCards : 8,
+        maxAtomicFragments: maximumWork,
       ),
     );
     var work = 0;
@@ -258,10 +265,14 @@ final class LazyPreparedSection extends LazySectionAuthority {
       onProgress?.call(session);
       if (session.acceptedPublishedCards.length > maximumCards ||
           session.checkpointIndex.records.length > maximumGuards) {
-        throw StateError('Aggregate preparation budget exceeded');
+        throw const LazyHandoffBoundExceeded(
+          'Aggregate preparation budget exceeded',
+        );
       }
       if (++steps > CanonicalPaginationBounds.residentContinuationRecordBasis) {
-        throw StateError('Section preparation exhausted checkpoint bound');
+        throw const LazyHandoffBoundExceeded(
+          'Section preparation exhausted checkpoint bound',
+        );
       }
       if (!operation.isCurrent) {
         throw StateError('Cancelled or stale section preparation');
@@ -275,29 +286,34 @@ final class LazyPreparedSection extends LazySectionAuthority {
       }
       work += result.boundedWorkEntriesConsumed;
       if (result.continuation.terminal) break;
-      if (work >= CanonicalPaginationBounds.normalWorkEnvelope) {
-        throw StateError('Section preparation needs more bounded evidence');
+      if (work >= maximumWork) {
+        throw const LazyHandoffBoundExceeded(
+          'Section preparation needs more bounded evidence',
+        );
       }
       final remainingCards =
           maximumCards - session.acceptedPublishedCards.length;
       if (remainingCards < 1 ||
           session.checkpointIndex.records.length >= maximumGuards) {
-        throw StateError('Aggregate preparation budget exhausted');
+        throw const LazyHandoffBoundExceeded(
+          'Aggregate preparation budget exhausted',
+        );
       }
       result = await session.generateForward(
         acceptedPublishedSuffix: result.continuation.previousFinalizedBoundary,
         operation: operation.pagination,
         budget: CanonicalPaginationWorkBudget(
           maxFinalizedCards: remainingCards < 8 ? remainingCards : 8,
-          maxAtomicFragments:
-              CanonicalPaginationBounds.normalWorkEnvelope - work,
+          maxAtomicFragments: maximumWork - work,
         ),
       );
     }
-    if (work > CanonicalPaginationBounds.normalWorkEnvelope ||
+    if (work > maximumWork ||
         session.acceptedPublishedCards.length >
             CanonicalPaginationBounds.activeCardCeiling) {
-      throw StateError('Section preparation exceeded its bound');
+      throw const LazyHandoffBoundExceeded(
+        'Section preparation exceeded its bound',
+      );
     }
     final cards = session.acceptedPublishedCards;
     validateCompleteSectionCoverage(input, cards);
@@ -364,6 +380,7 @@ final class LazyPreparedSection extends LazySectionAuthority {
       receipt,
       digest,
       operation.owner,
+      work,
     );
   }
 
@@ -488,7 +505,8 @@ abstract final class LazyHandoffRenderingAdapter {
 
 final class LazyAcceptedPublication {
   LazyAcceptedPublication.initial(this.current, this.owner)
-    : predecessor = null,
+    : sourceInput = current.input,
+      predecessor = null,
       lineageRootDigest = current.sessionDigest,
       previousHandoffDigest = null,
       handoffOrdinal = 0,
@@ -502,7 +520,8 @@ final class LazyAcceptedPublication {
     this.current,
     this.handoff,
     this.sessionDigest,
-  ) : predecessor = old.current,
+  ) : sourceInput = current.input,
+      predecessor = old.current,
       lineageRootDigest = old.lineageRootDigest,
       previousHandoffDigest = handoff!.handoffDigest,
       handoffOrdinal = old.handoffOrdinal + 1,
@@ -513,7 +532,8 @@ final class LazyAcceptedPublication {
   LazyAcceptedPublication.retained(
     LazyAcceptedPublication old,
     LazyRetainedSection retained,
-  ) : predecessor = null,
+  ) : sourceInput = retained.input,
+      predecessor = null,
       current = retained,
       owner = old.owner,
       revision = old.revision + 1,
@@ -524,6 +544,26 @@ final class LazyAcceptedPublication {
       cards = retained.cards,
       bodies = retained.bodies,
       sessionDigest = retained.sessionDigest;
+  LazyAcceptedPublication.prepended(
+    LazyAcceptedPublication old,
+    LazyPreparedSection reconstructed,
+    this.sourceInput,
+    this.handoff,
+  ) : predecessor = reconstructed,
+      current = old.current,
+      owner = old.owner,
+      revision = old.revision + 1,
+      lineageRootDigest = old.lineageRootDigest,
+      previousHandoffDigest = handoff!.handoffDigest,
+      handoffOrdinal = old.handoffOrdinal + 1,
+      cards = List.unmodifiable([...reconstructed.cards, ...old.cards]),
+      bodies = List.unmodifiable([...reconstructed.bodies, ...old.bodies]),
+      sessionDigest = readerSha256([
+        'LazyPrependSessionV1',
+        old.sessionDigest,
+        handoff.handoffDigest,
+      ]);
+  final LazySectionInput sourceInput;
   final String lineageRootDigest;
   final String? previousHandoffDigest;
   final int handoffOrdinal;
@@ -656,6 +696,114 @@ LazySnapshotHandoffV1 buildLazySnapshotHandoff({
   });
 }
 
+final class LazyHandoffBoundExceeded implements Exception {
+  const LazyHandoffBoundExceeded(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+/// This failure never authorizes a semantic substitute for an exact card.
+final class LazyExactReconstructionUnavailable implements Exception {
+  const LazyExactReconstructionUnavailable(this.message);
+  final String message;
+  @override
+  String toString() => 'Exact reconstruction unavailable: $message';
+}
+
+LazySnapshotHandoffV1 buildLazySnapshotPrepend({
+  required LazyAcceptedPublication old,
+  required LazyPreparedSection predecessor,
+  required LazyPreparedSection reconstructedCurrent,
+  required LazySectionInput window,
+  required String committedCardSignature,
+}) {
+  if (old.predecessor != null ||
+      old.current.input.sectionCount != 1 ||
+      predecessor.input.sectionCount != 1 ||
+      predecessor.receipt == null ||
+      predecessor.input.nextCandidate?.stableKey !=
+          old.current.input.sectionAuthorities.single.sectionKey ||
+      predecessor.packingIdentity != old.current.packingIdentity ||
+      reconstructedCurrent.packingIdentity != old.current.packingIdentity) {
+    throw const LazyExactReconstructionUnavailable(
+      'Predecessor, seam or packing authority differs',
+    );
+  }
+  old.current.validate();
+  predecessor.validate();
+  reconstructedCurrent.validate();
+  window.validateExtensionOf(predecessor.input);
+  final suffix = old.current.input;
+  if (window.sourceRecords.length !=
+          predecessor.input.snapshot.sourceCount +
+              suffix.sourceRecords.length ||
+      window.encodedSections.last != suffix.encodedSections.single ||
+      !List.generate(
+        suffix.sourceRecords.length,
+        (i) => identical(
+          window.sourceRecords[predecessor.input.snapshot.sourceCount + i],
+          suffix.sourceRecords[i],
+        ),
+      ).every((same) => same)) {
+    throw const LazyExactReconstructionUnavailable(
+      'Retained suffix authority differs',
+    );
+  }
+  if (reconstructedCurrent.input.snapshot.snapshotDigest !=
+          old.current.input.snapshot.snapshotDigest ||
+      canonicalJsonEncode(
+            old.bodies.map((b) => b.canonicalEncoding).toList(),
+          ) !=
+          canonicalJsonEncode(
+            reconstructedCurrent.bodies
+                .map((b) => b.canonicalEncoding)
+                .toList(),
+          ) ||
+      !old.cards.any((c) => c.identity.signature == committedCardSignature)) {
+    throw const LazyExactReconstructionUnavailable(
+      'Exact current card or source reconstruction differs',
+    );
+  }
+  // Stable-body equality includes all payload, stable slices and resolved block
+  // metrics. Runtime ordinals and snapshot-specific P05 identities are separate.
+  final first = old.current.bodies.first.sourceSlices.first;
+  final projection = LazyStableResidentProjection(
+    authority: old.current.input.sectionAuthorities.single,
+    snapshot: window.snapshot,
+  );
+  final next = projection.projectSlice(first);
+  if (next.sourceOrdinalHint != predecessor.input.snapshot.sourceCount ||
+      (next.startUtf16 ?? next.tableRowStart ?? 0) != 0) {
+    throw const LazyExactReconstructionUnavailable(
+      'Successor cursor does not meet the hard seam',
+    );
+  }
+  return LazySnapshotHandoffV1({
+    'kind': 'LazySnapshotPrependV1',
+    'acceptedPublicationDigest': old.digest,
+    'parentSessionDigest': old.sessionDigest,
+    'previousHandoffDigest': old.previousHandoffDigest,
+    'handoffOrdinal': old.handoffOrdinal + 1,
+    'committedCardSignature': committedCardSignature,
+    'predecessorRoot': predecessor.sessionDigest,
+    'predecessorReceipt': predecessor.receipt!.receiptDigest,
+    'predecessorBodies': readerSha256(
+      predecessor.bodies.map((b) => b.canonicalEncoding).toList(),
+    ),
+    'currentBodies': readerSha256(
+      reconstructedCurrent.bodies.map((b) => b.canonicalEncoding).toList(),
+    ),
+    'window': window.snapshot.snapshotDigest,
+    'packing': predecessor.packingIdentity,
+    'predecessorEnd': sectionEndPosition(
+      predecessor.input,
+      predecessor.cards.last.sourceSlices.last,
+    ),
+    'successorCursor': next.toCanonicalJson(),
+  });
+}
+
 enum LazySnapshotPublicationOutcome {
   accepted,
   prepared,
@@ -666,6 +814,7 @@ enum LazySnapshotPublicationOutcome {
   failedAttempt,
   retentionRequired,
   boundExceeded,
+  exactUnavailable,
   busy,
 }
 

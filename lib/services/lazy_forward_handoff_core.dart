@@ -149,8 +149,19 @@ final class LazyForwardHandoffCore {
   LazyForwardBeginResult beginNext(
     ParsedSection section,
     LazyHandoffOperation operation,
-  ) {
-    if (_pending != null) {
+  ) => _begin(section, operation, backward: false);
+
+  LazyForwardBeginResult beginPrevious(
+    ParsedSection section,
+    LazyHandoffOperation operation,
+  ) => _begin(section, operation, backward: true);
+
+  LazyForwardBeginResult _begin(
+    ParsedSection section,
+    LazyHandoffOperation operation, {
+    required bool backward,
+  }) {
+    if (_pending != null || _retentionCandidate != null) {
       return const LazyForwardBeginResult(
         LazySnapshotPublicationResult(LazySnapshotPublicationOutcome.busy),
       );
@@ -179,7 +190,24 @@ final class LazyForwardHandoffCore {
       );
     }
     try {
-      final input = old.current.input.append(section);
+      if (backward &&
+          old.current.input.publication
+                  .predecessorOf(old.current.input.sections.single)
+                  ?.stableKey !=
+              section.identity.stableKey) {
+        return const LazyForwardBeginResult(
+          LazySnapshotPublicationResult(
+            LazySnapshotPublicationOutcome.exactUnavailable,
+            'Verified immediate predecessor required',
+          ),
+        );
+      }
+      final input = backward
+          ? LazySectionInput.capture(
+              publication: old.current.input.publication,
+              sections: [section],
+            )
+          : old.current.input.append(section);
       final token = LazyForwardTransfer._(++_sequence);
       _pending = _PendingForward(
         token.id,
@@ -188,6 +216,9 @@ final class LazyForwardHandoffCore {
         old.digest,
         operation.owner,
         state.lazyVisibleCardSignature,
+        backward: backward,
+        committedInput: backward ? old.current.input : null,
+        window: backward ? input.joinSuccessor(old.current.input) : null,
       );
       _check();
       return LazyForwardBeginResult(
@@ -210,8 +241,9 @@ final class LazyForwardHandoffCore {
   Future<LazySnapshotPublicationResult> prepare(
     LazyForwardTransfer transfer,
     ReaderCardPaginatorLayout layout,
-    LazyHandoffOperation operation,
-  ) async {
+    LazyHandoffOperation operation, {
+    ReaderCardPaginatorLayout? committedLayout,
+  }) async {
     final pending = _pending;
     if (pending == null ||
         pending.id != transfer.id ||
@@ -258,6 +290,36 @@ final class LazyForwardHandoffCore {
         },
       );
       pending.source = null;
+      if (pending.backward) {
+        if (committedLayout == null) {
+          throw const LazyExactReconstructionUnavailable(
+            'Current-section renderer evidence required',
+          );
+        }
+        pending.workingInput = pending.committedInput;
+        pending.layout = committedLayout;
+        final remaining = limits.cards - _census().cards;
+        final remainingGuards = limits.guards - _census().guards - 2;
+        pending.verified = await LazyPreparedSection.prepare(
+          input: pending.committedInput!,
+          layout: committedLayout,
+          operation: ownedOperation,
+          maximumWork:
+              CanonicalPaginationBounds.normalWorkEnvelope -
+              pending.prepared!.workEntries,
+          maximumCards: remaining,
+          maximumGuards: remainingGuards,
+          onProgress: (session) {
+            pending.session = session;
+            _check();
+          },
+        );
+        final work =
+            pending.prepared!.workEntries + pending.verified!.workEntries;
+        if (work > (peak['reconstructionWork'] ?? 0)) {
+          peak['reconstructionWork'] = work;
+        }
+      }
       pending.working = false;
       _check();
       if (!_current(pending, operation)) {
@@ -270,11 +332,19 @@ final class LazyForwardHandoffCore {
               : LazySnapshotPublicationOutcome.stale,
         );
       }
-      pending.handoff = buildLazySnapshotHandoff(
-        old: state.lazyPublication!,
-        successor: pending.prepared!,
-        committedCardSignature: state.lazyVisibleCardSignature,
-      );
+      pending.handoff = pending.backward
+          ? buildLazySnapshotPrepend(
+              old: state.lazyPublication!,
+              predecessor: pending.prepared!,
+              reconstructedCurrent: pending.verified!,
+              window: pending.window!,
+              committedCardSignature: state.lazyVisibleCardSignature!,
+            )
+          : buildLazySnapshotHandoff(
+              old: state.lazyPublication!,
+              successor: pending.prepared!,
+              committedCardSignature: state.lazyVisibleCardSignature,
+            );
       _check();
       return const LazySnapshotPublicationResult(
         LazySnapshotPublicationOutcome.prepared,
@@ -284,7 +354,14 @@ final class LazyForwardHandoffCore {
           ? LazySnapshotPublicationOutcome.cancelled
           : !_current(pending, operation)
           ? LazySnapshotPublicationOutcome.stale
+          : pending.backward && error is! LazyHandoffBoundExceeded
+          ? LazySnapshotPublicationOutcome.exactUnavailable
           : LazySnapshotPublicationOutcome.boundExceeded;
+      if (pending.backward &&
+          (outcome == LazySnapshotPublicationOutcome.exactUnavailable ||
+              outcome == LazySnapshotPublicationOutcome.boundExceeded)) {
+        state.latchLazyAttemptFailure(operation);
+      }
       _release();
       return LazySnapshotPublicationResult(outcome, '$error');
     }
@@ -322,14 +399,41 @@ final class LazyForwardHandoffCore {
           '$error',
         );
       }
+      final controls = operation.pagination;
+      final publicationOperation = LazyHandoffOperation(
+        owner: operation.owner,
+        currentOwner: operation.currentOwner,
+        pagination: CanonicalPaginationOperationControls(
+          generationToken: controls.generationToken,
+          currentGenerationToken: controls.currentGenerationToken,
+          scheduler: controls.scheduler,
+          priority: controls.priority,
+          isCancelled: () =>
+              pending.cancelled ||
+              !identical(_pending, pending) ||
+              controls.isCancelled(),
+          diagnosticBookId: controls.diagnosticBookId,
+          onDiagnostic: controls.onDiagnostic,
+        ),
+      );
+      if (pending.backward) {
+        return state.publishSnapshotPrepend(
+          predecessor: pending.prepared!,
+          reconstructedCurrent: pending.verified!,
+          window: pending.window!,
+          handoff: pending.handoff!,
+          operation: publicationOperation,
+          beforeCommit: beforeCommit,
+        );
+      }
       return state.publishSnapshotHandoff(
         successor: pending.prepared!,
         handoff: pending.handoff!,
-        operation: operation,
+        operation: publicationOperation,
         beforeCommit: beforeCommit,
       );
     } finally {
-      _release();
+      if (identical(_pending, pending)) _release();
       _observe();
     }
   }
@@ -344,7 +448,16 @@ final class LazyForwardHandoffCore {
 
   LazySnapshotPublicationResult retainSnapshotSuffix(
     LazyHandoffOperation operation,
-  ) {
+  ) => _retain(operation, predecessor: false);
+
+  LazySnapshotPublicationResult retainSnapshotPrefix(
+    LazyHandoffOperation operation,
+  ) => _retain(operation, predecessor: true);
+
+  LazySnapshotPublicationResult _retain(
+    LazyHandoffOperation operation, {
+    required bool predecessor,
+  }) {
     if (_pending != null || _retentionCandidate != null) {
       return const LazySnapshotPublicationResult(
         LazySnapshotPublicationOutcome.busy,
@@ -354,11 +467,13 @@ final class LazyForwardHandoffCore {
     try {
       final result = state.retainSnapshotSuffix(
         operation: operation,
+        retainPredecessor: predecessor,
         pinnedRendererCards: _leases.values.toSet(),
         beforeCommit: () {
-          final kept = state.lazyPublication!.current.cards
-              .map((c) => c.identity.signature)
-              .toSet();
+          final selected = predecessor
+              ? state.lazyPublication!.predecessor!
+              : state.lazyPublication!.current;
+          final kept = selected.cards.map((c) => c.identity.signature).toSet();
           if (!_leases.values.every(kept.contains)) {
             throw StateError('Renderer pin changed before retention');
           }
@@ -454,7 +569,9 @@ final class LazyForwardHandoffCore {
         live.sections > limits.sections ||
         live.accountedBytes > limits.bytes ||
         live.metadataBytes > limits.metadataBytes) {
-      throw StateError('Core retention bound exceeded: ${live.toJson()}');
+      throw LazyHandoffBoundExceeded(
+        'Core retention bound exceeded: ${live.toJson()}',
+      );
     }
     _observe();
   }
@@ -467,8 +584,10 @@ final class LazyForwardHandoffCore {
       if (publication != null) publication.current,
       if (_retentionCandidate != null) _retentionCandidate!,
       if (pending?.prepared != null) pending!.prepared!,
+      if (pending?.verified != null) pending!.verified!,
     ];
     final inputs = HashSet<LazySectionInput>.identity();
+    if (publication != null) inputs.add(publication.sourceInput);
     final sessions = HashSet<CanonicalReaderPaginationSession>.identity();
     final renderers = HashSet<ReaderLayoutContract>.identity();
     final cards = HashSet<CanonicalFinalizedReaderCard>.identity();
@@ -502,11 +621,16 @@ final class LazyForwardHandoffCore {
     }
     if (pending != null) {
       if (pending.input != null) inputs.add(pending.input!);
+      if (pending.window != null) inputs.add(pending.window!);
+      if (pending.committedInput != null) inputs.add(pending.committedInput!);
       if (pending.session != null) sessions.add(pending.session!);
       if (pending.layout?.contract != null) {
         renderers.add(pending.layout!.contract!);
       }
-      if (pending.prepared == null) preparationReferences++;
+      if (pending.prepared == null ||
+          (pending.backward && pending.working && pending.verified == null)) {
+        preparationReferences++;
+      }
       if (pending.handoff != null) {
         guards.add(pending.handoff!.handoffDigest);
         metadata.add(pending.handoff!.canonicalEncoding);
@@ -599,11 +723,10 @@ final class LazyForwardHandoffCore {
     bytes +=
         16 * state.displayChunks.length + 16 * state.originalToDisplay.length;
     final working = pending?.working == true;
-    final scratchSources = working
-        ? pending!.input!.snapshot.sourceCount + 1
-        : 0;
+    final workingInput = pending?.workingInput ?? pending?.input;
+    final scratchSources = working ? workingInput!.snapshot.sourceCount + 1 : 0;
     final scratchBytes = working
-        ? pending!.input!.sourceRecords.fold<int>(
+        ? workingInput!.sourceRecords.fold<int>(
             0,
             (n, r) => n + 4 * r.encodedSource.length,
           )
@@ -638,9 +761,15 @@ final class _PendingForward {
     this.source,
     this.publicationDigest,
     this.owner,
-    this.visibleSignature,
-  );
+    this.visibleSignature, {
+    this.backward = false,
+    this.committedInput,
+    this.window,
+  });
   final int id;
+  final bool backward;
+  LazySectionInput? committedInput, window, workingInput;
+  LazyPreparedSection? verified;
   LazySectionInput? input;
   ParsedSection? source;
   ReaderCardPaginatorLayout? layout;
@@ -653,6 +782,10 @@ final class _PendingForward {
   bool working = false;
   bool cancelled = false;
   void clear() {
+    committedInput = null;
+    window = null;
+    workingInput = null;
+    verified = null;
     input = null;
     source = null;
     layout = null;
