@@ -1,3 +1,4 @@
+import 'lazy_snapshot_handoff_service.dart';
 import 'package:flutter/foundation.dart';
 
 import '../models/book_chunk.dart';
@@ -456,6 +457,245 @@ final class ProgressiveDisplayState {
   String? _acceptedLayoutIdentity;
   String? _acceptedPaginationIdentity;
   bool _canonicalCacheWriteAuthority = false;
+  LazyAcceptedPublication? _lazyPublication;
+  LazyPublicationOwner? _failedLazyAttempt;
+  LazyAcceptedPublication? get lazyPublication => _lazyPublication;
+
+  LazySnapshotPublicationResult publishLazyInitial({
+    required LazyPreparedSection prepared,
+    required LazyHandoffOperation operation,
+    void Function()? beforeCommit,
+  }) {
+    if (!operation.isCurrent || prepared.owner != operation.owner) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.stale,
+      );
+    }
+    if (_canonicalCards.isNotEmpty ||
+        _lazyPublication != null ||
+        prepared.input.sectionCount != 1 ||
+        prepared.input.snapshot.bookId != signature.bookId) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.invalid,
+        'Initial lazy publication requires an empty matching reader',
+      );
+    }
+    try {
+      prepared.validate();
+      final candidate = LazyAcceptedPublication.initial(
+        prepared,
+        operation.owner,
+      );
+      final projection = _lazyProjection(candidate);
+      beforeCommit?.call();
+      if (!operation.isCurrent ||
+          _canonicalCards.isNotEmpty ||
+          _lazyPublication != null) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      prepared.validate();
+      if (!operation.isCurrent ||
+          _canonicalCards.isNotEmpty ||
+          _lazyPublication != null) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      _commitLazyPublication(candidate, projection);
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.accepted,
+      );
+    } on Object catch (error) {
+      return LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.invalid,
+        '$error',
+      );
+    }
+  }
+
+  /// Dedicated compare-and-swap append. Ordinary append validation is unchanged.
+  LazySnapshotPublicationResult publishSnapshotHandoff({
+    required LazyPreparedSection successor,
+    required LazySnapshotHandoffV1 handoff,
+    required LazyHandoffOperation operation,
+    void Function()? beforeCommit,
+  }) {
+    final old = _lazyPublication;
+    if (operation.pagination.isCancelled()) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.cancelled,
+      );
+    }
+    if (!operation.isCurrent ||
+        successor.owner != operation.owner ||
+        old == null ||
+        old.owner.bookOpenEpoch != operation.owner.bookOpenEpoch ||
+        old.owner.displayOwner != operation.owner.displayOwner) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.stale,
+      );
+    }
+    if (old.revision != 0) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.replayed,
+      );
+    }
+    if (_failedLazyAttempt == operation.owner) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.failedAttempt,
+      );
+    }
+    try {
+      final expected = buildLazySnapshotHandoff(old: old, successor: successor);
+      if (expected.canonicalEncoding != handoff.canonicalEncoding ||
+          expected.handoffDigest != handoff.handoffDigest) {
+        throw StateError(
+          'Receipt, lineage, prefix or publication proof differs',
+        );
+      }
+      if (_canonicalCards.length != old.cards.length ||
+          !_sameCardSequence(_canonicalCards, old.cards)) {
+        throw StateError('Accepted publication changed');
+      }
+      for (var i = 0; i < old.cards.length; i++) {
+        LazyHandoffRenderingAdapter.block(
+          retained: old.current,
+          cardIndex: i,
+          successor: successor,
+        );
+      }
+      if (old.current.input.snapshot.sourceCount +
+                  successor.input.snapshot.sourceCount >
+              CanonicalPaginationBounds.activeSourceCeiling ||
+          old.cards.length + successor.cards.length >
+              CanonicalPaginationBounds.activeCardCeiling ||
+          old.current.session.checkpointIndex.records.length +
+                  successor.session.checkpointIndex.records.length >
+              CanonicalPaginationBounds.residentContinuationRecordBasis) {
+        throw StateError('Single-transfer aggregate authority bounds exceeded');
+      }
+      final candidate = LazyAcceptedPublication.transferred(
+        old,
+        successor,
+        handoff,
+        handoff.fields['successorSessionDigest']! as String,
+      );
+      final projection = _lazyProjection(candidate);
+      final oldDigest = old.digest;
+      beforeCommit?.call();
+      if (operation.pagination.isCancelled()) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.cancelled,
+        );
+      }
+      if (!operation.isCurrent ||
+          !identical(_lazyPublication, old) ||
+          old.digest != oldDigest) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      // Recheck all retained bytes/evidence after the final callback. No mutation
+      // of published cards, continuation ancestry or source records is involved.
+      old.current.validate();
+      successor.validate();
+      if (!operation.isCurrent ||
+          !identical(_lazyPublication, old) ||
+          old.digest != oldDigest) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      _commitLazyPublication(candidate, projection);
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.accepted,
+      );
+    } on Object catch (error) {
+      if (!identical(_lazyPublication, old) || !operation.isCurrent) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      _failedLazyAttempt = operation.owner;
+      return LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.invalid,
+        '$error',
+      );
+    }
+  }
+
+  ({
+    List<BookChunk> chunks,
+    List<List<int>> forward,
+    Map<int, int> reverse,
+    List<PreparedDisplayRange> ranges,
+  })
+  _lazyProjection(LazyAcceptedPublication publication) {
+    final chunks = List<BookChunk>.unmodifiable(
+      publication.cards.map((c) => c.card),
+    );
+    final forward = List<List<int>>.unmodifiable([
+      for (final card in publication.cards)
+        List<int>.unmodifiable(
+          card.sourceSlices.map((s) => s.sourceOrdinalHint).toSet(),
+        ),
+    ]);
+    final reverse = <int, int>{};
+    for (var display = 0; display < forward.length; display++) {
+      for (final source in forward[display]) {
+        reverse[source] = display;
+      }
+    }
+    return (
+      chunks: chunks,
+      forward: forward,
+      reverse: Map.unmodifiable(reverse),
+      ranges: List.unmodifiable([
+        PreparedDisplayRange(
+          sourceRange: SourceChunkRange(
+            0,
+            publication.current.input.snapshot.sourceCount,
+          ),
+          displayStart: 0,
+          displayEndExclusive: chunks.length,
+        ),
+      ]),
+    );
+  }
+
+  void _commitLazyPublication(
+    LazyAcceptedPublication candidate,
+    ({
+      List<BookChunk> chunks,
+      List<List<int>> forward,
+      Map<int, int> reverse,
+      List<PreparedDisplayRange> ranges,
+    })
+    projection,
+  ) {
+    _ranges = projection.ranges;
+    _displayChunks = projection.chunks;
+    _displayToOriginal = projection.forward;
+    _originalToDisplay = projection.reverse;
+    _canonicalCards = candidate.cards;
+    _acceptedCanonicalContinuation = candidate.current.receipt == null
+        ? candidate.current.continuation
+        : null;
+    _acceptedSourceSnapshot = candidate.current.input.snapshot;
+    _acceptedSessionIdentity = candidate.sessionDigest;
+    _acceptedLayoutIdentity =
+        candidate.current.session.controlledLayoutIdentity;
+    _acceptedPaginationIdentity = readerPaginationAlgorithmVersion;
+    _canonicalCacheWriteAuthority =
+        false; // No ordinary cache terminal proof for a section receipt.
+    sourceChunkCount = candidate.current.input.snapshot.sourceCount;
+    initialWindowReady = true;
+    generationComplete = candidate.current.input.verifiedBookEnd;
+    _lazyPublication = candidate;
+    _failedLazyAttempt = null;
+  }
 
   List<PreparedDisplayRange> get ranges => _ranges;
   List<BookChunk> get displayChunks => _displayChunks;
@@ -840,6 +1080,8 @@ final class ProgressiveDisplayState {
       _acceptedLayoutIdentity = request.controlledLayoutIdentity;
       _acceptedPaginationIdentity = request.paginationAlgorithmIdentity;
       _canonicalCacheWriteAuthority = true;
+      _lazyPublication = null;
+      _failedLazyAttempt = null;
       initialWindowReady = true;
       generationComplete = prepared.generationComplete;
       foregroundRequest = null;
@@ -1675,6 +1917,8 @@ final class ProgressiveDisplayState {
       ).every((index) => _sameFinalizedCard(first[index], second[index]));
 
   void _clearCanonicalAuthority() {
+    _lazyPublication = null;
+    _failedLazyAttempt = null;
     _canonicalCards = [];
     _acceptedCanonicalContinuation = null;
     _acceptedSourceSnapshot = null;

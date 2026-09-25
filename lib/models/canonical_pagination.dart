@@ -1515,6 +1515,7 @@ final class CanonicalFinalizedReaderCard {
 }
 
 enum CanonicalPaginationOutcomeKind {
+  inputExhaustedAwaitingSuccessor,
   finalizedOutputAvailable,
   logicalEndReached,
   budgetExhaustedWithProvisionalFrontier,
@@ -1529,6 +1530,19 @@ sealed class CanonicalPaginationResult {
 
   final CanonicalPaginationWorkDiagnostics diagnostics;
   CanonicalPaginationOutcomeKind get kind;
+}
+
+/// A complete hard-section tail, without any v1 terminal continuation.
+final class CanonicalInputExhaustedAwaitingSuccessor
+    extends CanonicalPaginationResult {
+  CanonicalInputExhaustedAwaitingSuccessor({
+    required super.diagnostics,
+    required List<CanonicalFinalizedReaderCard> finalizedCards,
+  }) : finalizedCards = List.unmodifiable(finalizedCards);
+  final List<CanonicalFinalizedReaderCard> finalizedCards;
+  @override
+  CanonicalPaginationOutcomeKind get kind =>
+      CanonicalPaginationOutcomeKind.inputExhaustedAwaitingSuccessor;
 }
 
 sealed class CanonicalPaginationAcceptedResult

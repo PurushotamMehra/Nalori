@@ -1,3 +1,4 @@
+import '../models/lazy_section_input.dart';
 import 'dart:collection';
 import 'dart:math' as math;
 
@@ -159,6 +160,7 @@ final class CanonicalPaginationRequest {
     this.paginationAlgorithmIdentity = readerPaginationAlgorithmVersion,
     this.target,
     this.continuationParent,
+    this.sectionInput,
   });
 
   final String bookId;
@@ -173,6 +175,7 @@ final class CanonicalPaginationRequest {
   /// Required for a non-root continuation so its parent link can be proved.
   final CanonicalPaginationContinuation? continuationParent;
   final CanonicalPaginationWorkBudget workBudget;
+  final LazySectionInput? sectionInput;
   final CanonicalPaginationOperationControls operation;
 }
 
@@ -183,6 +186,17 @@ sealed class CanonicalReaderPaginationPathResult {
   CanonicalPaginationContinuation? get acceptedContinuation => null;
   bool get hasAcceptedRestartAuthority => false;
   bool get hasCacheWriteAuthority => false;
+}
+
+final class CanonicalReaderInputExhausted
+    extends CanonicalReaderPaginationPathResult {
+  CanonicalReaderInputExhausted(
+    List<CanonicalFinalizedReaderCard> cards,
+    this.diagnostics,
+  ) : publishableCards = List.unmodifiable(cards);
+  @override
+  final List<CanonicalFinalizedReaderCard> publishableCards;
+  final CanonicalPaginationWorkDiagnostics diagnostics;
 }
 
 sealed class CanonicalReaderPaginationPathAccepted
@@ -359,6 +373,7 @@ final class CanonicalReaderPaginationSession {
     required this.layout,
     this.paginator = const ReaderCardPaginator(),
     this.deferPublicationCommit = false,
+    this.sectionInput,
   }) : _checkpointIndex = CanonicalPaginationCheckpointIndex(
          bookId: sourceSnapshot.bookId,
          publicationFingerprint: sourceSnapshot.publicationFingerprint,
@@ -374,6 +389,9 @@ final class CanonicalReaderPaginationSession {
   final ReaderCardPaginatorLayout layout;
   final ReaderCardPaginator paginator;
   final bool deferPublicationCommit;
+  final LazySectionInput? sectionInput;
+  bool _inputExhausted = false;
+  bool get inputExhaustedAwaitingSuccessor => _inputExhausted;
   CanonicalPaginationCheckpointIndex _checkpointIndex;
   CanonicalPaginationContinuation? _acceptedSuffix;
   CanonicalFinalizedReaderCard? _acceptedPublishedSuffixCard;
@@ -534,6 +552,11 @@ final class CanonicalReaderPaginationSession {
     required CanonicalPaginationTargetCursor target,
     required CanonicalPaginationOperationControls operation,
   }) async {
+    if (sectionInput != null) {
+      return const CanonicalReaderRequiredEarlierRestart(
+        'Lazy handoff sessions start at their verified section root.',
+      );
+    }
     final resolved = sourceSnapshot.resolveOrdinal(
       sourceIdentity: target.sourceIdentity,
       ordinalHint: target.sourceOrdinalHint,
@@ -710,17 +733,27 @@ final class CanonicalReaderPaginationSession {
   Future<CanonicalReaderPaginationPathResult> generateForward({
     required CanonicalPaginationFinalizedBoundary acceptedPublishedSuffix,
     required CanonicalPaginationOperationControls operation,
+    CanonicalPaginationWorkBudget budget =
+        const CanonicalPaginationWorkBudget(),
   }) => _runWithDeferredPublication(
     () => _generateForwardInternal(
       acceptedPublishedSuffix: acceptedPublishedSuffix,
       operation: operation,
+      budget: budget,
     ),
   );
 
   Future<CanonicalReaderPaginationPathResult> _generateForwardInternal({
     required CanonicalPaginationFinalizedBoundary acceptedPublishedSuffix,
     required CanonicalPaginationOperationControls operation,
+    CanonicalPaginationWorkBudget budget =
+        const CanonicalPaginationWorkBudget(),
   }) async {
+    if (_inputExhausted) {
+      return const CanonicalReaderRequiredEarlierRestart(
+        'Sealed input requires a dedicated snapshot handoff.',
+      );
+    }
     final restart = _acceptedSuffix;
     if (restart == null ||
         !_sameBoundary(
@@ -748,7 +781,7 @@ final class CanonicalReaderPaginationSession {
       restart: restart,
       continuationParent: parent,
       operation: operation,
-      budget: const CanonicalPaginationWorkBudget(),
+      budget: budget,
     );
     return _acceptSingle(result, operation: operation);
   }
@@ -779,6 +812,11 @@ final class CanonicalReaderPaginationSession {
     required CanonicalPaginationCursor acceptedSuccessorStartCursor,
     required CanonicalPaginationOperationControls operation,
   }) async {
+    if (sectionInput != null) {
+      return const CanonicalReaderRequiredEarlierRestart(
+        'Lazy backward transfer is not implemented',
+      );
+    }
     final desiredOrdinal = sourceSnapshot.resolveOrdinal(
       sourceIdentity: desiredPredecessor.sourceIdentity,
       ordinalHint: desiredPredecessor.sourceOrdinalHint,
@@ -919,6 +957,11 @@ final class CanonicalReaderPaginationSession {
   Future<CanonicalReaderPaginationPathResult> _runWithDeferredPublication(
     Future<CanonicalReaderPaginationPathResult> Function() operation,
   ) async {
+    if (sectionInput != null && deferPublicationCommit) {
+      return const CanonicalReaderRequiredEarlierRestart(
+        'Lazy sections are prepared in private successor sessions.',
+      );
+    }
     if (!deferPublicationCommit) return operation();
     final before = _captureSessionState();
     try {
@@ -1542,6 +1585,7 @@ final class CanonicalReaderPaginationSession {
       sourceSnapshot: sourceSnapshot,
       controlledLayoutIdentity: controlledLayoutIdentity,
       layout: layout,
+      sectionInput: sectionInput,
       restart: restart,
       continuationParent: continuationParent,
       target: target,
@@ -1560,6 +1604,18 @@ final class CanonicalReaderPaginationSession {
     }
     if (!_operationIsCurrent(operation)) {
       return CanonicalReaderPaginationPathRejected(_staleRejection(operation));
+    }
+    if (result is CanonicalInputExhaustedAwaitingSuccessor) {
+      if (replacePublishedCards) _acceptedPublishedCards.clear();
+      _acceptedPublishedCards.addAll(result.finalizedCards);
+      if (result.finalizedCards.isNotEmpty) {
+        _acceptedPublishedSuffixCard = result.finalizedCards.last;
+      }
+      _inputExhausted = true;
+      return CanonicalReaderInputExhausted(
+        result.finalizedCards,
+        result.diagnostics,
+      );
     }
     final accepted = result as CanonicalPaginationAcceptedResult;
     final insertion = _checkpointIndex.insert(accepted);
@@ -2523,6 +2579,19 @@ final class ReaderCardPaginator {
   Future<CanonicalPaginationResult> paginateCanonical(
     CanonicalPaginationRequest request,
   ) async {
+    final sectionInput = request.sectionInput;
+    if (sectionInput != null) {
+      try {
+        sectionInput.validateSnapshot(request.sourceSnapshot);
+      } on Object catch (error) {
+        return CanonicalInvalidRestartSourceRejected(
+          diagnostics: const CanonicalPaginationWorkDiagnostics(),
+          reason: CanonicalPaginationRejectionReason
+              .incompatibleParserSourceSnapshot,
+          message: '$error',
+        );
+      }
+    }
     final invalid = _validateCanonicalRequest(request);
     if (invalid != null) {
       return CanonicalInvalidRestartSourceRejected(
@@ -2647,6 +2716,12 @@ final class ReaderCardPaginator {
         engine.kind == _EngineStopKind.logicalEnd ||
         (engine.nextCursor.isLogicalEnd &&
             engine.frontier.cardCandidateCount == 0);
+    if (terminal && sectionInput != null && !sectionInput.verifiedBookEnd) {
+      return CanonicalInputExhaustedAwaitingSuccessor(
+        diagnostics: engine.diagnostics,
+        finalizedCards: finalized,
+      );
+    }
     final checkpointReason = switch (engine.kind) {
       _ when terminal => CanonicalPaginationCheckpointReason.terminalBookEnd,
       _EngineStopKind.sectionBoundary =>
