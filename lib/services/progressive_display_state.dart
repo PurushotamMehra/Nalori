@@ -460,6 +460,78 @@ final class ProgressiveDisplayState {
   LazyAcceptedPublication? _lazyPublication;
   LazyPublicationOwner? _failedLazyAttempt;
   LazyAcceptedPublication? get lazyPublication => _lazyPublication;
+  String? _lazyVisibleCardSignature;
+  String? get lazyVisibleCardSignature => _lazyVisibleCardSignature;
+  bool lazyAttemptFailed(LazyPublicationOwner owner) =>
+      _failedLazyAttempt == owner;
+
+  bool advanceLazyVisibleCard(
+    String signature,
+    LazyHandoffOperation operation,
+  ) {
+    final publication = _lazyPublication;
+    if (publication == null ||
+        !operation.isCurrent ||
+        operation.owner.bookOpenEpoch != publication.owner.bookOpenEpoch ||
+        operation.owner.displayOwner != publication.owner.displayOwner ||
+        !publication.cards.any((c) => c.identity.signature == signature)) {
+      return false;
+    }
+    _lazyVisibleCardSignature = signature;
+    return true;
+  }
+
+  LazySnapshotPublicationResult retainSnapshotSuffix({
+    required LazyHandoffOperation operation,
+    Set<String> pinnedRendererCards = const {},
+    void Function(LazyRetainedSection)? onPrepared,
+    void Function()? beforeCommit,
+  }) {
+    final old = _lazyPublication;
+    if (old == null ||
+        !operation.isCurrent ||
+        old.owner.bookOpenEpoch != operation.owner.bookOpenEpoch ||
+        old.owner.displayOwner != operation.owner.displayOwner) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.stale,
+      );
+    }
+    final retainedSignatures = old.current.cards
+        .map((c) => c.identity.signature)
+        .toSet();
+    if (!retainedSignatures.contains(_lazyVisibleCardSignature) ||
+        !pinnedRendererCards.every(retainedSignatures.contains)) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.retentionRequired,
+        'Visible card or renderer lease still pins the obsolete section',
+      );
+    }
+    final visible = _lazyVisibleCardSignature;
+    try {
+      final retained = LazyRetainedSection.capture(old.current);
+      onPrepared?.call(retained);
+      final candidate = LazyAcceptedPublication.retained(old, retained);
+      final projection = _lazyProjection(candidate);
+      beforeCommit?.call();
+      if (!operation.isCurrent ||
+          !identical(old, _lazyPublication) ||
+          visible != _lazyVisibleCardSignature) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      retained.validate();
+      _commitLazyPublication(candidate, projection);
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.accepted,
+      );
+    } on Object catch (error) {
+      return LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.invalid,
+        '$error',
+      );
+    }
+  }
 
   LazySnapshotPublicationResult publishLazyInitial({
     required LazyPreparedSection prepared,
@@ -523,6 +595,7 @@ final class ProgressiveDisplayState {
     void Function()? beforeCommit,
   }) {
     final old = _lazyPublication;
+    final visible = _lazyVisibleCardSignature;
     if (operation.pagination.isCancelled()) {
       return const LazySnapshotPublicationResult(
         LazySnapshotPublicationOutcome.cancelled,
@@ -537,9 +610,15 @@ final class ProgressiveDisplayState {
         LazySnapshotPublicationOutcome.stale,
       );
     }
-    if (old.revision != 0) {
+    final ordinal = handoff.fields['handoffOrdinal'];
+    if (ordinal is int && ordinal <= old.handoffOrdinal) {
       return const LazySnapshotPublicationResult(
         LazySnapshotPublicationOutcome.replayed,
+      );
+    }
+    if (old.predecessor != null || old.current.input.sectionCount != 1) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.retentionRequired,
       );
     }
     if (_failedLazyAttempt == operation.owner) {
@@ -548,7 +627,11 @@ final class ProgressiveDisplayState {
       );
     }
     try {
-      final expected = buildLazySnapshotHandoff(old: old, successor: successor);
+      final expected = buildLazySnapshotHandoff(
+        old: old,
+        successor: successor,
+        committedCardSignature: _lazyVisibleCardSignature,
+      );
       if (expected.canonicalEncoding != handoff.canonicalEncoding ||
           expected.handoffDigest != handoff.handoffDigest) {
         throw StateError(
@@ -571,7 +654,7 @@ final class ProgressiveDisplayState {
               CanonicalPaginationBounds.activeSourceCeiling ||
           old.cards.length + successor.cards.length >
               CanonicalPaginationBounds.activeCardCeiling ||
-          old.current.session.checkpointIndex.records.length +
+          (old.current.session?.checkpointIndex.records.length ?? 0) +
                   successor.session.checkpointIndex.records.length >
               CanonicalPaginationBounds.residentContinuationRecordBasis) {
         throw StateError('Single-transfer aggregate authority bounds exceeded');
@@ -592,7 +675,8 @@ final class ProgressiveDisplayState {
       }
       if (!operation.isCurrent ||
           !identical(_lazyPublication, old) ||
-          old.digest != oldDigest) {
+          old.digest != oldDigest ||
+          visible != _lazyVisibleCardSignature) {
         return const LazySnapshotPublicationResult(
           LazySnapshotPublicationOutcome.stale,
         );
@@ -603,7 +687,8 @@ final class ProgressiveDisplayState {
       successor.validate();
       if (!operation.isCurrent ||
           !identical(_lazyPublication, old) ||
-          old.digest != oldDigest) {
+          old.digest != oldDigest ||
+          visible != _lazyVisibleCardSignature) {
         return const LazySnapshotPublicationResult(
           LazySnapshotPublicationOutcome.stale,
         );
@@ -639,7 +724,19 @@ final class ProgressiveDisplayState {
     final forward = List<List<int>>.unmodifiable([
       for (final card in publication.cards)
         List<int>.unmodifiable(
-          card.sourceSlices.map((s) => s.sourceOrdinalHint).toSet(),
+          card.sourceSlices.map((s) {
+            final owners = publication.current.input.snapshot.owners;
+            final ordinal = owners.indexWhere(
+              (o) =>
+                  o.sourceIdentity == s.sourceIdentity &&
+                  o.sectionIdentity == s.sectionIdentity &&
+                  o.sourceDigest == s.sourceDigest,
+            );
+            if (ordinal < 0) {
+              throw StateError('Retained stable source owner is absent');
+            }
+            return ordinal;
+          }).toSet(),
         ),
     ]);
     final reverse = <int, int>{};
@@ -685,8 +782,7 @@ final class ProgressiveDisplayState {
         : null;
     _acceptedSourceSnapshot = candidate.current.input.snapshot;
     _acceptedSessionIdentity = candidate.sessionDigest;
-    _acceptedLayoutIdentity =
-        candidate.current.session.controlledLayoutIdentity;
+    _acceptedLayoutIdentity = candidate.current.packingIdentity;
     _acceptedPaginationIdentity = readerPaginationAlgorithmVersion;
     _canonicalCacheWriteAuthority =
         false; // No ordinary cache terminal proof for a section receipt.
@@ -694,6 +790,7 @@ final class ProgressiveDisplayState {
     initialWindowReady = true;
     generationComplete = candidate.current.input.verifiedBookEnd;
     _lazyPublication = candidate;
+    _lazyVisibleCardSignature ??= candidate.cards.first.identity.signature;
     _failedLazyAttempt = null;
   }
 
@@ -1081,6 +1178,7 @@ final class ProgressiveDisplayState {
       _acceptedPaginationIdentity = request.paginationAlgorithmIdentity;
       _canonicalCacheWriteAuthority = true;
       _lazyPublication = null;
+      _lazyVisibleCardSignature = null;
       _failedLazyAttempt = null;
       initialWindowReady = true;
       generationComplete = prepared.generationComplete;
@@ -1918,6 +2016,7 @@ final class ProgressiveDisplayState {
 
   void _clearCanonicalAuthority() {
     _lazyPublication = null;
+    _lazyVisibleCardSignature = null;
     _failedLazyAttempt = null;
     _canonicalCards = [];
     _acceptedCanonicalContinuation = null;

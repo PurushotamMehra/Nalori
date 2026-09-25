@@ -78,6 +78,23 @@ final class CanonicalPaginationSourceOwner {
   };
 }
 
+/// Immutable lazy backing record. Resident ordinals belong only to a view;
+/// retirement/expansion share this object without rewriting its encoded bytes.
+final class CanonicalLazySourceRecord {
+  CanonicalLazySourceRecord.pin({
+    required BookChunk source,
+    required this.sourceIdentity,
+    required this.sectionIdentity,
+    required this.spineIdentity,
+  }) : encodedSource = canonicalJsonEncode(source.toJson()),
+       sourceDigest = canonicalBookChunkOwnershipDigest(source);
+  final String encodedSource;
+  final String sourceIdentity;
+  final String sectionIdentity;
+  final String spineIdentity;
+  final String sourceDigest;
+}
+
 /// A revision-pinned source snapshot.
 ///
 /// Source chunks are stored as canonical serialized records and decoded on
@@ -93,6 +110,7 @@ final class CanonicalPaginationSourceSnapshot {
     required this.snapshotDigest,
     required List<CanonicalPaginationSourceOwner> owners,
     required List<String> encodedSources,
+    this.lazyRecords,
   }) : owners = List<CanonicalPaginationSourceOwner>.unmodifiable(owners),
        _encodedSources = List<String>.unmodifiable(encodedSources),
        _ordinalByIdentity = Map<String, int>.unmodifiable(<String, int>{
@@ -169,6 +187,56 @@ final class CanonicalPaginationSourceSnapshot {
     );
   }
 
+  /// Separate lazy address space. Ordinary pin/resolve remains dense and strict.
+  factory CanonicalPaginationSourceSnapshot.pinLazy({
+    required String bookId,
+    required String publicationFingerprint,
+    required String parserSourceIdentity,
+    required String sourceRevision,
+    required List<CanonicalLazySourceRecord> records,
+  }) {
+    if (records.map((r) => r.sourceIdentity).toSet().length != records.length ||
+        records.any(
+          (r) =>
+              r.sourceIdentity.isEmpty ||
+              r.sectionIdentity.isEmpty ||
+              r.spineIdentity.isEmpty,
+        )) {
+      throw ArgumentError('Missing or duplicate lazy source ownership');
+    }
+    final owners = [
+      for (var i = 0; i < records.length; i++)
+        CanonicalPaginationSourceOwner(
+          sourceIdentity: records[i].sourceIdentity,
+          sectionIdentity: records[i].sectionIdentity,
+          spineIdentity: records[i].spineIdentity,
+          sourceOrdinalHint: i,
+          sourceDigest: records[i].sourceDigest,
+        ),
+    ];
+    final encoded = [for (final record in records) record.encodedSource];
+    return CanonicalPaginationSourceSnapshot._(
+      bookId: bookId,
+      publicationFingerprint: publicationFingerprint,
+      parserSourceIdentity: parserSourceIdentity,
+      sourceRevision: sourceRevision,
+      owners: owners,
+      encodedSources: encoded,
+      lazyRecords: List.unmodifiable(records),
+      snapshotDigest: readerSha256([
+        'LazySourceViewV1',
+        bookId,
+        publicationFingerprint,
+        parserSourceIdentity,
+        sourceRevision,
+        owners.map((o) => o.toDigestJson()).toList(),
+        encoded,
+      ]),
+    );
+  }
+
+  final List<CanonicalLazySourceRecord>? lazyRecords;
+
   final String bookId;
   final String publicationFingerprint;
   final String parserSourceIdentity;
@@ -206,8 +274,24 @@ final class CanonicalPaginationSourceSnapshot {
     if (ordinal == null) {
       throw StateError('Stable source owner did not resolve exactly.');
     }
-    final decoded = jsonDecode(_encodedSources[ordinal]);
-    return BookChunk.fromJson(Map<String, dynamic>.from(decoded as Map));
+    final decoded = Map<String, dynamic>.from(
+      jsonDecode(_encodedSources[ordinal]) as Map,
+    );
+    if (lazyRecords != null) {
+      // Ephemeral engine projection only. Original record/card bytes never move.
+      final delta = ordinal - (decoded['i'] as int);
+      decoded['i'] = ordinal;
+      if (decoded['sr'] case final List ranges) {
+        decoded['sr'] = [
+          for (final value in ranges)
+            {
+              ...Map<String, dynamic>.from(value as Map),
+              'ci': (value['ci'] as int) + delta,
+            },
+        ];
+      }
+    }
+    return BookChunk.fromJson(decoded);
   }
 
   BookChunk resolveOrdinalSource(int ordinal) => resolveSource(

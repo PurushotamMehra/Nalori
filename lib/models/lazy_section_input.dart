@@ -3,7 +3,6 @@ import 'dart:convert';
 import '../services/lazy_epub_index_service.dart';
 import '../services/lazy_parsed_book.dart';
 import '../services/lazy_stable_card_service.dart';
-import 'book_chunk.dart';
 import 'canonical_pagination.dart';
 import 'lazy_stable_card.dart';
 import 'reader_checkpoint.dart';
@@ -41,6 +40,47 @@ final class PublicationSpineAuthority {
   String get bookId => _index.bookId;
   String get publicationFingerprint => _index.publicationFingerprint;
   String get dependencyIdentity => lazySectionDependencySignature(_index);
+  int get accountedMetadataBytes =>
+      2 *
+      canonicalJsonEncode([
+        _index.filePath,
+        _index.bookId,
+        _index.title,
+        _index.author,
+        _index.authorList,
+        _index.contentDirectoryPath,
+        _index.coverHref,
+        _index.schemaVersion,
+        _index.publicationFingerprint,
+        _index.fileSizeBytes,
+        _index.fileModifiedMs,
+        _index.normalizedHrefToManifestHref,
+        _index.normalizedHrefToSpineIndex,
+        for (final item in _index.spine)
+          [
+            item.index,
+            item.idRef,
+            item.href,
+            item.mediaType,
+            item.fullPath,
+            item.isLinear,
+            item.sizeBytes,
+            item.sourceChecksum,
+            item.normalizedHref,
+            item.structuralWeight,
+            item.prefixWeight,
+          ],
+        for (final item in _index.manifest.values)
+          [
+            item.id,
+            item.href,
+            item.mediaType,
+            item.fullPath,
+            item.sizeBytes,
+            item.normalizedHref,
+            item.properties,
+          ],
+      ]).length;
 
   LazyStableSectionAuthority sectionAuthority(ParsedSection section) =>
       LazyStableSectionAuthority.capture(_index, section);
@@ -120,48 +160,21 @@ final class LazySectionInput {
         );
       }
     }
-    final chunks = <BookChunk>[];
-    final keys = <CanonicalPaginationSourceKey>[];
+    final records = <CanonicalLazySourceRecord>[];
     for (var i = 0; i < copies.length; i++) {
-      final section = copies[i];
       final authority = authorities[i];
-      for (var local = 0; local < section.chunks.length; local++) {
-        final ordinal = chunks.length;
-        // Only unpublished source projections receive dense runtime ordinals.
-        final json = Map<String, dynamic>.from(section.chunks[local].toJson());
-        json['i'] = ordinal;
-        if (json['sr'] case final List ranges) {
-          final start = ordinal - local;
-          json['sr'] = [
-            for (final range in ranges)
-              {
-                ...Map<String, dynamic>.from(range as Map),
-                'ci': (range['ci'] as int) + start,
-              },
-          ];
-        }
-        chunks.add(BookChunk.fromJson(json));
-        keys.add(
-          CanonicalPaginationSourceKey(
+      for (var local = 0; local < copies[i].chunks.length; local++) {
+        records.add(
+          CanonicalLazySourceRecord.pin(
+            source: copies[i].chunks[local],
             sourceIdentity: authority.sourceIdentity(local),
             sectionIdentity: authority.sectionKey,
             spineIdentity: authority.sectionKey,
-            sourceOrdinalHint: ordinal,
           ),
         );
       }
     }
-    if (chunks.length > CanonicalPaginationBounds.activeSourceCeiling) {
-      throw StateError('Aggregate snapshot exceeds the source bound');
-    }
-    final snapshot = CanonicalPaginationSourceSnapshot.pin(
-      bookId: publication.bookId,
-      publicationFingerprint: publication.publicationFingerprint,
-      parserSourceIdentity: lazyParsedSectionParserVersion,
-      sourceRevision: readerSha256(['LazySectionInputV1', encoded]),
-      sourceChunks: chunks,
-      sourceKeys: keys,
-    );
+    final snapshot = _snapshot(publication, encoded, records);
     return LazySectionInput._(
       publication,
       List.unmodifiable(encoded),
@@ -185,10 +198,82 @@ final class LazySectionInput {
       ParsedSection.fromJson(jsonDecode(s) as Map<String, dynamic>),
   ];
 
-  LazySectionInput append(ParsedSection successor) => LazySectionInput.capture(
-    publication: publication,
-    sections: [...sections, successor],
+  static CanonicalPaginationSourceSnapshot _snapshot(
+    PublicationSpineAuthority publication,
+    List<String> encoded,
+    List<CanonicalLazySourceRecord> records,
+  ) => CanonicalPaginationSourceSnapshot.pinLazy(
+    bookId: publication.bookId,
+    publicationFingerprint: publication.publicationFingerprint,
+    parserSourceIdentity: lazyParsedSectionParserVersion,
+    sourceRevision: readerSha256(['LazySectionInputV1', encoded]),
+    records: records,
   );
+
+  List<String> get encodedSections => _sections;
+  List<CanonicalLazySourceRecord> get sourceRecords => snapshot.lazyRecords!;
+
+  LazySectionInput append(ParsedSection successor) {
+    if (sectionCount != 1) {
+      throw StateError('Retire obsolete prefix before another handoff');
+    }
+    final added = LazySectionInput.capture(
+      publication: publication,
+      sections: [successor],
+    );
+    if (nextCandidate?.stableKey != successor.identity.stableKey) {
+      throw StateError('Section is not the immediate pinned successor');
+    }
+    final encoded = List<String>.unmodifiable([
+      ..._sections,
+      ...added._sections,
+    ]);
+    final records = [...sourceRecords, ...added.sourceRecords];
+    if (records.length > CanonicalPaginationBounds.activeSourceCeiling ||
+        encoded.fold<int>(0, (n, s) => n + utf8.encode(s).length) >
+            LazyStableCardBody.maxEncodedBytes) {
+      throw StateError('Expanded source evidence exceeds bounds');
+    }
+    return LazySectionInput._(
+      publication,
+      encoded,
+      _snapshot(publication, encoded, records),
+      List.unmodifiable([...sectionAuthorities, ...added.sectionAuthorities]),
+      added.nextCandidate,
+    );
+  }
+
+  /// Exact immutable suffix; retained records are shared, not reencoded.
+  LazySectionInput retainLastSection() {
+    final encoded = List<String>.unmodifiable([_sections.last]);
+    final records = sourceRecords.sublist(lastSectionStart);
+    final result = LazySectionInput._(
+      publication,
+      encoded,
+      _snapshot(publication, encoded, records),
+      List.unmodifiable([sectionAuthorities.last]),
+      nextCandidate,
+    );
+    result.validateSuffixOf(this);
+    return result;
+  }
+
+  void validateSuffixOf(LazySectionInput old) {
+    if (sectionCount != 1 ||
+        _sections.single != old._sections.last ||
+        sourceRecords.length !=
+            old.sourceRecords.length - old.lastSectionStart) {
+      throw StateError('Invalid retained suffix');
+    }
+    for (var i = 0; i < sourceRecords.length; i++) {
+      if (!identical(
+        sourceRecords[i],
+        old.sourceRecords[old.lastSectionStart + i],
+      )) {
+        throw StateError('Suffix backing/source ownership changed');
+      }
+    }
+  }
 
   void validateSnapshot(CanonicalPaginationSourceSnapshot candidate) {
     if (candidate.snapshotDigest != snapshot.snapshotDigest ||

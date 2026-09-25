@@ -67,9 +67,118 @@ String lazyCanonicalCardGuard(CanonicalFinalizedReaderCard card) =>
       card.resolvedLayout?.physicalCardIdentityComponents,
     ]);
 
+/// Live authority for accepted section cards. Retained authority deliberately
+/// has no paginator session, old snapshot, layout callbacks or preparation link.
+abstract class LazySectionAuthority {
+  LazySectionInput get input;
+  CanonicalReaderPaginationSession? get session;
+  List<CanonicalFinalizedReaderCard> get cards;
+  List<LazyStableCardBody> get bodies;
+  List<String> get cardGuards;
+  SectionEndReceiptV1? get receipt;
+  String get sessionDigest;
+  LazyPublicationOwner get owner;
+  ReaderLayoutContract get rendererContract;
+  String get packingIdentity;
+  CanonicalPaginationContinuation? get continuation;
+  String? get retentionDigest => null;
+  void validate();
+}
+
+final class LazyRetainedSection extends LazySectionAuthority {
+  LazyRetainedSection._(
+    this.input,
+    this.cards,
+    this.bodies,
+    this.cardGuards,
+    this.receipt,
+    this.owner,
+    this.rendererContract,
+    this.packingIdentity,
+    this.retentionDigest,
+    this.sessionDigest,
+  );
+  factory LazyRetainedSection.capture(LazySectionAuthority old) {
+    old.validate();
+    final input = old.input.retainLastSection();
+    final receipt = old.receipt;
+    final retention = readerSha256([
+      'LazySuffixRetentionV1',
+      old.input.snapshot.snapshotDigest,
+      input.snapshot.snapshotDigest,
+      input.prefixDigest(input.snapshot.sourceCount),
+      old.cardGuards,
+      receipt?.receiptDigest,
+      old.continuation?.integrityDigest,
+      old.packingIdentity,
+    ]);
+    return LazyRetainedSection._(
+      input,
+      old.cards,
+      old.bodies,
+      old.cardGuards,
+      receipt,
+      old.owner,
+      old.rendererContract,
+      old.packingIdentity,
+      retention,
+      readerSha256(['LazyRetainedSessionRootV1', retention]),
+    );
+  }
+  @override
+  final LazySectionInput input;
+  @override
+  final List<CanonicalFinalizedReaderCard> cards;
+  @override
+  final List<LazyStableCardBody> bodies;
+  @override
+  final List<String> cardGuards;
+  @override
+  final SectionEndReceiptV1? receipt;
+  @override
+  final LazyPublicationOwner owner;
+  @override
+  final ReaderLayoutContract rendererContract;
+  @override
+  final String packingIdentity;
+  @override
+  final String retentionDigest;
+  @override
+  final String sessionDigest;
+  @override
+  CanonicalReaderPaginationSession? get session => null;
+  @override
+  CanonicalPaginationContinuation? get continuation => null;
+  @override
+  void validate() {
+    final authority = input.sectionAuthorities.single;
+    final projection = LazyStableResidentProjection(
+      authority: authority,
+      snapshot: input.snapshot,
+    );
+    if (packingIdentity !=
+        LazyStableCardEmitter.packingIdentity(authority, rendererContract)) {
+      throw StateError('Retained packing authority changed');
+    }
+    for (var i = 0; i < cards.length; i++) {
+      if (lazyCanonicalCardGuard(cards[i]) != cardGuards[i] ||
+          cards[i].identity.signature != bodies[i].identity.signature) {
+        throw StateError('Retained card guard changed');
+      }
+      for (final slice in bodies[i].sourceSlices) {
+        projection.projectSlice(slice);
+      }
+      ReaderLayoutRenderingAdapter.block(
+        contract: rendererContract,
+        card: cards[i].resolvedLayout!,
+      );
+    }
+  }
+}
+
 /// Private section preparation consumes the sole production canonical session.
 /// No split, packing, finalization or successful acceptance is synthesized here.
-final class LazyPreparedSection {
+final class LazyPreparedSection extends LazySectionAuthority {
   LazyPreparedSection._(
     this.input,
     this.session,
@@ -80,20 +189,37 @@ final class LazyPreparedSection {
     this.sessionDigest,
     this.owner,
   );
+  @override
   final LazySectionInput input;
+  @override
   final CanonicalReaderPaginationSession session;
+  @override
   final List<CanonicalFinalizedReaderCard> cards;
+  @override
   final List<LazyStableCardBody> bodies;
+  @override
   final List<String> cardGuards;
+  @override
   final SectionEndReceiptV1? receipt;
+  @override
   final String sessionDigest;
+  @override
   final LazyPublicationOwner owner;
+  @override
   CanonicalPaginationContinuation? get continuation => session.acceptedSuffix;
+  @override
+  ReaderLayoutContract get rendererContract => session.layout.contract!;
+  @override
+  String get packingIdentity => session.controlledLayoutIdentity;
 
   static Future<LazyPreparedSection> prepare({
     required LazySectionInput input,
     required ReaderCardPaginatorLayout layout,
     required LazyHandoffOperation operation,
+    int maximumCards = CanonicalPaginationBounds.activeCardCeiling,
+    int maximumGuards =
+        CanonicalPaginationBounds.residentContinuationRecordBasis,
+    void Function(CanonicalReaderPaginationSession)? onProgress,
   }) async {
     if (!operation.isCurrent) {
       throw StateError('Cancelled or stale section preparation');
@@ -110,6 +236,10 @@ final class LazyPreparedSection {
       layout: layout,
       sectionInput: input,
     );
+    if (maximumCards < 1 || maximumGuards < 1) {
+      throw StateError('No aggregate preparation budget');
+    }
+    onProgress?.call(session);
     final root = snapshot.ownerAt(input.lastSectionStart);
     var result = await session.generateInitial(
       restart: CanonicalPaginationTrustedSectionStart(
@@ -118,10 +248,18 @@ final class LazyPreparedSection {
         sourceOrdinalHint: root.sourceOrdinalHint,
       ),
       operation: operation.pagination,
+      budget: CanonicalPaginationWorkBudget(
+        maxFinalizedCards: maximumCards < 8 ? maximumCards : 8,
+      ),
     );
     var work = 0;
     var steps = 0;
     while (true) {
+      onProgress?.call(session);
+      if (session.acceptedPublishedCards.length > maximumCards ||
+          session.checkpointIndex.records.length > maximumGuards) {
+        throw StateError('Aggregate preparation budget exceeded');
+      }
       if (++steps > CanonicalPaginationBounds.residentContinuationRecordBasis) {
         throw StateError('Section preparation exhausted checkpoint bound');
       }
@@ -140,10 +278,17 @@ final class LazyPreparedSection {
       if (work >= CanonicalPaginationBounds.normalWorkEnvelope) {
         throw StateError('Section preparation needs more bounded evidence');
       }
+      final remainingCards =
+          maximumCards - session.acceptedPublishedCards.length;
+      if (remainingCards < 1 ||
+          session.checkpointIndex.records.length >= maximumGuards) {
+        throw StateError('Aggregate preparation budget exhausted');
+      }
       result = await session.generateForward(
         acceptedPublishedSuffix: result.continuation.previousFinalizedBoundary,
         operation: operation.pagination,
         budget: CanonicalPaginationWorkBudget(
+          maxFinalizedCards: remainingCards < 8 ? remainingCards : 8,
           maxAtomicFragments:
               CanonicalPaginationBounds.normalWorkEnvelope - work,
         ),
@@ -222,6 +367,7 @@ final class LazyPreparedSection {
     );
   }
 
+  @override
   void validate() {
     input.validateSnapshot(session.sourceSnapshot);
     _validateSourceContract(session.layout.contract!, input.snapshot);
@@ -314,12 +460,12 @@ void validateCompleteSectionCoverage(
 /// supplies separate exact prefix/source membership and stable packing proof.
 abstract final class LazyHandoffRenderingAdapter {
   static ResolvedReaderBlockLayout block({
-    required LazyPreparedSection retained,
+    required LazySectionAuthority retained,
     required int cardIndex,
     required LazyPreparedSection successor,
   }) {
     successor.input.validateExtensionOf(retained.input);
-    if (retained.session.controlledLayoutIdentity !=
+    if (retained.packingIdentity !=
         successor.session.controlledLayoutIdentity) {
       throw StateError(
         'Lazy metric/renderer/font/pagination authority changed',
@@ -334,7 +480,7 @@ abstract final class LazyHandoffRenderingAdapter {
       projection.projectSlice(slice);
     }
     return ReaderLayoutRenderingAdapter.block(
-      contract: retained.session.layout.contract!,
+      contract: retained.rendererContract,
       card: retained.cards[cardIndex].resolvedLayout!,
     );
   }
@@ -343,6 +489,9 @@ abstract final class LazyHandoffRenderingAdapter {
 final class LazyAcceptedPublication {
   LazyAcceptedPublication.initial(this.current, this.owner)
     : predecessor = null,
+      lineageRootDigest = current.sessionDigest,
+      previousHandoffDigest = null,
+      handoffOrdinal = 0,
       revision = 0,
       handoff = null,
       cards = current.cards,
@@ -354,12 +503,32 @@ final class LazyAcceptedPublication {
     this.handoff,
     this.sessionDigest,
   ) : predecessor = old.current,
+      lineageRootDigest = old.lineageRootDigest,
+      previousHandoffDigest = handoff!.handoffDigest,
+      handoffOrdinal = old.handoffOrdinal + 1,
       owner = old.owner,
       revision = old.revision + 1,
       cards = List.unmodifiable([...old.cards, ...current.cards]),
       bodies = List.unmodifiable([...old.bodies, ...current.bodies]);
-  final LazyPreparedSection? predecessor;
-  final LazyPreparedSection current;
+  LazyAcceptedPublication.retained(
+    LazyAcceptedPublication old,
+    LazyRetainedSection retained,
+  ) : predecessor = null,
+      current = retained,
+      owner = old.owner,
+      revision = old.revision + 1,
+      handoff = null,
+      lineageRootDigest = old.lineageRootDigest,
+      previousHandoffDigest = old.previousHandoffDigest,
+      handoffOrdinal = old.handoffOrdinal,
+      cards = retained.cards,
+      bodies = retained.bodies,
+      sessionDigest = retained.sessionDigest;
+  final String lineageRootDigest;
+  final String? previousHandoffDigest;
+  final int handoffOrdinal;
+  final LazySectionAuthority? predecessor;
+  final LazySectionAuthority current;
   final LazyPublicationOwner owner;
   final int revision;
   final LazySnapshotHandoffV1? handoff;
@@ -378,20 +547,27 @@ final class LazyAcceptedPublication {
 LazySnapshotHandoffV1 buildLazySnapshotHandoff({
   required LazyAcceptedPublication old,
   required LazyPreparedSection successor,
+  String? committedCardSignature,
 }) {
-  if (old.revision != 0 || old.current.receipt == null) {
-    throw StateError('Receipt unavailable or single transfer already consumed');
+  if (old.current.input.sectionCount != 1 ||
+      old.current.receipt == null ||
+      old.predecessor != null) {
+    throw StateError('Retained single-section receipt required');
   }
   successor.input.validateExtensionOf(old.current.input);
   old.current.validate();
   successor.validate();
+  final committed =
+      committedCardSignature ?? old.cards.first.identity.signature;
+  if (!old.cards.any((c) => c.identity.signature == committed)) {
+    throw StateError('Visible card absent from retained publication');
+  }
   final a = old.current;
   final b = successor;
   final oldSnapshot = a.input.snapshot;
   final snapshot = b.input.snapshot;
   final contract = b.session.layout.contract!;
-  if (a.session.controlledLayoutIdentity !=
-      b.session.controlledLayoutIdentity) {
+  if (a.packingIdentity != b.session.controlledLayoutIdentity) {
     throw StateError('Packing compatibility changed');
   }
   final nextOwner = snapshot.ownerAt(oldSnapshot.sourceCount);
@@ -401,13 +577,13 @@ LazySnapshotHandoffV1 buildLazySnapshotHandoff({
     sectionIdentity: nextOwner.sectionIdentity,
     sourceOrdinalHint: nextOwner.sourceOrdinalHint,
   );
-  final rootDigest = old.sessionDigest;
+  final rootDigest = old.lineageRootDigest;
   final successorDigest = readerSha256([
     'LazySuccessorSessionV1',
     rootDigest,
     old.sessionDigest,
-    null,
-    1,
+    old.previousHandoffDigest,
+    old.handoffOrdinal + 1,
     snapshot.snapshotDigest,
     b.session.controlledLayoutIdentity,
     a.receipt!.receiptDigest,
@@ -424,8 +600,9 @@ LazySnapshotHandoffV1 buildLazySnapshotHandoff({
     'lineageRootDigest': rootDigest,
     'parentSessionDigest': old.sessionDigest,
     'successorSessionDigest': successorDigest,
-    'previousHandoffDigest': null,
-    'handoffOrdinal': 1,
+    'previousHandoffDigest': old.previousHandoffDigest,
+    'handoffOrdinal': old.handoffOrdinal + 1,
+    'retentionProofDigest': a.retentionDigest,
     'oldSnapshotDigest': oldSnapshot.snapshotDigest,
     'oldSourceRevision': oldSnapshot.sourceRevision,
     'newSnapshotDigest': snapshot.snapshotDigest,
@@ -441,7 +618,7 @@ LazySnapshotHandoffV1 buildLazySnapshotHandoff({
     'sectionEndReceiptDigest': a.receipt!.receiptDigest,
     'acceptedPublicationDigest': old.digest,
     'acceptedCardCount': old.cards.length,
-    'committedCardSignature': old.cards.first.identity.signature,
+    'committedCardSignature': committed,
     'lastAcceptedCardSignature': last.identity.signature,
     'lastAcceptedCardBytesDigest': a.cardGuards.last,
     'lastAcceptedSlicesDigest': readerSha256(
@@ -469,7 +646,7 @@ LazySnapshotHandoffV1 buildLazySnapshotHandoff({
     'compatibilityClassifierRevision': readerCompatibilityClassifierRevision,
     'fontDeliveryDigest': contract.fontDeliveryEvidence.digest,
     'oldSourceCompatibilityFingerprint':
-        a.session.layout.contract!.identities.sourceCompatibilityFingerprint,
+        a.rendererContract.identities.sourceCompatibilityFingerprint,
     'newSourceCompatibilityFingerprint':
         contract.identities.sourceCompatibilityFingerprint,
     'sourceExtensionProofDigest': readerSha256([
@@ -481,11 +658,15 @@ LazySnapshotHandoffV1 buildLazySnapshotHandoff({
 
 enum LazySnapshotPublicationOutcome {
   accepted,
+  prepared,
   stale,
   cancelled,
   replayed,
   invalid,
   failedAttempt,
+  retentionRequired,
+  boundExceeded,
+  busy,
 }
 
 final class LazySnapshotPublicationResult {

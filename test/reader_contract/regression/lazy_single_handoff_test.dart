@@ -28,7 +28,7 @@ void main() {
   testWidgets(
     'J01 known successor seals input without a terminal continuation',
     (tester) async {
-      final run = await _Run.open(tester);
+      final run = await LazySingleHandoffTestRun.open(tester);
       expect(run.a.receipt, isNotNull);
       expect(run.a.session.inputExhaustedAwaitingSuccessor, isTrue);
       expect(run.a.session.acceptedSuffix, isNull);
@@ -48,7 +48,7 @@ void main() {
   testWidgets(
     'J02 one adjacent transfer preserves A and atomically appends only B',
     (tester) async {
-      final run = await _Run.open(tester);
+      final run = await LazySingleHandoffTestRun.open(tester);
       final before = run.state.lazyPublication!;
       final bytes = _bytes(run.state);
       final guards = run.a.cardGuards;
@@ -135,7 +135,7 @@ void main() {
   testWidgets(
     'J03 genuine final section retains valid terminal codec and rejects resume',
     (tester) async {
-      final run = await _Run.open(tester);
+      final run = await LazySingleHandoffTestRun.open(tester);
       final b = await run.prepareB(tester);
       expect(b.receipt, isNull);
       expect(b.input.verifiedBookEnd, isTrue);
@@ -165,7 +165,7 @@ void main() {
     testWidgets('J04 $change rejects without publication changes', (
       tester,
     ) async {
-      final run = await _Run.open(tester);
+      final run = await LazySingleHandoffTestRun.open(tester);
       final b = await run.prepareB(tester);
       final old = run.state.lazyPublication!;
       final bytes = _bytes(run.state);
@@ -200,7 +200,7 @@ void main() {
   testWidgets('J05 consumed handoff cannot replay or append twice', (
     tester,
   ) async {
-    final run = await _Run.open(tester);
+    final run = await LazySingleHandoffTestRun.open(tester);
     final b = await run.prepareB(tester);
     final h = buildLazySnapshotHandoff(
       old: run.state.lazyPublication!,
@@ -242,7 +242,7 @@ void main() {
     testWidgets(
       'J06 invalid $field latches only that attempt and preserves publication',
       (tester) async {
-        final run = await _Run.open(tester);
+        final run = await LazySingleHandoffTestRun.open(tester);
         final b = await run.prepareB(tester);
         final old = run.state.lazyPublication!;
         final bytes = _bytes(run.state);
@@ -276,7 +276,7 @@ void main() {
   testWidgets(
     'J07 exact prefix rejects changed source records and skipped successor',
     (tester) async {
-      final run = await _Run.open(tester, sectionCount: 3);
+      final run = await LazySingleHandoffTestRun.open(tester, sectionCount: 3);
       final bSection = run.sections[1];
       final aJson = run.sections[0].toJson();
       final chunks = (aJson['chunks'] as List)
@@ -301,7 +301,7 @@ void main() {
   testWidgets('J08 ordinary append cannot adopt successor root', (
     tester,
   ) async {
-    final run = await _Run.open(tester);
+    final run = await LazySingleHandoffTestRun.open(tester);
     final b = await run.prepareB(tester);
     final bytes = _bytes(run.state);
     final result = run.state.publishCanonical(
@@ -329,7 +329,7 @@ void main() {
   testWidgets(
     'J09 successor with another known section emits another receipt, no repeated transfer claim',
     (tester) async {
-      final run = await _Run.open(tester, sectionCount: 3);
+      final run = await LazySingleHandoffTestRun.open(tester, sectionCount: 3);
       final b = await run.prepareB(tester);
       expect(b.receipt, isNotNull);
       expect(b.continuation, isNull);
@@ -361,7 +361,10 @@ void main() {
         () => ReaderCoreParsedFixture.load('single-rich-'),
       ))!;
       try {
-        final run = await _Run.open(tester, fixture: fixture.epubFile);
+        final run = await LazySingleHandoffTestRun.open(
+          tester,
+          fixture: fixture.epubFile,
+        );
         final b = await run.prepareB(tester);
         final before = run.a.cardGuards;
         final h = buildLazySnapshotHandoff(
@@ -393,7 +396,7 @@ void main() {
   testWidgets('J11 wrong F202 source contract rejects private preparation', (
     tester,
   ) async {
-    final run = await _Run.open(tester);
+    final run = await LazySingleHandoffTestRun.open(tester);
     final bytes = _bytes(run.state);
     await expectLater(
       LazyPreparedSection.prepare(
@@ -409,7 +412,7 @@ void main() {
   testWidgets('J12 stale per-source font evidence rejects transfer', (
     tester,
   ) async {
-    final run = await _Run.open(tester);
+    final run = await LazySingleHandoffTestRun.open(tester);
     final b = await run.prepareB(tester);
     final h = buildLazySnapshotHandoff(
       old: run.state.lazyPublication!,
@@ -429,7 +432,7 @@ void main() {
   testWidgets('J13 racing proposals cannot overwrite an accepted transfer', (
     tester,
   ) async {
-    final run = await _Run.open(tester);
+    final run = await LazySingleHandoffTestRun.open(tester);
     final b = await run.prepareB(tester);
     final h = buildLazySnapshotHandoff(
       old: run.state.lazyPublication!,
@@ -463,7 +466,7 @@ void main() {
   testWidgets('J14 immutable spine proof ignores later caller index mutation', (
     tester,
   ) async {
-    final run = await _Run.open(tester);
+    final run = await LazySingleHandoffTestRun.open(tester);
     final nextKey = run.a.input.nextCandidate!.stableKey;
     run.originalIndex.spine.removeLast();
     expect(run.publication.successorOf(run.sections.first)!.stableKey, nextKey);
@@ -487,7 +490,7 @@ void main() {
   testWidgets('J15 old prepared work cannot be relabelled as a fresh attempt', (
     tester,
   ) async {
-    final run = await _Run.open(tester);
+    final run = await LazySingleHandoffTestRun.open(tester);
     final b = await run.prepareB(tester);
     final h = buildLazySnapshotHandoff(
       old: run.state.lazyPublication!,
@@ -543,7 +546,7 @@ String _bytes(ProgressiveDisplayState state) => canonicalJsonEncode([
   state.generationComplete,
 ]);
 
-class _Run {
+class LazySingleHandoffTestRun {
   late PublicationSpineAuthority publication;
   late LazyEpubIndex originalIndex;
   late List<ParsedSection> sections;
@@ -576,12 +579,12 @@ class _Run {
     );
   }
 
-  static Future<_Run> open(
+  static Future<LazySingleHandoffTestRun> open(
     WidgetTester tester, {
     int sectionCount = 2,
     File? fixture,
   }) async {
-    final run = _Run();
+    final run = LazySingleHandoffTestRun();
     await tester.runAsync(() async {
       final root = await Directory.systemTemp.createTemp('nalori-one-handoff-');
       final file =
