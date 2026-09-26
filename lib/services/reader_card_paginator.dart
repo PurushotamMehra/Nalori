@@ -400,6 +400,42 @@ final class CanonicalReaderPaginationSession {
   final Map<int, _CanonicalSessionState> _pendingPublicationStates =
       <int, _CanonicalSessionState>{};
 
+  final Object _sessionBranchIdentity = Object();
+  Object? _forwardForkParentIdentity;
+
+  /// Private forward preparation shares immutable cards/source but owns its
+  /// checkpoint/frontier state. It cannot mutate the accepted reader session.
+  CanonicalReaderPaginationSession forkForForward() {
+    if (_inputExhausted ||
+        _acceptedSuffix == null ||
+        _acceptedSuffix!.terminal ||
+        _pendingPublicationStates.isNotEmpty) {
+      throw StateError('An exact live nonterminal suffix is required');
+    }
+    final branch = CanonicalReaderPaginationSession(
+      sourceSnapshot: sourceSnapshot,
+      controlledLayoutIdentity: controlledLayoutIdentity,
+      layout: layout,
+      paginator: paginator,
+      sectionInput: sectionInput,
+    );
+    // The existing validated checkpoint fork keeps the exact suffix and its
+    // parent, without retaining every earlier two-card request checkpoint.
+    final checkpointBranch = _checkpointIndex.forkAt(_acceptedSuffix!);
+    if (!checkpointBranch.accepted) {
+      throw StateError(checkpointBranch.rejection!.message);
+    }
+    branch._checkpointIndex = checkpointBranch.index!;
+    branch._acceptedSuffix = _acceptedSuffix;
+    branch._acceptedPublishedSuffixCard = _acceptedPublishedSuffixCard;
+    branch._acceptedPublishedCards.addAll(_acceptedPublishedCards);
+    branch._forwardForkParentIdentity = _sessionBranchIdentity;
+    return branch;
+  }
+
+  bool isForwardForkOf(CanonicalReaderPaginationSession accepted) =>
+      identical(_forwardForkParentIdentity, accepted._sessionBranchIdentity);
+
   CanonicalPaginationCheckpointIndex get checkpointIndex => _checkpointIndex;
   CanonicalPaginationContinuation? get acceptedSuffix => _acceptedSuffix;
 

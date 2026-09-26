@@ -602,3 +602,44 @@ truth remain independent gates. See the [current entry-proof report](nalori-lazy
 and [address inventory](nalori-lazy-source-address-inventory.md) for commands,
 counts and exact unresolved coverage. The report's current bounded prompt
 supersedes the earlier next-task prompt while these entry blockers remain.
+
+## 15. Partial successor pagination amendment (2026-09-27)
+
+The forward core may accept a finalized prefix of B without exhausting B.
+Complete immutable **source capture** of B is still required; partial source
+loading, oversized subdivision and frontier transfer during retirement are
+not authorized by this amendment. Stable-body/checkpoint formats and ordinary
+append/P05 validation remain unchanged.
+
+State transitions:
+
+1. **sealed A → private B prefix**: validate the existing A receipt and exact
+   A+B source extension. Start B once at its verified root, retaining the normal
+   two-card frontier. Stop after a bounded finalized batch; provisional cards
+   never enter publication. A remains accepted while preparation yields.
+2. **private prefix → accepted unfinished B**: validate exact ordered coverage
+   from B's root through the finalized boundary and the production nonterminal
+   continuation/frontier. The dedicated handoff atomically adopts that prefix,
+   keeps all A cards/renderer authority, and retains the unfinished B session.
+   An unfinished B has no section-end receipt and is not book end, even when
+   pinned spine metadata says B is the final section.
+3. **accepted unfinished B → private extension → accepted longer B**: fork only
+   the exact accepted session state (immutable snapshot, accepted cards, exact
+   continuation and checkpoint parents). Resume production `generateForward`;
+   never restart at B's root. The candidate proves identical accepted prefix,
+   unchanged source/layout and exact parent suffix, then atomically appends new
+   finalized cards. No handoff ordinal/source authority change occurs here.
+4. **unfinished → complete**: only actual input exhaustion with a successor
+   permits B's receipt; only actual terminal pagination plus pinned final-book
+   evidence permits book-end status. Complete coverage is required for either.
+5. **cancelled/stale private work → prior accepted state**: discard the private
+   fork and settle accounting; accepted B cards and its exact continuation stay
+   usable by a later explicit request. No automatic rebuild or source recapture.
+
+One core operation owns pending work at a time. Forked checkpoint parents,
+frontier, source scratch, private finalized cards and renderer leases count
+against the existing aggregate limits. Budget refusal preserves accepted state.
+Retirement and backward reconstruction continue to require complete sections;
+unfinished frontier retention transfer and backward first-card preparation are
+separate requirements. Preparation/validation uses the yielding route and its
+same owner/publication/visible-position checks before atomic commit.

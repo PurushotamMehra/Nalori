@@ -95,6 +95,7 @@ abstract class LazySectionAuthority {
   String get packingIdentity;
   CanonicalPaginationContinuation? get continuation;
   String? get retentionDigest => null;
+  bool get sectionComplete => true;
   Future<void> validateYielding(LazyValidationWork work) async {
     if (this is LazyPreparedSection) {
       final prepared = this as LazyPreparedSection;
@@ -104,7 +105,7 @@ abstract class LazySectionAuthority {
           !prepared.session.inputExhaustedAwaitingSuccessor) {
         throw StateError('Missing exhaustion authority');
       }
-      await validateCompleteSectionCoverageYielding(input, cards, work);
+      await prepared.validateCoverageYielding(work);
     } else if (packingIdentity !=
         LazyStableCardEmitter.packingIdentity(
           input.sectionAuthorities.single,
@@ -168,6 +169,9 @@ final class LazyRetainedSection extends LazySectionAuthority {
     this.sessionDigest,
   );
   factory LazyRetainedSection.capture(LazySectionAuthority old) {
+    if (!old.sectionComplete) {
+      throw StateError('Unfinished frontier pins its source view');
+    }
     old.validate();
     final input = old.input.retainLastSection();
     final receipt = old.receipt;
@@ -198,6 +202,9 @@ final class LazyRetainedSection extends LazySectionAuthority {
     LazySectionAuthority old,
     LazyValidationWork work,
   ) async {
+    if (!old.sectionComplete) {
+      throw StateError('Unfinished frontier pins its source view');
+    }
     await old.validateYielding(work);
     final input = await old.input.retainYielding(work);
     final receipt = old.receipt;
@@ -289,6 +296,9 @@ final class LazyPreparedSection extends LazySectionAuthority {
     this.sessionDigest,
     this.owner,
     this.workEntries,
+    this.sectionComplete,
+    this.continuation,
+    this.parentContinuationDigest,
   );
   @override
   final LazySectionInput input;
@@ -308,7 +318,39 @@ final class LazyPreparedSection extends LazySectionAuthority {
   final LazyPublicationOwner owner;
   final int workEntries;
   @override
-  CanonicalPaginationContinuation? get continuation => session.acceptedSuffix;
+  final CanonicalPaginationContinuation? continuation;
+  @override
+  final bool sectionComplete;
+  final String? parentContinuationDigest;
+
+  bool get matchesSession =>
+      continuation?.integrityDigest ==
+          session.acceptedSuffix?.integrityDigest &&
+      cards.length == session.acceptedPublishedCards.length &&
+      sectionComplete ==
+          (session.inputExhaustedAwaitingSuccessor ||
+              continuation?.terminal == true);
+
+  Future<void> validateCoverageYielding(LazyValidationWork work) async {
+    if (!matchesSession) {
+      throw StateError('Prepared session advanced outside its publication');
+    }
+    await _validateSectionCoverageYielding(
+      input,
+      cards,
+      work,
+      complete: sectionComplete,
+    );
+    if (!sectionComplete &&
+        (receipt != null ||
+            continuation == null ||
+            continuation!.terminal ||
+            continuation!.previousFinalizedBoundary.cardIdentity?.signature !=
+                cards.last.identity.signature)) {
+      throw StateError('Finalized prefix lacks its exact live continuation');
+    }
+  }
+
   @override
   ReaderLayoutContract get rendererContract => session.layout.contract!;
   @override
@@ -319,6 +361,8 @@ final class LazyPreparedSection extends LazySectionAuthority {
     required ReaderCardPaginatorLayout layout,
     required LazyHandoffOperation operation,
     LazyValidationWork? validationWork,
+    bool firstBatchOnly = false,
+    LazyPreparedSection? previous,
     int maximumWork = CanonicalPaginationBounds.normalWorkEnvelope,
     int maximumCards = CanonicalPaginationBounds.activeCardCeiling,
     int maximumGuards =
@@ -334,12 +378,25 @@ final class LazyPreparedSection extends LazySectionAuthority {
     _validateSourceContract(contract, snapshot);
     final authority = input.sectionAuthorities.last;
     final packing = LazyStableCardEmitter.packingIdentity(authority, contract);
-    final session = CanonicalReaderPaginationSession(
-      sourceSnapshot: snapshot,
-      controlledLayoutIdentity: packing,
-      layout: layout,
-      sectionInput: input,
-    );
+    if ((firstBatchOnly || previous != null) && validationWork == null) {
+      throw StateError('Partial preparation requires yielding validation');
+    }
+    if (previous != null &&
+        (!firstBatchOnly ||
+            previous.sectionComplete ||
+            !previous.matchesSession ||
+            !identical(previous.input, input) ||
+            !identical(previous.session.layout, layout))) {
+      throw StateError('Exact unfinished section authority required');
+    }
+    final session =
+        previous?.session.forkForForward() ??
+        CanonicalReaderPaginationSession(
+          sourceSnapshot: snapshot,
+          controlledLayoutIdentity: packing,
+          layout: layout,
+          sectionInput: input,
+        );
     if (maximumCards < 1 ||
         maximumGuards < 1 ||
         maximumWork < 1 ||
@@ -348,18 +405,35 @@ final class LazyPreparedSection extends LazySectionAuthority {
     }
     onProgress?.call(session);
     final root = snapshot.ownerAt(input.lastSectionStart);
-    var result = await session.generateInitial(
-      restart: CanonicalPaginationTrustedSectionStart(
-        sectionIdentity: root.sectionIdentity,
-        sourceIdentity: root.sourceIdentity,
-        sourceOrdinalHint: root.sourceOrdinalHint,
-      ),
-      operation: operation.pagination,
-      budget: CanonicalPaginationWorkBudget(
-        maxFinalizedCards: maximumCards < 8 ? maximumCards : 8,
-        maxAtomicFragments: maximumWork,
-      ),
-    );
+    final oldCardCount = previous?.cards.length ?? 0;
+    final availableCards = maximumCards - oldCardCount;
+    if (availableCards < 1) {
+      throw const LazyHandoffBoundExceeded('No aggregate batch card capacity');
+    }
+    var result = previous != null
+        ? await session.generateForward(
+            acceptedPublishedSuffix:
+                previous.continuation!.previousFinalizedBoundary,
+            operation: operation.pagination,
+            budget: CanonicalPaginationWorkBudget(
+              maxFinalizedCards: availableCards < 2 ? availableCards : 2,
+              maxAtomicFragments: maximumWork,
+            ),
+          )
+        : await session.generateInitial(
+            restart: CanonicalPaginationTrustedSectionStart(
+              sectionIdentity: root.sectionIdentity,
+              sourceIdentity: root.sourceIdentity,
+              sourceOrdinalHint: root.sourceOrdinalHint,
+            ),
+            operation: operation.pagination,
+            budget: CanonicalPaginationWorkBudget(
+              maxFinalizedCards: firstBatchOnly
+                  ? (maximumCards < 2 ? maximumCards : 2)
+                  : (maximumCards < 8 ? maximumCards : 8),
+              maxAtomicFragments: maximumWork,
+            ),
+          );
     var work = 0;
     var steps = 0;
     while (true) {
@@ -383,10 +457,16 @@ final class LazyPreparedSection extends LazySectionAuthority {
         break;
       }
       if (result is! CanonicalReaderPaginationPathAccepted) {
-        throw StateError('Section pagination rejected: $result');
+        throw StateError(
+          'Section pagination rejected: ${result is CanonicalReaderPaginationPathRejected ? result.rejection.message : result}',
+        );
       }
       work += result.boundedWorkEntriesConsumed;
-      if (result.continuation.terminal) break;
+      if (result.continuation.terminal ||
+          (firstBatchOnly &&
+              session.acceptedPublishedCards.length > oldCardCount)) {
+        break;
+      }
       if (work >= maximumWork) {
         throw const LazyHandoffBoundExceeded(
           'Section preparation needs more bounded evidence',
@@ -404,7 +484,9 @@ final class LazyPreparedSection extends LazySectionAuthority {
         acceptedPublishedSuffix: result.continuation.previousFinalizedBoundary,
         operation: operation.pagination,
         budget: CanonicalPaginationWorkBudget(
-          maxFinalizedCards: remainingCards < 8 ? remainingCards : 8,
+          maxFinalizedCards: firstBatchOnly
+              ? (remainingCards < 2 ? remainingCards : 2)
+              : (remainingCards < 8 ? remainingCards : 8),
           maxAtomicFragments: maximumWork - work,
         ),
       );
@@ -417,18 +499,27 @@ final class LazyPreparedSection extends LazySectionAuthority {
       );
     }
     final cards = session.acceptedPublishedCards;
+    final complete =
+        session.inputExhaustedAwaitingSuccessor ||
+        session.acceptedSuffix?.terminal == true;
     if (validationWork == null) {
       validateCompleteSectionCoverage(input, cards);
     } else {
-      await validateCompleteSectionCoverageYielding(
+      await _validateSectionCoverageYielding(
         input,
         cards,
         validationWork,
+        complete: complete,
       );
     }
-    final bodies = <LazyStableCardBody>[];
-    final guards = <String>[];
-    for (final card in cards) {
+    final bodies = <LazyStableCardBody>[...?previous?.bodies];
+    final guards = <String>[...?previous?.cardGuards];
+    for (var i = 0; i < oldCardCount; i++) {
+      if (!identical(cards[i], previous!.cards[i])) {
+        throw StateError('Accepted prefix was rewritten');
+      }
+    }
+    for (final card in cards.skip(oldCardCount)) {
       bodies.add(
         validationWork == null
             ? LazyStableCardEmitter.emit(
@@ -458,7 +549,7 @@ final class LazyPreparedSection extends LazySectionAuthority {
     }
     final last = cards.last;
     final position = sectionEndPosition(input, last.sourceSlices.last);
-    final receipt = input.verifiedBookEnd
+    final receipt = !complete || input.verifiedBookEnd
         ? null
         : SectionEndReceiptV1._({
             'kind': 'SectionEndReceiptV1',
@@ -491,7 +582,9 @@ final class LazyPreparedSection extends LazySectionAuthority {
             'sourceCompatibilityEvidenceDigest':
                 contract.identities.sourceCompatibilityFingerprint,
           });
-    if (input.verifiedBookEnd && session.acceptedSuffix?.terminal != true) {
+    if (complete &&
+        input.verifiedBookEnd &&
+        session.acceptedSuffix?.terminal != true) {
       throw StateError('Final section lacks verified terminal authority');
     }
     final digest = readerSha256([
@@ -511,11 +604,17 @@ final class LazyPreparedSection extends LazySectionAuthority {
       digest,
       operation.owner,
       work,
+      complete,
+      session.acceptedSuffix,
+      previous?.continuation?.integrityDigest,
     );
   }
 
   @override
   void validate() {
+    if (!sectionComplete || !matchesSession) {
+      throw StateError('Full-section authority required');
+    }
     input.validateSnapshot(session.sourceSnapshot);
     _validateSourceContract(session.layout.contract!, input.snapshot);
     if (receipt != null && !session.inputExhaustedAwaitingSuccessor) {
@@ -607,7 +706,14 @@ Future<void> validateCompleteSectionCoverageYielding(
   LazySectionInput input,
   List<CanonicalFinalizedReaderCard> cards,
   LazyValidationWork work,
-) async {
+) => _validateSectionCoverageYielding(input, cards, work, complete: true);
+
+Future<void> _validateSectionCoverageYielding(
+  LazySectionInput input,
+  List<CanonicalFinalizedReaderCard> cards,
+  LazyValidationWork work, {
+  required bool complete,
+}) async {
   if (cards.isEmpty) throw StateError('No finalized section cards');
   final slices = cards.expand((c) => c.sourceSlices).toList();
   var index = 0;
@@ -645,6 +751,7 @@ Future<void> validateCompleteSectionCoverageYielding(
       offset = end;
       count++;
     }
+    if (!complete && index == slices.length && count > 0) return;
     if (offset != extent || count == 0) {
       throw StateError('Incomplete section source coverage');
     }
@@ -710,6 +817,27 @@ final class LazyAcceptedPublication {
       revision = old.revision + 1,
       cards = List.unmodifiable([...old.cards, ...current.cards]),
       bodies = List.unmodifiable([...old.bodies, ...current.bodies]);
+  LazyAcceptedPublication.extended(
+    LazyAcceptedPublication old,
+    LazyPreparedSection prepared,
+  ) : sourceInput = old.sourceInput,
+      predecessor = old.predecessor,
+      current = prepared,
+      lineageRootDigest = old.lineageRootDigest,
+      previousHandoffDigest = old.previousHandoffDigest,
+      handoffOrdinal = old.handoffOrdinal,
+      owner = old.owner,
+      revision = old.revision + 1,
+      handoff = old.handoff,
+      sessionDigest = old.sessionDigest,
+      cards = List.unmodifiable([
+        ...old.cards,
+        ...prepared.cards.skip(old.current.cards.length),
+      ]),
+      bodies = List.unmodifiable([
+        ...old.bodies,
+        ...prepared.bodies.skip(old.current.bodies.length),
+      ]);
   LazyAcceptedPublication.retained(
     LazyAcceptedPublication old,
     LazyRetainedSection retained,

@@ -510,7 +510,9 @@ final class ProgressiveDisplayState {
       );
     }
     final selected = retainPredecessor ? old.predecessor : old.current;
-    if (selected == null) {
+    if (selected == null ||
+        !old.current.sectionComplete ||
+        !selected.sectionComplete) {
       return const LazySnapshotPublicationResult(
         LazySnapshotPublicationOutcome.retentionRequired,
       );
@@ -679,7 +681,7 @@ final class ProgressiveDisplayState {
       }
       final projection = await _lazyProjectionYielding(candidate, work);
       beforeCommit?.call();
-      if (!current()) {
+      if (!current() || !prepared.matchesSession) {
         return LazySnapshotPublicationResult(
           operation.pagination.isCancelled()
               ? LazySnapshotPublicationOutcome.cancelled
@@ -708,6 +710,88 @@ final class ProgressiveDisplayState {
     }
   }
 
+  /// Same-snapshot extension from the accepted nonterminal suffix. This is
+  /// neither a source handoff nor ordinary cross-snapshot append admission.
+  Future<LazySnapshotPublicationResult> extendLazyYielding({
+    required LazyPreparedSection prepared,
+    required LazyHandoffOperation operation,
+    required LazyValidationWork work,
+    void Function()? beforeCommit,
+  }) async {
+    final old = _lazyPublication;
+    final visible = _lazyVisibleCardSignature;
+    bool current() =>
+        operation.isCurrent &&
+        work.isCurrent() &&
+        identical(old, _lazyPublication) &&
+        visible == _lazyVisibleCardSignature;
+    if (old == null ||
+        !current() ||
+        prepared.owner != operation.owner ||
+        old.owner.bookOpenEpoch != operation.owner.bookOpenEpoch ||
+        old.owner.displayOwner != operation.owner.displayOwner) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.stale,
+      );
+    }
+    if (_failedLazyAttempt == operation.owner) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.failedAttempt,
+      );
+    }
+    try {
+      final previous = old.current;
+      if (previous is! LazyPreparedSection ||
+          previous.sectionComplete ||
+          !previous.matchesSession ||
+          !prepared.session.isForwardForkOf(previous.session) ||
+          prepared.parentContinuationDigest !=
+              previous.continuation?.integrityDigest ||
+          !identical(prepared.input, previous.input) ||
+          !identical(prepared.rendererContract, previous.rendererContract) ||
+          prepared.cards.length <= previous.cards.length) {
+        throw StateError('Exact forward continuation required');
+      }
+      await previous.validateYielding(work);
+      await prepared.validateYielding(work);
+      for (var i = 0; i < previous.cards.length; i++) {
+        if (!identical(previous.cards[i], prepared.cards[i]) ||
+            !identical(previous.bodies[i], prepared.bodies[i]) ||
+            previous.cardGuards[i] != prepared.cardGuards[i]) {
+          throw StateError('Accepted prefix changed');
+        }
+        await work.step('continuation-prefix');
+      }
+      final candidate = LazyAcceptedPublication.extended(old, prepared);
+      if (candidate.cards.length >
+          CanonicalPaginationBounds.activeCardCeiling) {
+        throw const LazyHandoffBoundExceeded('Published card bound');
+      }
+      final projection = await _lazyProjectionYielding(candidate, work);
+      beforeCommit?.call();
+      if (!current() || !previous.matchesSession || !prepared.matchesSession) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      _commitLazyPublication(candidate, projection);
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.accepted,
+      );
+    } on Object catch (e) {
+      if (!current()) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      _failedLazyAttempt = operation.owner;
+      return LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.invalid,
+        '$e',
+      );
+    }
+  }
+
   Future<LazySnapshotPublicationResult> retainLazyYielding({
     required LazyHandoffOperation operation,
     required LazyValidationWork work,
@@ -731,7 +815,9 @@ final class ProgressiveDisplayState {
       );
     }
     final selected = predecessor ? old.predecessor : old.current;
-    if (selected == null) {
+    if (selected == null ||
+        !old.current.sectionComplete ||
+        !selected.sectionComplete) {
       return const LazySnapshotPublicationResult(
         LazySnapshotPublicationOutcome.retentionRequired,
       );
@@ -1142,7 +1228,9 @@ final class ProgressiveDisplayState {
         false; // No ordinary cache terminal proof for a section receipt.
     sourceChunkCount = candidate.sourceInput.snapshot.sourceCount;
     initialWindowReady = true;
-    generationComplete = candidate.current.input.verifiedBookEnd;
+    generationComplete =
+        candidate.current.sectionComplete &&
+        candidate.current.input.verifiedBookEnd;
     _lazyPublication = candidate;
     _lazyVisibleCardSignature ??= candidate.cards.first.identity.signature;
     _failedLazyAttempt = null;

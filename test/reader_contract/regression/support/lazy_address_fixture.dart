@@ -4,6 +4,7 @@ import 'package:archive/archive.dart';
 List<int> buildAddressFixture({
   int sectionCount = 7,
   Set<int> emptySections = const {},
+  Map<int, String> sectionBodies = const {},
 }) {
   final manifestItems = List.generate(
     sectionCount,
@@ -67,9 +68,11 @@ List<int> buildAddressFixture({
     );
 
   for (var i = 1; i <= sectionCount; i++) {
-    final body = emptySections.contains(i)
-        ? ''
-        : '<h1 id="s$i">Section $i</h1><p>Section $i text.</p>';
+    final body =
+        sectionBodies[i] ??
+        (emptySections.contains(i)
+            ? ''
+            : '<h1 id="s$i">Section $i</h1><p>Section $i text.</p>');
     archive.addFile(
       ArchiveFile.string(
         'OEBPS/text/s$i.xhtml',
