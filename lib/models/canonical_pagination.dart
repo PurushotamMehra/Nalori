@@ -1,3 +1,4 @@
+import '../services/lazy_validation_work.dart';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -19,6 +20,21 @@ String canonicalBookChunkOwnershipDigest(BookChunk chunk) {
     ];
   }
   return readerSha256(json);
+}
+
+Future<String> canonicalOwnershipYielding(
+  BookChunk chunk,
+  LazyValidationWork work,
+) async {
+  final json = Map<String, Object?>.from(chunk.toJson())..remove('i');
+  final ranges = json['sr'];
+  if (ranges is List) {
+    json['sr'] = <Map<String, Object?>>[
+      for (final value in ranges)
+        Map<String, Object?>.from(value as Map)..remove('ci'),
+    ];
+  }
+  return work.digest(json);
 }
 
 /// Bounds derived by the approved P04 canonical-pagination design.
@@ -88,6 +104,26 @@ final class CanonicalLazySourceRecord {
     required this.spineIdentity,
   }) : encodedSource = canonicalJsonEncode(source.toJson()),
        sourceDigest = canonicalBookChunkOwnershipDigest(source);
+  CanonicalLazySourceRecord._(
+    this.encodedSource,
+    this.sourceDigest,
+    this.sourceIdentity,
+    this.sectionIdentity,
+    this.spineIdentity,
+  );
+  static Future<CanonicalLazySourceRecord> pinYielding({
+    required BookChunk source,
+    required String sourceIdentity,
+    required String sectionIdentity,
+    required String spineIdentity,
+    required LazyValidationWork work,
+  }) async => CanonicalLazySourceRecord._(
+    await work.encode(source.toJson()),
+    await canonicalOwnershipYielding(source, work),
+    sourceIdentity,
+    sectionIdentity,
+    spineIdentity,
+  );
   final String encodedSource;
   final String sourceIdentity;
   final String sectionIdentity;
@@ -224,6 +260,57 @@ final class CanonicalPaginationSourceSnapshot {
       encodedSources: encoded,
       lazyRecords: List.unmodifiable(records),
       snapshotDigest: readerSha256([
+        'LazySourceViewV1',
+        bookId,
+        publicationFingerprint,
+        parserSourceIdentity,
+        sourceRevision,
+        owners.map((o) => o.toDigestJson()).toList(),
+        encoded,
+      ]),
+    );
+  }
+
+  static Future<CanonicalPaginationSourceSnapshot> pinLazyYielding({
+    required String bookId,
+    required String publicationFingerprint,
+    required String parserSourceIdentity,
+    required String sourceRevision,
+    required List<CanonicalLazySourceRecord> records,
+    required LazyValidationWork work,
+  }) async {
+    if (records.map((r) => r.sourceIdentity).toSet().length != records.length ||
+        records.any(
+          (r) =>
+              r.sourceIdentity.isEmpty ||
+              r.sectionIdentity.isEmpty ||
+              r.spineIdentity.isEmpty,
+        )) {
+      throw ArgumentError('Missing or duplicate lazy source ownership');
+    }
+    final owners = <CanonicalPaginationSourceOwner>[];
+    for (var i = 0; i < records.length; i++) {
+      owners.add(
+        CanonicalPaginationSourceOwner(
+          sourceIdentity: records[i].sourceIdentity,
+          sectionIdentity: records[i].sectionIdentity,
+          spineIdentity: records[i].spineIdentity,
+          sourceOrdinalHint: i,
+          sourceDigest: records[i].sourceDigest,
+        ),
+      );
+      await work.step('source-view');
+    }
+    final encoded = [for (final r in records) r.encodedSource];
+    return CanonicalPaginationSourceSnapshot._(
+      bookId: bookId,
+      publicationFingerprint: publicationFingerprint,
+      parserSourceIdentity: parserSourceIdentity,
+      sourceRevision: sourceRevision,
+      owners: owners,
+      encodedSources: encoded,
+      lazyRecords: List.unmodifiable(records),
+      snapshotDigest: await work.digest([
         'LazySourceViewV1',
         bookId,
         publicationFingerprint,
@@ -1576,6 +1663,26 @@ final class CanonicalPaginationTargetContainmentEvidence {
   final int offsetWithinSliceUtf16;
 }
 
+BookChunk pinCanonicalChunk(BookChunk c) => c.copyWith(
+  imageBytes: c.imageBytes == null
+      ? null
+      : Uint8List.fromList(c.imageBytes!).asUnmodifiableView(),
+  links: c.links == null ? null : List.unmodifiable(c.links!),
+  inlineStyles: c.inlineStyles == null
+      ? null
+      : List.unmodifiable(c.inlineStyles!),
+  footnotes: c.footnotes == null ? null : List.unmodifiable(c.footnotes!),
+  sourceRanges: c.sourceRanges == null
+      ? null
+      : List.unmodifiable(c.sourceRanges!),
+  textBoundaries: c.textBoundaries == null
+      ? null
+      : List.unmodifiable(c.textBoundaries!),
+  listDisplaySegments: c.listDisplaySegments == null
+      ? null
+      : List.unmodifiable(c.listDisplaySegments!),
+);
+
 @immutable
 final class CanonicalFinalizedReaderCard {
   CanonicalFinalizedReaderCard({
@@ -1583,9 +1690,11 @@ final class CanonicalFinalizedReaderCard {
     required this.identity,
     required List<CanonicalPaginationSourceSlice> sourceSlices,
     this.resolvedLayout,
-  }) : card = BookChunk.fromJson(
-         Map<String, dynamic>.from(
-           jsonDecode(canonicalJsonEncode(card.toJson())) as Map,
+  }) : card = pinCanonicalChunk(
+         BookChunk.fromJson(
+           Map<String, dynamic>.from(
+             jsonDecode(canonicalJsonEncode(card.toJson())) as Map,
+           ),
          ),
        ),
        sourceSlices = List<CanonicalPaginationSourceSlice>.unmodifiable(

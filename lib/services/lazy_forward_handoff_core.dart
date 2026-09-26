@@ -1,3 +1,4 @@
+import 'lazy_validation_work.dart';
 import 'dart:collection';
 import 'dart:convert';
 
@@ -137,6 +138,65 @@ final class LazyForwardHandoffCore {
   final ProgressiveDisplayState state;
   final LazyForwardRetentionLimits limits;
   _PendingForward? _pending;
+  LazyValidationWork? _work;
+  int _validationBaseBytes = 0, _validationBaseSources = 0;
+  bool _retiring = false;
+  bool _retirementCancelled = false;
+  String? get validationPhase => _work?.phase;
+  int get validationUnits => _work?.units ?? 0;
+  int get validationTemporaryBytes => _work?.accountedBytes ?? 0;
+  final Expando<int> _cardSizes = Expando<int>();
+  final Expando<int> _snapshotSizes = Expando<int>();
+  final Expando<int> _sectionSizes = Expando<int>();
+  final Expando<int> _indexSizes = Expando<int>();
+
+  LazyValidationWork _startValidation(
+    LazyHandoffOperation operation,
+    bool Function() current,
+  ) {
+    if (_work != null) throw StateError('Only one validation may own the core');
+    final live = _census();
+    _validationBaseBytes = live.accountedBytes;
+    _validationBaseSources = live.sources;
+    final remaining = limits.bytes - _validationBaseBytes;
+    return _work = LazyValidationWork(
+      task: operation.pagination.scheduler.startTask(
+        id: -(++_sequence),
+        priority: operation.pagination.priority,
+        isExternallyCancelled: () => !current(),
+      ),
+      isCurrent: current,
+      maxTemporaryBytes: remaining,
+      checkBudget: () {
+        if (_validationBaseBytes + (_work?.accountedBytes ?? 0) >
+            limits.bytes) {
+          throw const LazyHandoffBoundExceeded(
+            'Validation buffers exceed core budget',
+          );
+        }
+        final sources = _validationBaseSources + (_work?.heldSources ?? 0);
+        if (sources > limits.sources) {
+          throw const LazyHandoffBoundExceeded(
+            'Private capture exceeds source budget',
+          );
+        }
+        if (sources > (peak['sources'] ?? 0)) peak['sources'] = sources;
+        final bytes = _validationBaseBytes + (_work?.accountedBytes ?? 0);
+        if (bytes > (peak['bytes'] ?? 0)) peak['bytes'] = bytes;
+      },
+    );
+  }
+
+  void _finishValidation() {
+    final work = _work;
+    if (work == null) return;
+    if (work.peakTemporaryBytes > (peak['validationBuffers'] ?? 0)) {
+      peak['validationBuffers'] = work.peakTemporaryBytes;
+    }
+    work.finish();
+    _work = null;
+  }
+
   LazyRetainedSection? _retentionCandidate;
   final Map<int, String> _leases = {};
   int _sequence = 0;
@@ -145,6 +205,201 @@ final class LazyForwardHandoffCore {
   LazyForwardLiveState get liveState => _census();
   LazySectionInput inputFor(LazyForwardTransfer transfer) =>
       _require(transfer).input!;
+
+  Future<LazyForwardBeginResult> beginNextYielding(
+    ParsedSection section,
+    LazyHandoffOperation operation,
+  ) => _beginYielding(section, operation, false);
+  Future<LazyForwardBeginResult> beginPreviousYielding(
+    ParsedSection section,
+    LazyHandoffOperation operation,
+  ) => _beginYielding(section, operation, true);
+
+  Future<LazyForwardBeginResult> _beginYielding(
+    ParsedSection section,
+    LazyHandoffOperation operation,
+    bool backward,
+  ) async {
+    if (_pending != null || _retiring) {
+      return const LazyForwardBeginResult(
+        LazySnapshotPublicationResult(LazySnapshotPublicationOutcome.busy),
+      );
+    }
+    final old = state.lazyPublication;
+    if (old == null ||
+        !operation.isCurrent ||
+        old.owner.bookOpenEpoch != operation.owner.bookOpenEpoch ||
+        old.owner.displayOwner != operation.owner.displayOwner) {
+      return const LazyForwardBeginResult(
+        LazySnapshotPublicationResult(LazySnapshotPublicationOutcome.stale),
+      );
+    }
+    if (state.lazyAttemptFailed(operation.owner)) {
+      return const LazyForwardBeginResult(
+        LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.failedAttempt,
+        ),
+      );
+    }
+    if (old.predecessor != null || old.current.input.sectionCount != 1) {
+      return const LazyForwardBeginResult(
+        LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.retentionRequired,
+        ),
+      );
+    }
+    final token = LazyForwardTransfer._(++_sequence);
+    final pending = _PendingForward(
+      token.id,
+      null,
+      section,
+      old,
+      operation.owner,
+      state.lazyVisibleCardSignature,
+      backward: backward,
+      committedInput: backward ? old.current.input : null,
+    );
+    _pending = pending;
+    pending.working = true;
+    try {
+      _check();
+      final work = _startValidation(
+        operation,
+        () => _current(pending, operation),
+      );
+      final added = await LazySectionInput.captureYielding(
+        publication: old.current.input.publication,
+        section: section,
+        work: work,
+        onPinned: (copy) {
+          pending.source = copy;
+          _check();
+        },
+      );
+      pending.input = added;
+      _check();
+      if (backward) {
+        pending.window = await added.joinYielding(old.current.input, work);
+      } else {
+        pending.input = await old.current.input.joinYielding(added, work);
+      }
+      pending.working = false;
+      _check();
+      return LazyForwardBeginResult(
+        const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.prepared,
+        ),
+        token,
+      );
+    } on Object catch (error) {
+      final stale = !_current(pending, operation);
+      _release();
+      return LazyForwardBeginResult(
+        LazySnapshotPublicationResult(
+          stale
+              ? LazySnapshotPublicationOutcome.stale
+              : LazySnapshotPublicationOutcome.boundExceeded,
+          '$error',
+        ),
+      );
+    } finally {
+      _finishValidation();
+    }
+  }
+
+  Future<LazySnapshotPublicationResult> publishYielding(
+    LazyForwardTransfer transfer,
+    LazyHandoffOperation operation, {
+    LazySnapshotHandoffV1? proposal,
+    void Function()? beforeCommit,
+  }) async {
+    final pending = _pending;
+    if (pending == null ||
+        pending.id != transfer.id ||
+        pending.prepared == null ||
+        pending.working) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.replayed,
+      );
+    }
+    pending.working = true;
+    try {
+      final work = _startValidation(
+        operation,
+        () => _current(pending, operation),
+      );
+      if (proposal != null) pending.handoff = proposal;
+      _check();
+      return await state.publishLazyYielding(
+        prepared: pending.prepared!,
+        reconstructedCurrent: pending.backward ? pending.verified : null,
+        window: pending.window,
+        proposal: pending.handoff!,
+        operation: operation,
+        work: work,
+        beforeCommit: () {
+          beforeCommit?.call();
+          if (!_current(pending, operation)) {
+            throw StateError('Stale core commit');
+          }
+          _check();
+        },
+      );
+    } on Object catch (error) {
+      return LazySnapshotPublicationResult(
+        !_current(pending, operation)
+            ? LazySnapshotPublicationOutcome.stale
+            : LazySnapshotPublicationOutcome.boundExceeded,
+        '$error',
+      );
+    } finally {
+      _finishValidation();
+      if (identical(_pending, pending)) _release();
+      _observe();
+    }
+  }
+
+  Future<LazySnapshotPublicationResult> retainYielding(
+    LazyHandoffOperation operation, {
+    bool predecessor = false,
+  }) async {
+    if (_pending != null || _retiring) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.busy,
+      );
+    }
+    final old = state.lazyPublication;
+    final visible = state.lazyVisibleCardSignature;
+    _retiring = true;
+    _retirementCancelled = false;
+    try {
+      final work = _startValidation(
+        operation,
+        () =>
+            operation.isCurrent &&
+            identical(old, state.lazyPublication) &&
+            visible == state.lazyVisibleCardSignature &&
+            _retiring &&
+            !_retirementCancelled,
+      );
+      return await state.retainLazyYielding(
+        operation: operation,
+        work: work,
+        predecessor: predecessor,
+        rendererPins: () => _leases.values.toSet(),
+        onPrepared: (candidate) {
+          _retentionCandidate = candidate;
+          _check();
+        },
+      );
+    } finally {
+      _retentionCandidate = null;
+      _retiring = false;
+      _retirementCancelled = false;
+      _finishValidation();
+      _observe();
+    }
+  }
 
   LazyForwardBeginResult beginNext(
     ParsedSection section,
@@ -161,7 +416,7 @@ final class LazyForwardHandoffCore {
     LazyHandoffOperation operation, {
     required bool backward,
   }) {
-    if (_pending != null || _retentionCandidate != null) {
+    if (_pending != null || _retentionCandidate != null || _retiring) {
       return const LazyForwardBeginResult(
         LazySnapshotPublicationResult(LazySnapshotPublicationOutcome.busy),
       );
@@ -213,7 +468,7 @@ final class LazyForwardHandoffCore {
         token.id,
         input,
         section,
-        old.digest,
+        old,
         operation.owner,
         state.lazyVisibleCardSignature,
         backward: backward,
@@ -262,6 +517,10 @@ final class LazyForwardHandoffCore {
     pending.working = true;
     pending.layout = layout;
     try {
+      final validation = _startValidation(
+        operation,
+        () => _current(pending, operation),
+      );
       _check();
       final active = _census(includePending: false);
       final controls = operation.pagination;
@@ -280,6 +539,7 @@ final class LazyForwardHandoffCore {
       );
       pending.prepared = await LazyPreparedSection.prepare(
         input: pending.input!,
+        validationWork: validation,
         layout: layout,
         operation: ownedOperation,
         maximumCards: limits.cards - active.cards,
@@ -302,6 +562,7 @@ final class LazyForwardHandoffCore {
         final remainingGuards = limits.guards - _census().guards - 2;
         pending.verified = await LazyPreparedSection.prepare(
           input: pending.committedInput!,
+          validationWork: validation,
           layout: committedLayout,
           operation: ownedOperation,
           maximumWork:
@@ -320,7 +581,6 @@ final class LazyForwardHandoffCore {
           peak['reconstructionWork'] = work;
         }
       }
-      pending.working = false;
       _check();
       if (!_current(pending, operation)) {
         final cancelled =
@@ -333,18 +593,21 @@ final class LazyForwardHandoffCore {
         );
       }
       pending.handoff = pending.backward
-          ? buildLazySnapshotPrepend(
+          ? await buildLazySnapshotPrependYielding(
+              work: validation,
               old: state.lazyPublication!,
               predecessor: pending.prepared!,
               reconstructedCurrent: pending.verified!,
               window: pending.window!,
               committedCardSignature: state.lazyVisibleCardSignature!,
             )
-          : buildLazySnapshotHandoff(
+          : await buildLazySnapshotHandoffYielding(
+              work: validation,
               old: state.lazyPublication!,
               successor: pending.prepared!,
               committedCardSignature: state.lazyVisibleCardSignature,
             );
+      pending.working = false;
       _check();
       return const LazySnapshotPublicationResult(
         LazySnapshotPublicationOutcome.prepared,
@@ -364,6 +627,8 @@ final class LazyForwardHandoffCore {
       }
       _release();
       return LazySnapshotPublicationResult(outcome, '$error');
+    } finally {
+      _finishValidation();
     }
   }
 
@@ -440,7 +705,10 @@ final class LazyForwardHandoffCore {
 
   void cancelPending() {
     final pending = _pending;
-    if (pending == null) return;
+    if (pending == null) {
+      if (_retiring) _retirementCancelled = true;
+      return;
+    }
     pending.cancelled = true;
     // Active physical pagination stays accounted until its frame settles.
     if (!pending.working) _release();
@@ -458,7 +726,7 @@ final class LazyForwardHandoffCore {
     LazyHandoffOperation operation, {
     required bool predecessor,
   }) {
-    if (_pending != null || _retentionCandidate != null) {
+    if (_pending != null || _retentionCandidate != null || _retiring) {
       return const LazySnapshotPublicationResult(
         LazySnapshotPublicationOutcome.busy,
       );
@@ -526,7 +794,6 @@ final class LazyForwardHandoffCore {
         (c) => c.identity.signature == signature,
       );
       if (index >= 0) {
-        authority.validate();
         return ReaderLayoutRenderingAdapter.block(
           contract: authority.rendererContract,
           card: authority.cards[index].resolvedLayout!,
@@ -540,7 +807,7 @@ final class LazyForwardHandoffCore {
       !pending.cancelled &&
       operation.isCurrent &&
       pending.owner == operation.owner &&
-      state.lazyPublication?.digest == pending.publicationDigest &&
+      identical(state.lazyPublication, pending.publication) &&
       state.lazyVisibleCardSignature == pending.visibleSignature;
   _PendingForward _require(LazyForwardTransfer transfer) {
     final pending = _pending;
@@ -563,6 +830,8 @@ final class LazyForwardHandoffCore {
 
   void _check() {
     final live = liveState;
+    _validationBaseBytes = live.accountedBytes - (_work?.accountedBytes ?? 0);
+    _validationBaseSources = live.sources - (_work?.heldSources ?? 0);
     if (live.sources > limits.sources ||
         live.cards > limits.cards ||
         live.guards > limits.guards ||
@@ -636,7 +905,8 @@ final class LazyForwardHandoffCore {
         metadata.add(pending.handoff!.canonicalEncoding);
       }
       if (pending.source != null) {
-        bytes += 2 * canonicalJsonEncode(pending.source!.toJson()).length;
+        bytes += (_sectionSizes[pending.source!] ??=
+            2 * canonicalJsonEncode(pending.source!.toJson()).length);
       }
     }
     for (final input in inputs) {
@@ -674,12 +944,12 @@ final class LazyForwardHandoffCore {
     }
     final indexMetadataBytes = indexes.fold<int>(
       0,
-      (n, index) => n + index.accountedMetadataBytes,
+      (n, index) => n + (_indexSizes[index] ??= index.accountedMetadataBytes),
     );
     bytes += indexMetadataBytes;
     for (final snapshot in snapshots) {
       records.addAll(snapshot.lazyRecords ?? const []);
-      bytes +=
+      bytes += _snapshotSizes[snapshot] ??=
           2 *
           canonicalJsonEncode(
             snapshot.owners.map((o) => o.toDigestJson()).toList(),
@@ -698,7 +968,7 @@ final class LazyForwardHandoffCore {
       bytes += 2 * encoded.length;
     }
     for (final card in cards) {
-      bytes +=
+      bytes += _cardSizes[card] ??=
           2 * canonicalJsonEncode(card.card.toJson()).length +
           2 *
               canonicalJsonEncode(
@@ -707,7 +977,7 @@ final class LazyForwardHandoffCore {
           (card.resolvedLayout?.retainedStateBytes ?? 0);
     }
     for (final body in bodies) {
-      bytes += 2 * body.canonicalEncoding.length;
+      bytes += 2 * body.canonicalEncoding.length + body.retainedMetadataBytes;
     }
     for (final renderer in renderers) {
       bytes += renderer.retainedStateBytes;
@@ -724,16 +994,22 @@ final class LazyForwardHandoffCore {
         16 * state.displayChunks.length + 16 * state.originalToDisplay.length;
     final working = pending?.working == true;
     final workingInput = pending?.workingInput ?? pending?.input;
-    final scratchSources = working ? workingInput!.snapshot.sourceCount + 1 : 0;
-    final scratchBytes = working
-        ? workingInput!.sourceRecords.fold<int>(
+    final scratchSources = working && workingInput != null
+        ? workingInput.snapshot.sourceCount + 1
+        : 0;
+    final scratchBytes = working && workingInput != null
+        ? workingInput.sourceRecords.fold<int>(
             0,
             (n, r) => n + 4 * r.encodedSource.length,
           )
         : 0;
     final rawSources = pending?.source?.chunks.length ?? 0;
     return LazyForwardLiveState(
-      sources: records.length + scratchSources + rawSources,
+      sources:
+          records.length +
+          scratchSources +
+          rawSources +
+          (_work?.heldSources ?? 0),
       backingRecords: records.length,
       snapshotViews: snapshots.length,
       sessions: sessions.length,
@@ -742,9 +1018,10 @@ final class LazyForwardHandoffCore {
       guards:
           guards.length + (pending != null && pending.handoff == null ? 2 : 0),
       sections: sections.length,
-      accountedBytes: bytes + scratchBytes,
+      accountedBytes: bytes + scratchBytes + (_work?.accountedBytes ?? 0),
       metadataBytes: metadataBytes,
-      pendingTransfers: pending == null && _retentionCandidate == null ? 0 : 1,
+      pendingTransfers:
+          pending == null && _retentionCandidate == null && !_retiring ? 0 : 1,
       preparationReferences: preparationReferences,
       rendererLeases: _leases.length,
       frontierCardReservation: working ? 2 : 0,
@@ -759,7 +1036,7 @@ final class _PendingForward {
     this.id,
     this.input,
     this.source,
-    this.publicationDigest,
+    this.publication,
     this.owner,
     this.visibleSignature, {
     this.backward = false,
@@ -776,7 +1053,7 @@ final class _PendingForward {
   CanonicalReaderPaginationSession? session;
   LazyPreparedSection? prepared;
   LazySnapshotHandoffV1? handoff;
-  final String publicationDigest;
+  final LazyAcceptedPublication publication;
   final String? visibleSignature;
   final LazyPublicationOwner owner;
   bool working = false;

@@ -1,3 +1,4 @@
+import '../services/lazy_validation_work.dart';
 import 'dart:convert';
 
 import '../services/lazy_epub_index_service.dart';
@@ -84,6 +85,39 @@ final class PublicationSpineAuthority {
 
   LazyStableSectionAuthority sectionAuthority(ParsedSection section) =>
       LazyStableSectionAuthority.capture(_index, section);
+
+  Future<LazyStableSectionAuthority> sectionAuthorityYielding(
+    ParsedSection section,
+    LazyValidationWork work,
+  ) => LazyStableSectionAuthority.captureYielding(_index, section, work);
+  LazySectionIdentity? nextFor(
+    LazySectionIdentity section, {
+    bool backwards = false,
+  }) {
+    final position = section.spineIndex;
+    if (position < 0 ||
+        position >= _index.spine.length ||
+        !_index.spine[position].isLinear) {
+      throw StateError('Invalid linear source authority');
+    }
+    for (
+      var i = position + (backwards ? -1 : 1);
+      i >= 0 && i < _index.spine.length;
+      i += backwards ? -1 : 1
+    ) {
+      final item = _index.spine[i];
+      if (item.isLinear) {
+        return LazySectionIdentity.fromIndexItem(
+          bookId: bookId,
+          publicationFingerprint: publicationFingerprint,
+          item: item,
+          sourceChecksum: item.sourceChecksum,
+          dependencySignature: dependencyIdentity,
+        );
+      }
+    }
+    return null;
+  }
 
   LazySectionIdentity? predecessorOf(ParsedSection section) {
     sectionAuthority(section);
@@ -202,6 +236,163 @@ final class LazySectionInput {
       List.unmodifiable(authorities),
       publication.successorOf(copies.last),
     );
+  }
+
+  static Future<LazySectionInput> captureYielding({
+    required PublicationSpineAuthority publication,
+    required ParsedSection section,
+    required LazyValidationWork work,
+    void Function(ParsedSection)? onPinned,
+  }) async {
+    if (section.chunks.isEmpty ||
+        section.chunks.length > CanonicalPaginationBounds.activeSourceCeiling) {
+      throw StateError('Section source bound');
+    }
+    // Pin the caller's mutable metadata before the first suspension. Text strings
+    // are immutable; this SDK object-graph capture remains an indivisible unit.
+    final copy = ParsedSection(
+      identity: section.identity,
+      chunks: List.unmodifiable(section.chunks.map(pinCanonicalChunk)),
+      anchorMap: Map.unmodifiable(section.anchorMap),
+      chapters: List.unmodifiable(section.chapters),
+      wordCount: section.wordCount,
+      textCharCount: section.textCharCount,
+      resourceHrefs: List.unmodifiable(section.resourceHrefs),
+      parserVersion: section.parserVersion,
+    );
+    onPinned?.call(copy);
+    final heldBefore = work.heldBytes;
+    final sourcesBefore = work.heldSources;
+    try {
+      final encoded = await work.encode(copy.toJson());
+      work.hold(2 * encoded.length);
+      if (await work.utf8Length(encoded) > LazyStableCardBody.maxEncodedBytes) {
+        throw StateError('Section byte bound');
+      }
+      final authority = await publication.sectionAuthorityYielding(copy, work);
+      final records = <CanonicalLazySourceRecord>[];
+      for (var local = 0; local < copy.chunks.length; local++) {
+        work.reserveSource();
+        records.add(
+          await CanonicalLazySourceRecord.pinYielding(
+            source: copy.chunks[local],
+            sourceIdentity: authority.sourceIdentity(local),
+            sectionIdentity: authority.sectionKey,
+            spineIdentity: authority.sectionKey,
+            work: work,
+          ),
+        );
+        work.hold(2 * records.last.encodedSource.length);
+      }
+      return LazySectionInput._(
+        publication,
+        List.unmodifiable([encoded]),
+        await _snapshotYielding(publication, [encoded], records, work),
+        List.unmodifiable([authority]),
+        publication.nextFor(copy.identity),
+      );
+    } finally {
+      work.releaseHeld(work.heldBytes - heldBefore);
+      work.heldSources = sourcesBefore;
+    }
+  }
+
+  static Future<CanonicalPaginationSourceSnapshot> _snapshotYielding(
+    PublicationSpineAuthority publication,
+    List<String> encoded,
+    List<CanonicalLazySourceRecord> records,
+    LazyValidationWork work,
+  ) async => CanonicalPaginationSourceSnapshot.pinLazyYielding(
+    bookId: publication.bookId,
+    publicationFingerprint: publication.publicationFingerprint,
+    parserSourceIdentity: lazyParsedSectionParserVersion,
+    sourceRevision: await work.digest(['LazySectionInputV1', encoded]),
+    records: records,
+    work: work,
+  );
+
+  Future<LazySectionInput> joinYielding(
+    LazySectionInput added,
+    LazyValidationWork work,
+  ) async {
+    if (sectionCount != 1 ||
+        added.sectionCount != 1 ||
+        sectionAuthorities.single.publication !=
+            added.sectionAuthorities.single.publication ||
+        nextCandidate?.stableKey !=
+            added.sectionAuthorities.single.sectionKey) {
+      throw StateError('Invalid immediate successor');
+    }
+    final encoded = List<String>.unmodifiable([
+      ..._sections,
+      ...added._sections,
+    ]);
+    final records = [...sourceRecords, ...added.sourceRecords];
+    var bytes = 0;
+    for (final section in encoded) {
+      bytes += await work.utf8Length(section);
+    }
+    if (records.length > CanonicalPaginationBounds.activeSourceCeiling ||
+        bytes > LazyStableCardBody.maxEncodedBytes) {
+      throw StateError('Expanded evidence bound');
+    }
+    return LazySectionInput._(
+      publication,
+      encoded,
+      await _snapshotYielding(publication, encoded, records, work),
+      List.unmodifiable([...sectionAuthorities, ...added.sectionAuthorities]),
+      added.nextCandidate,
+    );
+  }
+
+  Future<LazySectionInput> retainYielding(LazyValidationWork work) async {
+    final encoded = List<String>.unmodifiable([_sections.last]);
+    final records = sourceRecords.sublist(lastSectionStart);
+    final result = LazySectionInput._(
+      publication,
+      encoded,
+      await _snapshotYielding(publication, encoded, records, work),
+      List.unmodifiable([sectionAuthorities.last]),
+      nextCandidate,
+    );
+    result.validateSuffixOf(this);
+    return result;
+  }
+
+  Future<String> prefixYielding(int count, LazyValidationWork work) async {
+    final entries = <Object?>['LazyExactPrefixV1'];
+    final heldBefore = work.heldBytes;
+    try {
+      for (var i = 0; i < count; i++) {
+        work.hold(4 * sourceRecords[i].encodedSource.length);
+        entries.add([
+          snapshot.ownerAt(i).toDigestJson(),
+          snapshot.resolveOrdinalSource(i).toJson(),
+        ]);
+        await work.step('source-prefix');
+      }
+      return await work.digest(entries);
+    } finally {
+      work.releaseHeld(work.heldBytes - heldBefore);
+    }
+  }
+
+  Future<void> validateExtensionYielding(
+    LazySectionInput old,
+    LazyValidationWork work,
+  ) async {
+    if (old.sectionCount != 1 ||
+        sectionCount != 2 ||
+        sectionAuthorities.first.publication !=
+            old.sectionAuthorities.single.publication ||
+        !await work.equal(_sections.first, old._sections.single) ||
+        old.nextCandidate?.stableKey != sectionAuthorities.last.sectionKey ||
+        await prefixYielding(old.snapshot.sourceCount, work) !=
+            await old.prefixYielding(old.snapshot.sourceCount, work)) {
+      throw StateError(
+        'Exact prefix, complete section or adjacency proof failed',
+      );
+    }
   }
 
   final PublicationSpineAuthority publication;

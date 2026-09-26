@@ -1,3 +1,4 @@
+import 'lazy_validation_work.dart';
 import '../models/lazy_section_input.dart';
 import 'lazy_snapshot_handoff_service.dart';
 import 'package:flutter/foundation.dart';
@@ -605,6 +606,178 @@ final class ProgressiveDisplayState {
     }
   }
 
+  /// Work remains private through every suspension. No caller-created digest is
+  /// a capability: the expected proof is recomputed here from live authorities.
+  Future<LazySnapshotPublicationResult> publishLazyYielding({
+    required LazyPreparedSection prepared,
+    LazyPreparedSection? reconstructedCurrent,
+    LazySectionInput? window,
+    required LazySnapshotHandoffV1 proposal,
+    required LazyHandoffOperation operation,
+    required LazyValidationWork work,
+    void Function()? beforeCommit,
+  }) async {
+    final old = _lazyPublication;
+    final visible = _lazyVisibleCardSignature;
+    bool current() =>
+        operation.isCurrent &&
+        work.isCurrent() &&
+        identical(old, _lazyPublication) &&
+        visible == _lazyVisibleCardSignature;
+    if (old == null ||
+        visible == null ||
+        !current() ||
+        prepared.owner != operation.owner ||
+        (reconstructedCurrent != null &&
+            reconstructedCurrent.owner != operation.owner) ||
+        old.owner.bookOpenEpoch != operation.owner.bookOpenEpoch ||
+        old.owner.displayOwner != operation.owner.displayOwner) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.stale,
+      );
+    }
+    if (_failedLazyAttempt == operation.owner) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.failedAttempt,
+      );
+    }
+    try {
+      final backward = reconstructedCurrent != null;
+      final expected = backward
+          ? await buildLazySnapshotPrependYielding(
+              work: work,
+              old: old,
+              predecessor: prepared,
+              reconstructedCurrent: reconstructedCurrent,
+              window: window!,
+              committedCardSignature: visible,
+            )
+          : await buildLazySnapshotHandoffYielding(
+              work: work,
+              old: old,
+              successor: prepared,
+              committedCardSignature: visible,
+            );
+      if (!await work.equal(
+            expected.canonicalEncoding,
+            proposal.canonicalEncoding,
+          ) ||
+          expected.handoffDigest != proposal.handoffDigest) {
+        throw StateError('Prepared proof differs');
+      }
+      final candidate = backward
+          ? LazyAcceptedPublication.prepended(old, prepared, window!, expected)
+          : LazyAcceptedPublication.transferred(
+              old,
+              prepared,
+              expected,
+              expected.fields['successorSessionDigest']! as String,
+            );
+      if (candidate.cards.length >
+          CanonicalPaginationBounds.activeCardCeiling) {
+        throw const LazyHandoffBoundExceeded('Published card bound');
+      }
+      final projection = await _lazyProjectionYielding(candidate, work);
+      beforeCommit?.call();
+      if (!current()) {
+        return LazySnapshotPublicationResult(
+          operation.pagination.isCancelled()
+              ? LazySnapshotPublicationOutcome.cancelled
+              : LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      // Payloads/slices are immutable and the validated authorities cannot be
+      // replaced without changing the captured publication/operation envelope.
+      _commitLazyPublication(candidate, projection);
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.accepted,
+      );
+    } on Object catch (error) {
+      if (!current()) {
+        return LazySnapshotPublicationResult(
+          operation.pagination.isCancelled()
+              ? LazySnapshotPublicationOutcome.cancelled
+              : LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      _failedLazyAttempt = operation.owner;
+      return LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.invalid,
+        '$error',
+      );
+    }
+  }
+
+  Future<LazySnapshotPublicationResult> retainLazyYielding({
+    required LazyHandoffOperation operation,
+    required LazyValidationWork work,
+    required bool predecessor,
+    required Set<String> Function() rendererPins,
+    void Function(LazyRetainedSection)? onPrepared,
+  }) async {
+    final old = _lazyPublication;
+    final visible = _lazyVisibleCardSignature;
+    bool current() =>
+        operation.isCurrent &&
+        work.isCurrent() &&
+        identical(old, _lazyPublication) &&
+        visible == _lazyVisibleCardSignature;
+    if (old == null ||
+        !current() ||
+        old.owner.bookOpenEpoch != operation.owner.bookOpenEpoch ||
+        old.owner.displayOwner != operation.owner.displayOwner) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.stale,
+      );
+    }
+    final selected = predecessor ? old.predecessor : old.current;
+    if (selected == null) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.retentionRequired,
+      );
+    }
+    final kept = selected.cards.map((c) => c.identity.signature).toSet();
+    bool pinsValid() =>
+        kept.contains(visible) && rendererPins().every(kept.contains);
+    if (!pinsValid()) {
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.retentionRequired,
+      );
+    }
+    try {
+      final retained = await LazyRetainedSection.captureYielding(
+        selected,
+        work,
+      );
+      onPrepared?.call(retained);
+      final candidate = LazyAcceptedPublication.retained(old, retained);
+      final projection = await _lazyProjectionYielding(candidate, work);
+      if (!current()) {
+        return LazySnapshotPublicationResult(
+          operation.pagination.isCancelled()
+              ? LazySnapshotPublicationOutcome.cancelled
+              : LazySnapshotPublicationOutcome.stale,
+        );
+      }
+      if (!pinsValid()) {
+        return const LazySnapshotPublicationResult(
+          LazySnapshotPublicationOutcome.retentionRequired,
+        );
+      }
+      _commitLazyPublication(candidate, projection);
+      return const LazySnapshotPublicationResult(
+        LazySnapshotPublicationOutcome.accepted,
+      );
+    } on Object catch (error) {
+      return LazySnapshotPublicationResult(
+        !current()
+            ? LazySnapshotPublicationOutcome.stale
+            : LazySnapshotPublicationOutcome.invalid,
+        '$error',
+      );
+    }
+  }
+
   /// Validated prepend imports only predecessor cards. The committed section
   /// stays byte-identical under its original renderer authority.
   LazySnapshotPublicationResult publishSnapshotPrepend({
@@ -874,6 +1047,63 @@ final class ProgressiveDisplayState {
       forward: forward,
       reverse: Map.unmodifiable(reverse),
       ranges: List.unmodifiable([
+        PreparedDisplayRange(
+          sourceRange: SourceChunkRange(
+            0,
+            publication.sourceInput.snapshot.sourceCount,
+          ),
+          displayStart: 0,
+          displayEndExclusive: chunks.length,
+        ),
+      ]),
+    );
+  }
+
+  Future<
+    ({
+      List<BookChunk> chunks,
+      List<List<int>> forward,
+      Map<int, int> reverse,
+      List<PreparedDisplayRange> ranges,
+    })
+  >
+  _lazyProjectionYielding(
+    LazyAcceptedPublication publication,
+    LazyValidationWork work,
+  ) async {
+    final chunks = List<BookChunk>.unmodifiable(
+      publication.cards.map((c) => c.card),
+    );
+    final forward = <List<int>>[];
+    final slots = {
+      for (final owner in publication.sourceInput.snapshot.owners)
+        owner.sourceIdentity: owner,
+    };
+    for (final card in publication.cards) {
+      final indexes = <int>{};
+      for (final slice in card.sourceSlices) {
+        final owner = slots[slice.sourceIdentity];
+        if (owner == null ||
+            owner.sectionIdentity != slice.sectionIdentity ||
+            owner.sourceDigest != slice.sourceDigest) {
+          throw StateError('Retained stable source absent');
+        }
+        indexes.add(owner.sourceOrdinalHint);
+        await work.step('projection-slice');
+      }
+      forward.add(List.unmodifiable(indexes));
+    }
+    final reverse = <int, int>{};
+    for (var display = 0; display < forward.length; display++) {
+      for (final source in forward[display]) {
+        reverse[source] = display;
+      }
+    }
+    return (
+      chunks: chunks,
+      forward: List<List<int>>.unmodifiable(forward),
+      reverse: Map<int, int>.unmodifiable(reverse),
+      ranges: List<PreparedDisplayRange>.unmodifiable([
         PreparedDisplayRange(
           sourceRange: SourceChunkRange(
             0,
